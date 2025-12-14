@@ -19,8 +19,9 @@ HF_API_TOKEN = os.getenv("HF_API_TOKEN")
 YADISK_TOKEN = os.getenv("YADISK_TOKEN")
 
 ROOT_FOLDER = "MedBot"
-DATA_FILE = "patients_data.json"
+DATA_FILE = "patients_data.json"  # локальный JSON для OCR и эмбеддингов
 
+# Инициализация
 yd = YaDisk(token=YADISK_TOKEN)
 logging.basicConfig(level=logging.INFO)
 
@@ -37,18 +38,8 @@ def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-def get_patients_from_disk():
-    patients = []
-    try:
-        items = yd.listdir(ROOT_FOLDER)
-        for item in items:
-            if item['type'] == 'dir':
-                patients.append(item['name'])
-    except Exception as e:
-        logging.error("Yandex Disk read error: %s", e)
-    return patients
-
 def get_embedding(text: str):
+    """Получение эмбеддинга через HF Router API"""
     url = "https://router.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
     headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
     payload = {"inputs": text}
@@ -61,7 +52,8 @@ def get_embedding(text: str):
         return []
 
 def hf_text_gen(text: str):
-    url = "https://api-inference.huggingface.co/models/gpt2"
+    """Запрос к HF для генерации текста"""
+    url = "https://router.huggingface.co/models/gpt2"
     headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
     payload = {"inputs": text}
     try:
@@ -80,18 +72,22 @@ def ocr_file(file_path):
         logging.error("OCR error: %s", e)
         return ""
 
+def list_patients_from_disk():
+    """Получаем список пациентов с Яндекс.Диска"""
+    if not yd.exists(ROOT_FOLDER):
+        yd.mkdir(ROOT_FOLDER)
+        return []
+    children = yd.listdir(ROOT_FOLDER)
+    return [c['name'] for c in children]
+
 # ----------------------
 # Handlers
 # ----------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb = [
-        ["Добавить пациента", "Выбрать пациента"],
-        ["Загрузить документ", "Найти документы"],
-        ["Запрос к нейросети"]
-    ]
+    # Загружаем список пациентов из Яндекс.Диска
+    context.user_data['patients'] = list_patients_from_disk()
+    kb = [["Добавить пациента", "Выбрать пациента"], ["Загрузить документ", "Найти документы"], ["Запрос к нейросети"]]
     await update.message.reply_text("Привет! Выберите действие:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
-    # Подтягиваем пациентов с Яндекс.Диска
-    context.user_data['patients'] = get_patients_from_disk()
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -129,11 +125,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['patients'].append(patient_name)
         context.user_data['patient'] = patient_name
         context.user_data['adding_patient'] = False
-        # Создаем папку на Яндекс.Диске
         remote_folder = f"{ROOT_FOLDER}/{patient_name}"
         if not yd.exists(remote_folder):
             yd.mkdir(remote_folder)
         await update.message.reply_text(f"Пациент {patient_name} добавлен и выбран.", reply_markup=ReplyKeyboardRemove())
+        return
+
+    # Загрузка документа
+    if text == "Загрузить документ":
+        selected_patient = context.user_data.get("patient")
+        if not selected_patient:
+            await update.message.reply_text("Сначала выберите пациента!")
+            return
+        await update.message.reply_text(f"Отправьте документ для пациента {selected_patient}.")
         return
 
     await update.message.reply_text("Неизвестная команда. Используйте меню.")
@@ -147,9 +151,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     doc = update.message.document
     file_name = doc.file_name
-    file_id = doc.file_id
     new_name = f"{selected_patient}-{file_name}-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-
     file_path = f"/tmp/{new_name}"
     await doc.get_file().download_to_drive(file_path)
 
@@ -159,7 +161,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Эмбеддинг
     embedding = get_embedding(text)
 
-    # Теги
+    # Ключевые слова
     tags = [selected_patient] + text.split()[:5]
 
     # Загружаем на Яндекс.Диск
@@ -183,36 +185,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"Документ {new_name} загружен и обработан.\nКлючевые слова: {', '.join(tags)}")
 
-async def list_documents(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    selected_patient = context.user_data.get("patient")
-    if not selected_patient:
-        await update.message.reply_text("Сначала выберите пациента!")
-        return
-    data = load_data()
-    patient_docs = data.get(selected_patient, [])
-    if not patient_docs:
-        await update.message.reply_text("Документы не найдены.")
-        return
-    text_list = "\n".join([f"{i+1}. {d['file_name']}" for i, d in enumerate(patient_docs)])
-    await update.message.reply_text(f"Документы пациента {selected_patient}:\n{text_list}")
-
-async def send_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    selected_patient = context.user_data.get("patient")
-    if not selected_patient:
-        await update.message.reply_text("Сначала выберите пациента!")
-        return
-    data = load_data()
-    patient_docs = data.get(selected_patient, [])
-    if not patient_docs:
-        await update.message.reply_text("Документы не найдены.")
-        return
-    # Отправляем все документы
-    for d in patient_docs:
-        remote_path = d['remote_path']
-        tmp_file = f"/tmp/{d['file_name']}"
-        yd.download(remote_path, tmp_file)
-        await update.message.reply_document(open(tmp_file, "rb"))
-
 # ----------------------
 # Основной запуск
 # ----------------------
@@ -221,6 +193,4 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(CommandHandler("list_docs", list_documents))
-    app.add_handler(CommandHandler("send_docs", send_document))
     app.run_polling()
