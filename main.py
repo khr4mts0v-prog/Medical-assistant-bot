@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
+print("BOT_TOKEN: ", BOT_TOKEN)
 
 def main_menu():
     return ReplyKeyboardMarkup(
