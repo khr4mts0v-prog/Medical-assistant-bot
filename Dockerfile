@@ -1,22 +1,21 @@
-# Берем легковесный Python
+# --- Используем лёгкий Python ---
 FROM python:3.11-slim
 
-# Обновляем пакеты и ставим Tesseract + русскую модель
-RUN apt-get update && \
-    apt-get install -y tesseract-ocr tesseract-ocr-rus poppler-utils && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# --- Устанавливаем зависимости ---
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr tesseract-ocr-rus poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
 
-# Создаем рабочую директорию
+# --- Рабочая директория ---
 WORKDIR /app
 
-# Копируем файлы бота
-COPY main.py requirements.txt ./
-
-# Устанавливаем Python-зависимости
+# --- Копируем файлы ---
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
 
-# Устанавливаем переменные для Tesseract
-ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata/
+# --- Устанавливаем переменные окружения по необходимости ---
+ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
 
-# Запуск бота
+# --- Запуск бота ---
 CMD ["python", "main.py"]
