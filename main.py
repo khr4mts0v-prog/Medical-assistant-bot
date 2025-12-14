@@ -8,7 +8,7 @@ from telegram.ext import (
     filters
 )
 
-BOT_TOKEN = os.getenv("8156252214:AAGMCTOEJ5n3tazmNIMCBgZl_oWAJZB8BvI")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 
 def main_menu():
