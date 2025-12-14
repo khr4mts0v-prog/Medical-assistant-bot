@@ -2,25 +2,16 @@ import os
 import logging
 import json
 import datetime
-import re
 import requests
-
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
-
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 import pytesseract
 from yadisk import YaDisk
 
-# ======================
-# НАСТРОЙКИ
-# ======================
+# ----------------------
+# Настройки
+# ----------------------
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -28,243 +19,238 @@ HF_API_TOKEN = os.getenv("HF_API_TOKEN")
 YADISK_TOKEN = os.getenv("YADISK_TOKEN")
 
 ROOT_FOLDER = "MedBot"
-LOCAL_TMP = "/tmp"
+DATA_FILE = "patients_data.json"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
-
+# Инициализация
 yd = YaDisk(token=YADISK_TOKEN)
+logging.basicConfig(level=logging.INFO)
 
-DOC_TYPES = [
-    "УЗИ",
-    "ЭКГ",
-    "ЭЭГ",
-    "Рентген",
-    "КТ",
-    "МРТ",
-    "Анализы",
-    "Общий анализ крови",
-    "Биохимия крови",
-    "Гормоны",
-    "Моча",
-    "Копрограмма",
-    "Заключение врача",
-    "Выписка",
-    "Справка",
-    "Протокол исследования",
-    "Осмотр специалиста",
-    "Назначения",
-    "Эпикриз",
-    "Другое",
-]
+# ----------------------
+# Helper функции
+# ----------------------
+def load_data():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
-# ======================
-# ВСПОМОГАТЕЛЬНОЕ
-# ======================
-def ensure_root():
-    if not yd.exists(ROOT_FOLDER):
-        yd.mkdir(ROOT_FOLDER)
+def save_data(data):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-def get_patients():
-    ensure_root()
-    return [
-        item["name"]
-        for item in yd.listdir(ROOT_FOLDER)
-        if item["type"] == "dir"
-    ]
-
-def extract_date(text: str):
-    m = re.search(r"(\d{2}[.\-]\d{2}[.\-]\d{4})", text)
-    if m:
-        return m.group(1).replace(".", "-")
-    return datetime.datetime.now().strftime("%d-%m-%Y")
-
-# ======================
-# AI ФУНКЦИИ
-# ======================
-def ai_detect_doc_type(text: str) -> str:
-    url = "https://router.huggingface.co/models/google/flan-t5-base"
+def get_embedding(text: str):
+    """Получение эмбеддинга через HF Router API"""
+    url = "https://router.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
     headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
-
-    prompt = (
-        "Определи тип медицинского документа.\n"
-        "Ответ строго одним вариантом из списка:\n"
-        + ", ".join(DOC_TYPES)
-        + "\n\nТекст:\n"
-        + text[:1500]
-        + "\n\nОтвет:"
-    )
-
+    payload = {"inputs": text}
     try:
-        r = requests.post(
-            url,
-            headers=headers,
-            json={"inputs": prompt},
-            timeout=40
-        )
-        r.raise_for_status()
-        out = r.json()[0]["generated_text"].strip()
-
-        for t in DOC_TYPES:
-            if t.lower() in out.lower():
-                return t
-
-        return "Другое"
-
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
     except Exception as e:
-        logging.error("AI type error: %s", e)
-        return "Документ"
-
-def ai_extract_keywords(text: str):
-    url = "https://router.huggingface.co/models/google/flan-t5-base"
-    headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
-
-    prompt = (
-        "Выдели 5–7 ключевых медицинских терминов.\n"
-        "Только существительные, через запятую.\n\n"
-        + text[:1500]
-    )
-
-    try:
-        r = requests.post(
-            url,
-            headers=headers,
-            json={"inputs": prompt},
-            timeout=40
-        )
-        r.raise_for_status()
-        raw = r.json()[0]["generated_text"]
-        return [w.strip().lower() for w in raw.split(",") if len(w.strip()) > 2][:7]
-
-    except Exception as e:
-        logging.error("AI keywords error: %s", e)
+        logging.error("HF embedding error: %s", e)
         return []
 
-# ======================
-# OCR
-# ======================
-def ocr_image(path):
+def hf_text_gen(prompt: str):
+    """HF генерация текста / классификация типа документа и ключевых слов"""
+    url = "https://api-inference.huggingface.co/models/google/flan-t5-base"
+    headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
+    payload = {"inputs": prompt}
     try:
-        return pytesseract.image_to_string(path, lang="rus")
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+        resp.raise_for_status()
+        result = resp.json()
+        if isinstance(result, list) and len(result) > 0 and "generated_text" in result[0]:
+            return result[0]["generated_text"]
+        return "Ошибка генерации"
+    except Exception as e:
+        logging.error("HF text gen error: %s", e)
+        return "Ошибка генерации"
+
+def ocr_file(file_path):
+    try:
+        text = pytesseract.image_to_string(file_path, lang="rus")
+        return text
     except Exception as e:
         logging.error("OCR error: %s", e)
         return ""
 
-# ======================
-# TELEGRAM HANDLERS
-# ======================
+def extract_date(text):
+    """Простейшее извлечение даты из текста OCR"""
+    import re
+    matches = re.findall(r"(\d{2}[./-]\d{2}[./-]\d{4})", text)
+    if matches:
+        return matches[0].replace("/", "-").replace(".", "-")
+    return datetime.datetime.now().strftime("%d-%m-%Y")
+
+def classify_document(text):
+    """Определяем тип документа и ключевые слова"""
+    prompt_type = f"Определи тип документа (ЭКГ, УЗИ, анализ крови, ЭЭГ и т.д.) на основе текста: {text[:1000]}"
+    doc_type = hf_text_gen(prompt_type).strip()
+
+    prompt_keywords = f"Выдели 5–7 ключевых слов из текста медицинского документа: {text[:1000]}"
+    keywords = hf_text_gen(prompt_keywords).strip()
+    return doc_type, keywords
+
+# ----------------------
+# Handlers
+# ----------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [
-        ["Выбрать пациента", "Добавить пациента"],
+        ["Добавить пациента", "Выбрать пациента"],
         ["Загрузить документ", "Найти документы"],
-        ["Запрос к нейросети"],
+        ["Запрос к нейросети"]
     ]
     await update.message.reply_text(
-        "Выберите действие:",
+        "Привет! Выберите действие:",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
+    data = load_data()
 
-    if text == "Добавить пациента":
-        context.user_data["await_patient_name"] = True
-        await update.message.reply_text("Введите имя пациента:")
+    # Если ожидаем файл
+    if context.user_data.get("awaiting_file"):
+        await update.message.reply_text("Ожидаю файл, а не текст.")
         return
 
-    if context.user_data.get("await_patient_name"):
-        name = text
-        ensure_root()
-        yd.mkdir(f"{ROOT_FOLDER}/{name}")
-        context.user_data["await_patient_name"] = False
-        await update.message.reply_text(f"Пациент «{name}» добавлен.")
+    # Обработка кнопок
+    if text == "Добавить пациента":
+        await update.message.reply_text("Введите имя нового пациента:")
+        context.user_data["adding_patient"] = True
+        return
+
+    if context.user_data.get("adding_patient"):
+        patient_name = text
+        if patient_name not in data:
+            data[patient_name] = []
+            save_data(data)
+        context.user_data["adding_patient"] = False
+        await update.message.reply_text(f"Пациент {patient_name} добавлен.")
         await start(update, context)
         return
 
     if text == "Выбрать пациента":
-        patients = get_patients()
-        if not patients:
-            await update.message.reply_text("Пациентов пока нет.")
+        if not data:
+            await update.message.reply_text("Сначала добавьте пациента.")
             return
+        kb = [[p] for p in data.keys()]
         await update.message.reply_text(
             "Выберите пациента:",
-            reply_markup=ReplyKeyboardMarkup(
-                [[p] for p in patients],
-                resize_keyboard=True
-            )
+            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
         )
-        context.user_data["await_select_patient"] = True
+        context.user_data["choosing_patient"] = True
         return
 
-    if context.user_data.get("await_select_patient"):
-        context.user_data["patient"] = text
-        context.user_data["await_select_patient"] = False
-        await update.message.reply_text(f"Выбран пациент: {text}")
-        await start(update, context)
+    if context.user_data.get("choosing_patient"):
+        if text in data:
+            context.user_data["patient"] = text
+            context.user_data["choosing_patient"] = False
+            await update.message.reply_text(f"Выбран пациент {text}")
+            await start(update, context)
+        else:
+            await update.message.reply_text("Пациент не найден.")
+        return
+
+    if text == "Загрузить документ":
+        if "patient" not in context.user_data:
+            await update.message.reply_text("Сначала выберите пациента!")
+            return
+        context.user_data["awaiting_file"] = True
+        await update.message.reply_text("Пожалуйста, отправьте файл для загрузки.")
+        return
+
+    if text == "Найти документы":
+        if "patient" not in context.user_data:
+            await update.message.reply_text("Сначала выберите пациента!")
+            return
+        patient = context.user_data["patient"]
+        docs = data.get(patient, [])
+        if not docs:
+            await update.message.reply_text("Документов нет.")
+            return
+        msg = "Документы:\n"
+        for d in docs:
+            msg += f"- {d['file_name']}\n"
+        await update.message.reply_text(msg)
         return
 
     if text == "Запрос к нейросети":
-        context.user_data["await_ai_query"] = True
-        await update.message.reply_text("Введите запрос:")
+        await update.message.reply_text("Отправьте запрос к нейросети:")
+        context.user_data["awaiting_query"] = True
         return
 
-    if context.user_data.get("await_ai_query"):
-        context.user_data["await_ai_query"] = False
-        answer = ai_detect_doc_type(text)
-        await update.message.reply_text(f"Ответ:\n{answer}")
-        await start(update, context)
+    if context.user_data.get("awaiting_query"):
+        query = text
+        response = hf_text_gen(query)
+        await update.message.reply_text(f"Ответ нейросети:\n{response}")
+        context.user_data["awaiting_query"] = False
         return
 
-    await update.message.reply_text("Неизвестная команда.")
+    await update.message.reply_text("Неизвестная команда. Используйте меню.")
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    patient = context.user_data.get("patient")
-    if not patient:
-        await update.message.reply_text("Сначала выберите пациента.")
+    if "patient" not in context.user_data:
+        await update.message.reply_text("Сначала выберите пациента!")
         return
 
-    doc = update.message.document or update.message.photo[-1]
-    file = await doc.get_file()
-    local_path = f"{LOCAL_TMP}/{file.file_id}.jpg"
-    await file.download_to_drive(local_path)
+    if not context.user_data.get("awaiting_file"):
+        await update.message.reply_text("Пожалуйста, используйте кнопку 'Загрузить документ' перед отправкой файла.")
+        return
 
-    logging.info("Файл скачан: %s", local_path)
+    doc = update.message.document
+    file_name = doc.file_name
+    patient = context.user_data["patient"]
 
-    text = ocr_image(local_path)
-    doc_type = ai_detect_doc_type(text)
-    keywords = ai_extract_keywords(text)
-    date = extract_date(text)
+    new_name = f"{patient}_{file_name}"
+    file_path = f"/tmp/{new_name}"
+    await doc.get_file().download_to_drive(file_path)
+    logging.info(f"Файл загружен локально: {file_path}")
 
-    filename = f"{patient}_{doc_type}_{date}.jpg"
-    remote_dir = f"{ROOT_FOLDER}/{patient}"
-    remote_path = f"{remote_dir}/{filename}"
+    text = ocr_file(file_path)
+    doc_date = extract_date(text)
+    doc_type, keywords = classify_document(text)
 
-    if not yd.exists(remote_dir):
-        yd.mkdir(remote_dir)
+    # Формируем новое имя файла
+    new_name = f"{patient}_{doc_type}_{doc_date}{os.path.splitext(file_name)[1]}"
 
-    yd.upload(local_path, remote_path, overwrite=True)
+    # Загружаем на Яндекс.Диск
+    remote_folder = f"{ROOT_FOLDER}/{patient}"
+    if not yd.exists(remote_folder):
+        yd.mkdir(remote_folder)
+    remote_path = f"{remote_folder}/{new_name}"
+    yd.upload(file_path, remote_path)
+    logging.info(f"Файл загружен на Яндекс.Диск: {remote_path}")
+
+    # Сохраняем JSON
+    data = load_data()
+    patient_docs = data.get(patient, [])
+    patient_docs.append({
+        "file_name": new_name,
+        "remote_path": remote_path,
+        "text": text,
+        "type": doc_type,
+        "date": doc_date,
+        "keywords": keywords,
+    })
+    data[patient] = patient_docs
+    save_data(data)
+
+    context.user_data["awaiting_file"] = False
 
     await update.message.reply_text(
-        f"📄 Документ загружен\n\n"
-        f"Название: {filename}\n"
-        f"Тип: {doc_type}\n"
-        f"Дата: {date}\n"
-        f"Ключевые слова: {', '.join(keywords) if keywords else 'нет'}"
+        f"📄 Документ загружен\n\nНазвание: {new_name}\nТип: {doc_type}\nДата: {doc_date}\nКлючевые слова: {keywords}"
     )
-
     await start(update, context)
 
-# ======================
-# MAIN
-# ======================
+# ----------------------
+# Основной запуск
+# ----------------------
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.Document.ALL | filters.PHOTO, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-    logging.info("Bot started")
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    logging.info("Бот запущен")
     app.run_polling()
