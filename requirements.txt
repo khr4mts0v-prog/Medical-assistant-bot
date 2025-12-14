@@ -1,9 +1,8 @@
-python-telegram-bot==20.7
+python-telegram-bot==20.4
 pytesseract
 pdf2image
-Pillow
-transformers
-torch
-yadisk
+sentence-transformers
 scikit-learn
 numpy
+yadisk
+huggingface-hub
