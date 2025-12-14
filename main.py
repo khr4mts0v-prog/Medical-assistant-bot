@@ -11,13 +11,16 @@ import numpy as np
 import tempfile
 
 # ===================== Настройки =====================
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Ваш токен Telegram
-HF_API_TOKEN = os.getenv("HF_API_TOKEN")  # HuggingFace API токен
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Telegram Bot Token
+HF_API_TOKEN = os.getenv("HF_API_TOKEN")  # HuggingFace API Token
 YANDEX_TOKEN = os.getenv("YANDEX_TOKEN")  # OAuth-токен Яндекс.Диска
 
-# Проверка переменных
 if not BOT_TOKEN or not HF_API_TOKEN or not YANDEX_TOKEN:
     raise ValueError("Не заданы BOT_TOKEN, HF_API_TOKEN или YANDEX_TOKEN")
+
+# ===================== Tesseract =====================
+# Указываем путь к tessdata для русской модели
+os.environ["TESSDATA_PREFIX"] = "/usr/share/tesseract-ocr/5/tessdata/"
 
 # ===================== HuggingFace =====================
 hf_client = InferenceClient(token=HF_API_TOKEN)
@@ -52,13 +55,16 @@ def patient_menu():
 # ===================== OCR =====================
 def extract_text(file_path, mime_type):
     text = ""
-    if "pdf" in mime_type:
-        images = convert_from_path(file_path)
-        for img in images:
-            text += pytesseract.image_to_string(img, lang="rus") + "\n"
-    else:
-        img = Image.open(file_path)
-        text = pytesseract.image_to_string(img, lang="rus")
+    try:
+        if "pdf" in mime_type:
+            images = convert_from_path(file_path)
+            for img in images:
+                text += pytesseract.image_to_string(img, lang="rus") + "\n"
+        else:
+            img = Image.open(file_path)
+            text = pytesseract.image_to_string(img, lang="rus")
+    except Exception as e:
+        print("OCR error:", e)
     return text
 
 # ===================== Эмбеддинг =====================
@@ -81,7 +87,6 @@ def upload_to_yadisk(file_path, patient_name):
     file_name = os.path.basename(file_path)
     remote_path = f"{folder}/{file_name}"
     y.upload(file_path, remote_path, overwrite=True)
-
     link = y.get_download_link(remote_path)
     return link
 
@@ -97,7 +102,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try: await update.message.delete()
     except: pass
 
-    # Меню пациентов
     if text == "👤 Выбрать пациента":
         await update.message.reply_text("Что хотите сделать с пациентом?", reply_markup=patient_menu())
     elif text == "➕ Добавить документы":
