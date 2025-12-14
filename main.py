@@ -105,7 +105,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text in ["🔍 Найти документы", "🧠 Запрос к нейросети"]:
         await update.message.reply_text("Функция пока в разработке.")
         else:
-        await update.message.reply_text("Неизвестная команда.")
+            await update.message.reply_text("Неизвестная команда.")
 
 # ========== OCR ==========
 def extract_text_from_file(file_path, mime_type):
