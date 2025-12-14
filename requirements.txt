@@ -1,8 +1,6 @@
 python-telegram-bot==20.4
 pytesseract
 pdf2image
-sentence-transformers
-scikit-learn
-numpy
 yadisk
 huggingface-hub
+requests
