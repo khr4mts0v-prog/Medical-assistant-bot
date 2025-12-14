@@ -4,3 +4,4 @@ pdf2image
 yadisk
 huggingface-hub
 requests
+Pillow
