@@ -2,7 +2,6 @@ import os
 import datetime
 import tempfile
 import json
-import requests
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -10,8 +9,8 @@ from telegram.ext import (
     MessageHandler, filters, ContextTypes
 )
 import pytesseract
-from huggingface_hub import InferenceClient
 import yadisk
+import requests
 
 # -------------------------
 # 1. Токены из .env
@@ -27,31 +26,31 @@ if not all([BOT_TOKEN, HF_API_TOKEN, YADISK_TOKEN]):
 # -------------------------
 # 2. Инициализация клиентов
 # -------------------------
-hf_client = InferenceClient(token=HF_API_TOKEN)
 yd = yadisk.YaDisk(token=YADISK_TOKEN)
-
 if not yd.check_token():
     raise ValueError("Ошибка аутентификации Яндекс.Диска")
 
 os.makedirs("uploads", exist_ok=True)
 
 # -------------------------
-# 3. База эмбеддингов
+# 3. База эмбеддингов и пациенты
 # -------------------------
-EMBED_DB_FILE = "embeddings.json"
-if os.path.exists(EMBED_DB_FILE):
-    with open(EMBED_DB_FILE, "r", encoding="utf-8") as f:
-        embed_db = json.load(f)
+DB_FILE = "db.json"
+if os.path.exists(DB_FILE):
+    with open(DB_FILE, "r", encoding="utf-8") as f:
+        db = json.load(f)
 else:
-    embed_db = {}
+    db = {"patients": {}}  # структура: {"patients": {"Имя": {"docs": {filename: {...}}}}}
 
 # -------------------------
 # 4. Меню
 # -------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
+        [InlineKeyboardButton("Добавить пациента", callback_data="add_patient")],
+        [InlineKeyboardButton("Выбрать пациента", callback_data="select_patient")],
         [InlineKeyboardButton("Добавить документ", callback_data="add_doc")],
-        [InlineKeyboardButton("Найти документ", callback_data="find_doc")],
+        [InlineKeyboardButton("Список документов", callback_data="list_docs")],
         [InlineKeyboardButton("Запрос к нейронке", callback_data="query_nn")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -65,18 +64,68 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # -------------------------
 # 5. Обработка кнопок
 # -------------------------
+current_patient = {}  # chat_id -> selected patient
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
         await query.answer()
-        if query.data == "add_doc":
-            await query.message.reply_text("Отправьте документ или фото.")
-        elif query.data == "find_doc":
-            await query.message.reply_text("Введите название или параметры документа.")
-        elif query.data == "query_nn":
-            await query.message.reply_text("Введите запрос к нейронке (например: что назначил кардиолог ребенку?).")
-        else:
-            await query.message.reply_text("Неизвестная команда.")
+        chat_id = str(query.message.chat_id)
+
+        if query.data == "add_patient":
+            await query.message.reply_text("Введите имя нового пациента:")
+            context.user_data["expect_patient_name"] = True
+
+        elif query.data == "select_patient":
+            if not db["patients"]:
+                await query.message.reply_text("Пациенты пока не добавлены.")
+                return
+            keyboard = [
+                [InlineKeyboardButton(name, callback_data=f"sel_patient:{name}")]
+                for name in db["patients"].keys()
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text("Выберите пациента:", reply_markup=reply_markup)
+
+        elif query.data.startswith("sel_patient:"):
+            name = query.data.split(":", 1)[1]
+            current_patient[chat_id] = name
+            await query.message.reply_text(f"Выбран пациент: {name}")
+
+        elif query.data == "add_doc":
+            if chat_id not in current_patient:
+                await query.message.reply_text("Сначала выберите пациента!")
+            else:
+                await query.message.reply_text("Отправьте документ или фото.")
+
+        elif query.data == "list_docs":
+            if chat_id not in current_patient:
+                await query.message.reply_text("Сначала выберите пациента!")
+            else:
+                patient = current_patient[chat_id]
+                docs = db["patients"].get(patient, {}).get("docs", {})
+                if not docs:
+                    await query.message.reply_text("Документы отсутствуют.")
+                    return
+                msg_text = "\n".join(docs.keys())
+                keyboard = [
+                    [InlineKeyboardButton(name, callback_data=f"get_doc:{name}")]
+                    for name in docs.keys()
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.message.reply_text("Документы пациента:", reply_markup=reply_markup)
+
+        elif query.data.startswith("get_doc:"):
+            fname = query.data.split(":", 1)[1]
+            patient = current_patient.get(chat_id)
+            if not patient:
+                await query.message.reply_text("Пациент не выбран!")
+                return
+            remote_path = db["patients"][patient]["docs"][fname]["yadisk_path"]
+            with tempfile.NamedTemporaryFile() as tmp_file:
+                yd.download(remote_path, tmp_file.name)
+                tmp_file.flush()
+                await query.message.reply_document(open(tmp_file.name, "rb"), filename=fname)
 
 # -------------------------
 # 6. OCR и генерация имени файла
@@ -93,11 +142,18 @@ def generate_filename(patient: str, study: str, date_str: str, ext: str):
     return f"{patient}-{study}-{date_str}.{ext}"
 
 # -------------------------
-# 7. Эмбеддинг через HF
+# 7. Получение эмбеддинга через HF
 # -------------------------
 def get_embedding(text: str):
-    response = hf_client.text_generation(model="gpt2", inputs=text)
-    return response  # Можно хранить текст или список
+    url = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
+    headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
+    payload = {"inputs": text}
+    response = requests.post(url, headers=headers, json=payload, timeout=30)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print("HF API error:", response.text)
+        return []
 
 # -------------------------
 # 8. Загрузка на Яндекс.Диск
@@ -118,6 +174,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg:
         return
 
+    chat_id = str(msg.chat_id)
+    if chat_id not in current_patient:
+        await msg.reply_text("Сначала выберите пациента!")
+        return
+    patient = current_patient[chat_id]
+
     if msg.document:
         file = msg.document
         ext = file.file_name.split(".")[-1]
@@ -130,7 +192,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     file_obj = await file.get_file()
     date_str = datetime.datetime.now().strftime("%Y%m%d")
-    filename = generate_filename("Пациент", "Исследование", date_str, ext)
+    filename = generate_filename(patient, "Исследование", date_str, ext)
     local_path = os.path.join("uploads", filename)
     await file_obj.download_to_drive(local_path)
 
@@ -143,32 +205,60 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Эмбеддинг
     emb = get_embedding(text)
 
-    # Сохраняем в базу
-    embed_db[filename] = {"text": text, "embedding": emb}
-    with open(EMBED_DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(embed_db, f, ensure_ascii=False, indent=2)
-
     # Загрузка в облако
     remote_file = upload_to_yadisk(local_path)
     remote_txt = upload_to_yadisk(txt_path)
 
+    # Сохраняем в базу
+    if patient not in db["patients"]:
+        db["patients"][patient] = {"docs": {}}
+    db["patients"][patient]["docs"][filename] = {
+        "text": text,
+        "embedding": emb,
+        "yadisk_path": remote_file,
+        "yadisk_txt_path": remote_txt
+    }
+
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(db, f, ensure_ascii=False, indent=2)
+
     await msg.reply_text(
-        f"Документ и текст успешно загружены на Яндекс.Диск:\n{remote_file}\n{remote_txt}"
+        f"Документ и текст успешно загружены:\n{remote_file}\n{remote_txt}"
     )
 
 # -------------------------
-# 10. Поиск по тексту и возврат файлов
+# 10. Обработка текста (нейронка или команды)
 # -------------------------
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg or not msg.text:
         return
-    query = msg.text.lower()
+    chat_id = str(msg.chat_id)
+    text = msg.text.lower()
 
-    # Ищем похожие документы
+    # Если ожидаем имя пациента
+    if context.user_data.get("expect_patient_name"):
+        context.user_data["expect_patient_name"] = False
+        patient_name = msg.text.strip()
+        if patient_name in db["patients"]:
+            await msg.reply_text("Пациент уже существует!")
+        else:
+            db["patients"][patient_name] = {"docs": {}}
+            with open(DB_FILE, "w", encoding="utf-8") as f:
+                json.dump(db, f, ensure_ascii=False, indent=2)
+            await msg.reply_text(f"Пациент {patient_name} добавлен.")
+        return
+
+    # Поиск документов по пациенту
+    patient = current_patient.get(chat_id)
+    if not patient:
+        await msg.reply_text("Сначала выберите пациента!")
+        return
+
+    # Ищем совпадения
     results = []
-    for fname, data in embed_db.items():
-        if query in data["text"].lower():
+    for fname, data in db["patients"][patient]["docs"].items():
+        if text in data["text"].lower():
             results.append(fname)
 
     if not results:
@@ -176,20 +266,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     for fname in results:
-        remote_path = f"/MedicalDocs/{fname}"
-        if yd.exists(remote_path):
-            # Скачиваем во временный файл
-            with tempfile.NamedTemporaryFile() as tmp_file:
-                yd.download(remote_path, tmp_file.name)
-                tmp_file.flush()
-                await msg.reply_document(open(tmp_file.name, "rb"), filename=fname)
-            # Также отдаем текстовый файл
-            remote_txt = remote_path + ".txt"
-            if yd.exists(remote_txt):
-                with tempfile.NamedTemporaryFile() as tmp_txt:
-                    yd.download(remote_txt, tmp_txt.name)
-                    tmp_txt.flush()
-                    await msg.reply_document(open(tmp_txt.name, "rb"), filename=fname + ".txt")
+        remote_path = db["patients"][patient]["docs"][fname]["yadisk_path"]
+        with tempfile.NamedTemporaryFile() as tmp_file:
+            yd.download(remote_path, tmp_file.name)
+            tmp_file.flush()
+            await msg.reply_document(open(tmp_file.name, "rb"), filename=fname)
 
 # -------------------------
 # 11. Регистрация обработчиков
