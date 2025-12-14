@@ -1,16 +1,11 @@
 import os
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
+# Получаем токен из переменных окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-print("BOT_TOKEN: ", BOT_TOKEN)
 
+# Меню
 def main_menu():
     return ReplyKeyboardMarkup(
         [
@@ -22,18 +17,24 @@ def main_menu():
         resize_keyboard=True
     )
 
+# Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет! Я медицинский архив.",
         reply_markup=main_menu()
     )
 
+# Обработка текстовых сообщений
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Функция в разработке")
 
-app = ApplicationBuilder().token(BOT_TOKEN).build()
+# Создаём приложение
+app = Application.builder().token(BOT_TOKEN).build()
+
+# Регистрируем обработчики
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-if __name__ == "__main__":
+# Запуск
+if name == "__main__":
     app.run_polling()
