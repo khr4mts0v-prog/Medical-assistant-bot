@@ -2,11 +2,12 @@ import os
 import logging
 import json
 import datetime
-import asyncio
 import requests
 from dotenv import load_dotenv
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+)
 import pytesseract
 from yadisk import YaDisk
 
@@ -22,11 +23,12 @@ YADISK_TOKEN = os.getenv("YADISK_TOKEN")
 ROOT_FOLDER = "MedBot"
 DATA_FILE = "patients_data.json"
 
+# Инициализация
 yd = YaDisk(token=YADISK_TOKEN)
 logging.basicConfig(level=logging.INFO)
 
 # ----------------------
-# Вспомогательные функции
+# Helper функции
 # ----------------------
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -38,28 +40,32 @@ def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-async def hf_text_gen(text: str):
-    def sync_call():
-        url = "https://api-inference.huggingface.co/models/gpt2"
-        headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
-        payload = {"inputs": text}
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        resp.raise_for_status()
-        result = resp.json()
-        if isinstance(result, list) and "generated_text" in result[0]:
-            return result[0]["generated_text"]
-        return "Ошибка генерации"
-    return await asyncio.to_thread(sync_call)
-
-async def get_embedding(text: str):
-    def sync_call():
-        url = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
-        headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
-        payload = {"inputs": text}
+def get_embedding(text: str):
+    """HF Router embeddings"""
+    url = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
+    headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
+    payload = {"inputs": text}
+    try:
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
         return resp.json()
-    return await asyncio.to_thread(sync_call)
+    except Exception as e:
+        logging.error("HF embedding error: %s", e)
+        return []
+
+def hf_text_gen(text: str):
+    """HF Router text generation"""
+    url = "https://api-inference.huggingface.co/models/gpt2"
+    headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
+    payload = {"inputs": text}
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        resp.raise_for_status()
+        result = resp.json()
+        return result[0].get("generated_text", "Ошибка генерации") if result else "Ошибка генерации"
+    except Exception as e:
+        logging.error("HF text gen error: %s", e)
+        return "Ошибка генерации"
 
 def ocr_file(file_path):
     try:
@@ -69,7 +75,7 @@ def ocr_file(file_path):
         return ""
 
 # ----------------------
-# Обработчики
+# Handlers
 # ----------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [
@@ -77,106 +83,83 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ["Загрузить документ", "Найти документы"],
         ["Запрос к нейросети"]
     ]
-    await update.message.reply_text("Привет! Выберите действие:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    await update.message.reply_text(
+        "Привет! Выберите действие:", 
+        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
+    )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     data = load_data()
-
-    if text.lower() == "добавить пациента":
-        await update.message.reply_text("Введите имя нового пациента:", reply_markup=ReplyKeyboardRemove())
-        context.user_data["adding_patient"] = True
-        return
-
-    if context.user_data.get("adding_patient"):
-        patient_name = text
-        if patient_name in data:
-            await update.message.reply_text("Пациент уже существует")
-        else:
+    
+    if text.lower().startswith("добавить пациента"):
+        patient_name = text.split(maxsplit=1)[-1].strip()
+        if not patient_name:
+            await update.message.reply_text("Введите имя пациента после команды.")
+            return
+        if patient_name not in data:
             data[patient_name] = []
             save_data(data)
-            await update.message.reply_text(f"Пациент {patient_name} добавлен")
-        context.user_data["adding_patient"] = False
+        context.user_data["patient"] = patient_name
+        await update.message.reply_text(f"Пациент {patient_name} добавлен и выбран.")
         return
-
-    if text.lower() == "выбрать пациента":
-        if not data:
-            await update.message.reply_text("Нет пациентов. Сначала добавьте пациента.")
-            return
-        kb_patients = [[name] for name in data.keys()]
-        await update.message.reply_text("Выберите пациента:", reply_markup=ReplyKeyboardMarkup(kb_patients, resize_keyboard=True))
-        context.user_data["choosing_patient"] = True
-        return
-
-    if context.user_data.get("choosing_patient"):
-        if text in data:
-            context.user_data["patient"] = text
-            await update.message.reply_text(f"Выбран пациент: {text}")
+    
+    if text.lower().startswith("выбрать пациента"):
+        patient_name = text.split(maxsplit=1)[-1].strip()
+        if patient_name in data:
+            context.user_data["patient"] = patient_name
+            await update.message.reply_text(f"Пациент {patient_name} выбран.")
         else:
-            await update.message.reply_text("Пациент не найден")
-        context.user_data["choosing_patient"] = False
+            await update.message.reply_text("Пациент не найден. Сначала добавьте его.")
         return
 
-    if text.lower() == "загрузить документ":
-        if not context.user_data.get("patient"):
-            await update.message.reply_text("Сначала выберите пациента!")
-            return
-        await update.message.reply_text("Отправьте файл документа:")
-        return
-
-    if text.lower() == "найти документы":
-        patient = context.user_data.get("patient")
-        if not patient:
-            await update.message.reply_text("Сначала выберите пациента!")
-            return
-        docs = data.get(patient, [])
-        if not docs:
-            await update.message.reply_text("Документы не найдены")
-            return
-        msg = "Документы пациента:\n" + "\n".join([d["file_name"] for d in docs])
-        await update.message.reply_text(msg)
-        return
-
-    if text.lower() == "запрос к нейросети":
-        await update.message.reply_text("Введите ваш запрос:")
-        context.user_data["hf_request"] = True
-        return
-
-    if context.user_data.get("hf_request"):
-        response = await hf_text_gen(text)
+    # Запрос к нейросети
+    if text.lower().startswith("найти") or text.lower().startswith("что"):
+        response = hf_text_gen(text)
         await update.message.reply_text(f"Ответ нейросети:\n{response}")
-        context.user_data["hf_request"] = False
         return
-
+    
     await update.message.reply_text("Неизвестная команда. Используйте меню.")
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
-    patient = context.user_data.get("patient")
-    if not patient:
+    selected_patient = context.user_data.get("patient")
+    if not selected_patient:
         await update.message.reply_text("Сначала выберите пациента!")
         return
 
-    doc = update.message.document
-    file_name = doc.file_name
-    new_name = f"{patient}-{file_name}-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+    # Определяем файл: документ или фото
+    doc = update.message.document or (update.message.photo[-1] if update.message.photo else None)
+    if not doc:
+        await update.message.reply_text("Не удалось получить файл.")
+        return
+
+    file_name = getattr(doc, "file_name", f"{doc.file_id}.jpg")
+    file_id = doc.file_id
+    new_name = f"{selected_patient}-{file_name}-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+    # Скачиваем файл локально
     file_path = f"/tmp/{new_name}"
     await doc.get_file().download_to_drive(file_path)
 
     # OCR
     text = ocr_file(file_path)
-    embedding = await get_embedding(text)
-    tags = [patient] + text.split()[:5]
 
-    # Яндекс.Диск
-    remote_folder = f"{ROOT_FOLDER}/{patient}"
+    # Эмбеддинг
+    embedding = get_embedding(text)
+
+    # Теги для быстрого поиска
+    tags = [selected_patient] + text.split()[:5]
+
+    # Загружаем на Яндекс.Диск
+    remote_folder = f"{ROOT_FOLDER}/{selected_patient}"
     if not yd.exists(remote_folder):
         yd.mkdir(remote_folder)
     remote_path = f"{remote_folder}/{new_name}"
     yd.upload(file_path, remote_path)
 
-    # JSON
-    patient_docs = data.get(patient, [])
+    # Сохраняем JSON
+    patient_docs = data.get(selected_patient, [])
     patient_docs.append({
         "file_name": new_name,
         "remote_path": remote_path,
@@ -184,17 +167,21 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "embedding": embedding,
         "tags": tags
     })
-    data[patient] = patient_docs
+    data[selected_patient] = patient_docs
     save_data(data)
 
-    await update.message.reply_text(f"Документ {new_name} загружен и обработан.\nКлючевые слова: {', '.join(tags)}")
+    await update.message.reply_text(
+        f"Документ {new_name} загружен и обработан.\nКлючевые слова: {', '.join(tags)}"
+    )
 
 # ----------------------
-# Запуск
+# Основной запуск
 # ----------------------
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    app.add_handler(MessageHandler(filters.Document.ALL | filters.PHOTO, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
     app.run_polling()
