@@ -1,41 +1,41 @@
 import os
-from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
-from intent import detect_intent
-from entities import extract_entities
-from embeddings import get_embedding
-from search import search_docs
-from storage import load_all_docs
+from ocr import ocr_image
+from yandex_disk import upload_file
+from hf_api import get_embedding
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! Загружай документы или задавай вопросы.")
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photo = update.message.photo[-1]
+    file = await photo.get_file()
+    image_bytes = await file.download_as_bytearray()
+    
+    try:
+        text = ocr_image(bytes(image_bytes))
+    except Exception as e:
+        await update.message.reply_text(f"OCR error: {e}")
+        return
+
+    # Сохраняем файл на Яндекс.Диск
+    file_name = f"/Пациент-Неизвестно-Дата.jpg"
+    upload_file(image_bytes, file_name)
+
+    await update.message.reply_text(f"Документ распознан и сохранен.\n\n{text[:4000]}")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-
-    intent = detect_intent(text)
-    entities = extract_entities(text)
-
-    if intent == "search":
-        docs = load_all_docs()
-        emb = get_embedding(text)
-        found = search_docs(emb, docs)
-
-        if not found:
-            await update.message.reply_text("Ничего не найдено")
-            return
-
-        msg = "\n".join(d["title"] for d in found)
-        await update.message.reply_text(msg)
-
-    elif intent == "question":
-        await update.message.reply_text("Анализ через HF будет здесь")
-
-    else:
-        await update.message.reply_text("Не понял запрос")
+    query = update.message.text
+    await update.message.reply_text(f"Вы запросили: {query}\nОбработка через HF пока в разработке.")
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.run_polling()
 
