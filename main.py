@@ -38,7 +38,7 @@ logging.basicConfig(
 yd = YaDisk(token=YADISK_TOKEN)
 
 # =====================
-# ВСПОМОГАТЕЛЬНОЕ
+# МЕНЮ
 # =====================
 def main_menu():
     return ReplyKeyboardMarkup(
@@ -50,6 +50,9 @@ def main_menu():
         resize_keyboard=True
     )
 
+# =====================
+# HF нейросеть
+# =====================
 def hf_generate(prompt: str) -> str:
     url = "https://router.huggingface.co/models/google/flan-t5-small"
     headers = {
@@ -58,7 +61,10 @@ def hf_generate(prompt: str) -> str:
     }
     payload = {
         "inputs": prompt,
-        "parameters": {"max_new_tokens": 256, "temperature": 0.1}
+        "parameters": {
+            "max_new_tokens": 256,
+            "temperature": 0.1
+        }
     }
     r = requests.post(url, headers=headers, json=payload, timeout=60)
     r.raise_for_status()
@@ -81,8 +87,15 @@ def analyze_ocr(text: str) -> dict:
         return json.loads(hf_generate(prompt))
     except Exception as e:
         logging.error("AI OCR error: %s", e)
-        return {"study_type": "документ", "date": "", "keywords": []}
+        return {
+            "study_type": "документ",
+            "date": "",
+            "keywords": []
+        }
 
+# =====================
+# ЯНДЕКС ДИСК
+# =====================
 def get_patients():
     if not yd.exists(ROOT_FOLDER):
         yd.mkdir(ROOT_FOLDER)
@@ -93,20 +106,9 @@ def get_patients():
         if item["type"] == "dir"
     ]
 
-def load_index(patient):
-    path = f"{ROOT_FOLDER}/{patient}/index.json"
-    if yd.exists(path):
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            yd.download(path, f.name)
-            return json.load(open(f.name, encoding="utf-8"))
-    return []
-
-def save_index(patient, data):
-    path = f"{ROOT_FOLDER}/{patient}/index.json"
-    with tempfile.NamedTemporaryFile(delete=False, mode="w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        yd.upload(f.name, path, overwrite=True)
-
+# =====================
+# OCR
+# =====================
 def ocr_file(path):
     try:
         img = Image.open(path)
@@ -129,13 +131,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     logging.info("TEXT: %s", text)
 
-    # Добавление пациента
+    # --- ожидание имени пациента ---
     if context.user_data.get("await_patient_name"):
         patient = text
         path = f"{ROOT_FOLDER}/{patient}"
         if not yd.exists(path):
             yd.mkdir(path)
-            save_index(patient, [])
         context.user_data.pop("await_patient_name")
         await update.message.reply_text(
             f"Пациент «{patient}» добавлен",
@@ -143,6 +144,17 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # --- ожидание AI запроса ---
+    if context.user_data.get("await_ai_query"):
+        context.user_data.pop("await_ai_query")
+        try:
+            answer = hf_generate(text)
+            await update.message.reply_text(answer, reply_markup=main_menu())
+        except Exception:
+            await update.message.reply_text("Ошибка генерации", reply_markup=main_menu())
+        return
+
+    # --- команды меню ---
     if text == "Добавить пациента":
         context.user_data["await_patient_name"] = True
         await update.message.reply_text(
@@ -170,39 +182,76 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if text == "Загрузить документ":
+        if not context.user_data.get("patient"):
+            await update.message.reply_text(
+                "Сначала выберите пациента",
+                reply_markup=main_menu()
+            )
+            return
+        context.user_data["await_document"] = True
+        await update.message.reply_text(
+            "Отправьте фото или PDF документа",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
     if text == "Найти документы":
         patient = context.user_data.get("patient")
         if not patient:
-            await update.message.reply_text("Сначала выберите пациента", reply_markup=main_menu())
+            await update.message.reply_text(
+                "Сначала выберите пациента",
+                reply_markup=main_menu()
+            )
             return
-        docs = load_index(patient)
-        if not docs:
-            await update.message.reply_text("Документов нет", reply_markup=main_menu())
+
+        folder = f"{ROOT_FOLDER}/{patient}"
+        files = []
+
+        if yd.exists(folder):
+            for item in yd.listdir(folder):
+                if item["type"] == "file":
+                    files.append(item["name"])
+
+        if not files:
+            await update.message.reply_text(
+                "Документов не найдено",
+                reply_markup=main_menu()
+            )
             return
-        msg = "\n".join(f"• {d['file']}" for d in docs)
-        await update.message.reply_text(f"Документы:\n{msg}", reply_markup=main_menu())
+
+        msg = "\n".join(f"• {f}" for f in files)
+        await update.message.reply_text(
+            f"Документы пациента {patient}:\n{msg}",
+            reply_markup=main_menu()
+        )
         return
 
     if text == "Запрос к нейросети":
         context.user_data["await_ai_query"] = True
-        await update.message.reply_text("Введите запрос:", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text(
+            "Введите запрос:",
+            reply_markup=ReplyKeyboardRemove()
+        )
         return
 
-    if context.user_data.get("await_ai_query"):
-        context.user_data.pop("await_ai_query")
-        try:
-            answer = hf_generate(text)
-            await update.message.reply_text(answer, reply_markup=main_menu())
-        except Exception as e:
-            await update.message.reply_text("Ошибка генерации", reply_markup=main_menu())
-        return
-
-    await update.message.reply_text("Неизвестная команда", reply_markup=main_menu())
+    await update.message.reply_text(
+        "Неизвестная команда",
+        reply_markup=main_menu()
+    )
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get("await_document"):
+        return
+
+    context.user_data.pop("await_document")
+
     patient = context.user_data.get("patient")
     if not patient:
-        await update.message.reply_text("Сначала выберите пациента", reply_markup=main_menu())
+        await update.message.reply_text(
+            "Сначала выберите пациента",
+            reply_markup=main_menu()
+        )
         return
 
     doc = update.message.document or update.message.photo[-1]
@@ -210,6 +259,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         await file.download_to_drive(tmp.name)
+        logging.info("File downloaded: %s", tmp.name)
         ocr_text = ocr_file(tmp.name)
 
     ai = analyze_ocr(ocr_text)
@@ -217,20 +267,13 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     date = ai.get("date") or datetime.date.today().isoformat()
     keywords = ai.get("keywords", [])[:5]
 
-    filename = f"{patient}-{study}-{date}{os.path.splitext(file.file_path)[1]}"
+    ext = os.path.splitext(file.file_path)[1]
+    filename = f"{patient}-{study}-{date}{ext}"
+
     remote_folder = f"{ROOT_FOLDER}/{patient}"
     remote_path = f"{remote_folder}/{filename}"
 
     yd.upload(tmp.name, remote_path, overwrite=True)
-
-    index = load_index(patient)
-    index.append({
-        "file": filename,
-        "study": study,
-        "date": date,
-        "keywords": keywords
-    })
-    save_index(patient, index)
 
     await update.message.reply_text(
         f"📄 Документ загружен\n\n"
