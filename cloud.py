@@ -1,49 +1,53 @@
+import requests
 import os
-import json
 import logging
-from yadisk import YaDisk
 
-class YandexDiskClient:
-    def __init__(self, token, root_folder="MedBot"):
-        self.yd = YaDisk(token=token)
-        self.root_folder = root_folder
-        if not self.yd.exists(root_folder):
-            self.yd.mkdir(root_folder)
+YADISK_API = "https://cloud-api.yandex.net/v1/disk/resources"
 
-    def list_patients(self):
-        """Возвращает список папок (пациентов)"""
-        patients = []
-        try:
-            for item in self.yd.listdir(self.root_folder):
-                if item["type"] == "dir":
-                    patients.append(item["name"])
-        except Exception as e:
-            logging.error(f"Ошибка получения списка пациентов: {e}")
-        return patients
+class YaDisk:
+    def __init__(self, token: str):
+        self.headers = {
+            "Authorization": f"OAuth {token}"
+        }
 
-    def upload_file(self, local_path, patient, file_name):
-        folder_path = f"{self.root_folder}/{patient}"
-        if not self.yd.exists(folder_path):
-            self.yd.mkdir(folder_path)
-        remote_path = f"{folder_path}/{file_name}"
-        self.yd.upload(local_path, remote_path, overwrite=True)
-        return remote_path
+    def ensure_dir(self, path: str):
+        r = requests.put(
+            YADISK_API,
+            headers=self.headers,
+            params={"path": path}
+        )
+        if r.status_code not in (201, 409):
+            logging.error(f"YaDisk mkdir error {path}: {r.text}")
 
-    def load_json(self, file_name="patients_data.json"):
-        local_tmp = f"/tmp/{file_name}"
-        remote_path = f"{self.root_folder}/{file_name}"
-        try:
-            if self.yd.exists(remote_path):
-                self.yd.download(remote_path, local_tmp)
-                with open(local_tmp, "r", encoding="utf-8") as f:
-                    return json.load(f)
-        except Exception as e:
-            logging.warning(f"JSON не найден или ошибка: {e}")
-        return {}
+    def upload_file(self, local_path: str, yadisk_path: str):
+        get_url = requests.get(
+            f"{YADISK_API}/upload",
+            headers=self.headers,
+            params={"path": yadisk_path, "overwrite": True}
+        ).json()
 
-    def save_json(self, data, file_name="patients_data.json"):
-        local_tmp = f"/tmp/{file_name}"
-        with open(local_tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        remote_path = f"{self.root_folder}/{file_name}"
-        self.yd.upload(local_tmp, remote_path, overwrite=True)
+        with open(local_path, "rb") as f:
+            r = requests.put(get_url["href"], files={"file": f})
+            if r.status_code not in (201, 202):
+                logging.error(f"Upload failed {yadisk_path}")
+
+    def download_file(self, yadisk_path: str, local_path: str):
+        get_url = requests.get(
+            f"{YADISK_API}/download",
+            headers=self.headers,
+            params={"path": yadisk_path}
+        ).json()
+
+        r = requests.get(get_url["href"])
+        with open(local_path, "wb") as f:
+            f.write(r.content)
+
+    def list_dir(self, path: str):
+        r = requests.get(
+            YADISK_API,
+            headers=self.headers,
+            params={"path": path, "limit": 1000}
+        )
+        if r.status_code != 200:
+            return []
+        return r.json().get("_embedded", {}).get("items", [])
