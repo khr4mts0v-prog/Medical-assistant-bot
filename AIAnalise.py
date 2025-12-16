@@ -1,33 +1,76 @@
 import requests
-import logging
-import os
-from dotenv import load_dotenv
-load_dotenv()
-HF_API_TOKEN = os.getenv("HF_API_TOKEN")
+import re
+from dateutil import parser
+from rapidfuzz import fuzz
 
-def get_embedding(text):
-    url = "https://router.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
-    headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
-    payload = {"inputs": text}
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        logging.error(f"HF embedding error: {e}")
-        return []
+HF_URL = "https://router.huggingface.co/hf-inference/models/google/flan-t5-base"
 
-def hf_text_gen(text):
-    url = "https://router.huggingface.co/models/EleutherAI/gpt-neo-125M"
-    headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
-    payload = {"inputs": text}
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
-        resp.raise_for_status()
-        result = resp.json()
-        if isinstance(result, list) and len(result) > 0:
-            return result[0].get("generated_text", "Ошибка генерации")
-        return "Ошибка генерации"
-    except Exception as e:
-        logging.error(f"HF text gen error: {e}")
-        return "Ошибка генерации"
+class AI:
+    def __init__(self, token):
+        self.headers = {
+            "Authorization": f"Bearer {token}"
+        }
+
+    def _ask(self, prompt: str) -> str:
+        r = requests.post(
+            HF_URL,
+            headers=self.headers,
+            json={"inputs": prompt},
+            timeout=60
+        )
+        if r.status_code != 200:
+            return ""
+        return r.json()[0]["generated_text"]
+
+    def classify_document(self, text: str):
+        prompt = f"""
+Определи тип медицинского документа (одно слово),
+дату исследования (дд-мм-гггг),
+и 5 ключевых медицинских слов.
+
+Текст:
+{text[:2000]}
+"""
+        answer = self._ask(prompt)
+
+        doc_type = "Документ"
+        date = None
+        keywords = []
+
+        if answer:
+            lines = answer.lower().splitlines()
+            for l in lines:
+                if "узи" in l:
+                    doc_type = "УЗИ"
+                if "экг" in l:
+                    doc_type = "ЭКГ"
+                if "мрт" in l:
+                    doc_type = "МРТ"
+
+                if not date:
+                    try:
+                        date = parser.parse(l, dayfirst=True).strftime("%d-%m-%Y")
+                    except:
+                        pass
+
+                if len(keywords) < 5:
+                    words = re.findall(r"[а-яё]{4,}", l)
+                    keywords.extend(words)
+
+        return {
+            "type": doc_type,
+            "date": date,
+            "keywords": list(set(keywords))[:5]
+        }
+
+    def answer_question(self, question: str, texts: list[str]) -> str:
+        joined = "\n\n".join(texts[:5])
+        prompt = f"""
+Вопрос: {question}
+
+Медицинские данные:
+{joined}
+
+Дай краткий и понятный ответ.
+"""
+        return self._ask(prompt)
