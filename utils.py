@@ -14,7 +14,6 @@ def format_filename(patient_name: str, doc_type: str, date_str: str, extension: 
     safe_date = re.sub(r'\W+', '-', date_str.strip())
     return f"{safe_patient}_{safe_type}_{safe_date}.{extension}"
 
-
 # ----------------------
 # Извлечение даты из текста
 # ----------------------
