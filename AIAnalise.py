@@ -1,76 +1,102 @@
 import requests
+import logging
+from typing import List
 import re
-from dateutil import parser
-from rapidfuzz import fuzz
 
-HF_URL = "https://router.huggingface.co/hf-inference/models/google/flan-t5-base"
+# ----------------------
+# Настройки
+# ----------------------
+HF_API_TOKEN = None  # В main.py будем передавать токен при вызове функций
 
-class AI:
-    def __init__(self, token):
-        self.headers = {
-            "Authorization": f"Bearer {token}"
-        }
+# ----------------------
+# Классификация документа
+# ----------------------
+def classify_document(text: str, hf_token: str) -> str:
+    """
+    Определяет тип документа по его тексту.
+    Возвращает строку с классификацией.
+    """
+    global HF_API_TOKEN
+    HF_API_TOKEN = hf_token
 
-    def _ask(self, prompt: str) -> str:
-        r = requests.post(
-            HF_URL,
-            headers=self.headers,
-            json={"inputs": prompt},
-            timeout=60
-        )
-        if r.status_code != 200:
-            return ""
-        return r.json()[0]["generated_text"]
+    # Расширенный список возможных типов
+    types = [
+        "ЭКГ", "ЭЭГ", "УЗИ", "МРТ", "КТ", "Рентген",
+        "Анализы крови", "Анализы мочи", "Анализы кала",
+        "Консультация офтальмолога", "Консультация ЛОР",
+        "Консультация терапевта", "Консультация кардиолога",
+        "Консультация эндокринолога", "Консультация невролога",
+        "Консультация хирурга", "Консультация педиатра",
+        "Вакцинация", "Прививка", "Флюорография",
+        "Диетолог", "Физиотерапия", "Сонограмма",
+        "Заключение"
+    ]
 
-    def classify_document(self, text: str):
-        prompt = f"""
-Определи тип медицинского документа (одно слово),
-дату исследования (дд-мм-гггг),
-и 5 ключевых медицинских слов.
+    # Локальная проверка по ключевым словам
+    for t in types:
+        if t.lower() in text.lower():
+            return t
 
-Текст:
-{text[:2000]}
-"""
-        answer = self._ask(prompt)
+    # Если не нашли — попробуем через нейросеть
+    try:
+        url = "https://router.huggingface.co/models/google/flan-t5-small"
+        headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
+        prompt = f"Определи тип медицинского документа по тексту: {text[:500]}"
+        payload = {"inputs": prompt}
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        resp.raise_for_status()
+        res_json = resp.json()
+        if isinstance(res_json, list) and res_json:
+            return res_json[0].get("generated_text", "Неопределено")
+    except Exception as e:
+        logging.error(f"Error classify_document: {e}")
 
-        doc_type = "Документ"
-        date = None
-        keywords = []
+    return "Неопределено"
 
-        if answer:
-            lines = answer.lower().splitlines()
-            for l in lines:
-                if "узи" in l:
-                    doc_type = "УЗИ"
-                if "экг" in l:
-                    doc_type = "ЭКГ"
-                if "мрт" in l:
-                    doc_type = "МРТ"
 
-                if not date:
-                    try:
-                        date = parser.parse(l, dayfirst=True).strftime("%d-%m-%Y")
-                    except:
-                        pass
+# ----------------------
+# Извлечение ключевых слов
+# ----------------------
+def extract_keywords(text: str, max_words: int = 10) -> List[str]:
+    """
+    Простое извлечение ключевых слов: самые часто встречающиеся слова,
+    кроме стоп-слов.
+    """
+    stop_words = set([
+        "и", "в", "на", "с", "по", "от", "за", "не", "на", "для", "к",
+        "с", "что", "это", "так", "как", "а", "но", "или", "по", "когда"
+    ])
+    words = re.findall(r'\b\w+\b', text.lower())
+    freq = {}
+    for w in words:
+        if w not in stop_words and len(w) > 2:
+            freq[w] = freq.get(w, 0) + 1
+    # Сортируем по частоте
+    sorted_words = sorted(freq.items(), key=lambda x: x[1], reverse=True)
+    return [w for w, _ in sorted_words[:max_words]]
 
-                if len(keywords) < 5:
-                    words = re.findall(r"[а-яё]{4,}", l)
-                    keywords.extend(words)
 
-        return {
-            "type": doc_type,
-            "date": date,
-            "keywords": list(set(keywords))[:5]
-        }
-
-    def answer_question(self, question: str, texts: list[str]) -> str:
-        joined = "\n\n".join(texts[:5])
-        prompt = f"""
-Вопрос: {question}
-
-Медицинские данные:
-{joined}
-
-Дай краткий и понятный ответ.
-"""
-        return self._ask(prompt)
+# ----------------------
+# Ответ на вопрос пользователя
+# ----------------------
+def answer_question(texts: List[str], question: str, hf_token: str) -> str:
+    """
+    Получаем список OCR-текстов документов и вопрос пользователя,
+    отправляем в HF модель, получаем ответ.
+    """
+    global HF_API_TOKEN
+    HF_API_TOKEN = hf_token
+    try:
+        combined_text = "\n".join(texts[:5])  # берем первые 5 документов
+        prompt = f"Документы:\n{combined_text}\nВопрос: {question}\nОтветь кратко и по делу."
+        url = "https://router.huggingface.co/models/google/flan-t5-small"
+        headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
+        payload = {"inputs": prompt}
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+        resp.raise_for_status()
+        res_json = resp.json()
+        if isinstance(res_json, list) and res_json:
+            return res_json[0].get("generated_text", "Ошибка генерации")
+    except Exception as e:
+        logging.error(f"Error answer_question: {e}")
+    return "Ошибка генерации"
