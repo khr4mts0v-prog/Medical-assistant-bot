@@ -2,39 +2,32 @@ import logging
 from yadisk import YaDisk
 
 class YaDiskClient:
-    def __init__(self, token: str):
+    def __init__(self, token):
+        if not token:
+            raise ValueError("Set YADISK_TOKEN in .env")
         self.yd = YaDisk(token=token)
 
-    def ensure_folder(self, path: str):
-        """Создаёт папку, если её нет"""
-        try:
-            if not self.yd.exists(path):
-                self.yd.mkdir(path)
-                logging.info(f"Папка создана на Яндекс.Диске: {path}")
-        except Exception as e:
-            logging.error(f"Ошибка создания папки {path}: {e}")
+    def ensure_folder(self, path):
+        parts, current = path.strip("/").split("/"), ""
+        for part in parts:
+            current = f"{current}/{part}".strip("/")
+            if not self.yd.exists(current):
+                try:
+                    self.yd.mkdir(current)
+                except Exception:
+                    if not self.yd.exists(current):
+                        logging.exception("Cannot create %s", current)
+                        raise
 
-    def upload_file(self, local_path: str, remote_path: str):
-        """Загружает файл на Яндекс.Диск"""
+    def upload_file(self, local, remote):
         try:
-            self.yd.upload(local_path, remote_path, overwrite=True)
-            logging.info(f"Файл {local_path} загружен как {remote_path}")
-        except Exception as e:
-            logging.error(f"Ошибка загрузки файла {local_path}: {e}")
+            self.yd.upload(local, remote, overwrite=True)
+        except Exception:
+            logging.exception("Upload failed: %s", remote)
+            raise
 
-    def list_folder(self, remote_path: str):
-        """Список файлов в папке"""
-        try:
-            files = self.yd.listdir(remote_path)
-            return [f['name'] for f in files if f['type'] == 'file']
-        except Exception as e:
-            logging.error(f"Ошибка получения списка папки {remote_path}: {e}")
-            return []
+    def list_folder(self, path):
+        return list(self.yd.listdir(path))
 
-    def download_file(self, remote_path: str, local_path: str):
-        """Скачивает файл с диска"""
-        try:
-            self.yd.download(remote_path, local_path)
-            logging.info(f"Файл {remote_path} скачан в {local_path}")
-        except Exception as e:
-            logging.error(f"Ошибка скачивания файла {remote_path}: {e}")
+    def download_file(self, remote, local):
+        self.yd.download(remote, local)
