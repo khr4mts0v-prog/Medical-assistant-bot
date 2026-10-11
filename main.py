@@ -14,7 +14,7 @@ from utils import format_filename, parse_date_from_text, normalize_extension, sa
 
 TOKEN=os.getenv("BOT_TOKEN","").strip()
 HF_TOKEN=os.getenv("HF_API_TOKEN","").strip()
-ROOT=os.getenv("YADISK_ROOT_FOLDER","MedArchive").strip("/")
+ROOT=os.getenv("YANDEX_ROOT_FOLDER","MedArchive").strip("/")
 MAX_UPLOAD_MB=max(1,int(os.getenv("MAX_UPLOAD_MB","20")))
 ALLOW={x.strip() for x in os.getenv("ALLOWED_TELEGRAM_IDS","").split(",") if x.strip()}
 logging.basicConfig(level=os.getenv("LOG_LEVEL","INFO"),format="%(asctime)s %(levelname)s %(message)s")
@@ -185,7 +185,7 @@ async def text_handler(u,c):
 async def send_long(msg,text):
     for i in range(0,len(text),3800): await msg.reply_text(text[i:i+3800])
 
-async def process_file(u,c,path,name):
+async def _process_file(u,c,path,name):
     s=state(c); f=active_family(u,c); patient=s.get("patient")
     if not f: return await say(u,"Сначала выберите семейный архив: /families")
     if not patient: return await say(u,"Сначала выберите пациента.")
@@ -217,6 +217,12 @@ async def process_file(u,c,path,name):
     except Exception as e:
         logging.exception("Document processing failed")
         await say(u,f"Не удалось обработать документ ({type(e).__name__}). Проверьте подключение Диска и настройки OCR.")
+
+_PROCESS_SEMAPHORE=asyncio.Semaphore(2)
+
+async def process_file(u,c,path,name):
+    async with _PROCESS_SEMAPHORE:
+        await _process_file(u,c,path,name)
 
 async def document_handler(u,c):
     if not permitted_user(u): return await say(u,"Доступ к боту ограничен.")
