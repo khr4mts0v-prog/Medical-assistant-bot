@@ -2,7 +2,7 @@
 import json, os, sqlite3, logging
 from pathlib import Path
 from datetime import datetime
-from tenancy import connect, init as init_tenancy
+from tenancy import connect, init as init_tenancy, cipher
 
 def init():
     init_tenancy()
@@ -55,7 +55,8 @@ def add_doc(fid,p,name,kind,date,remote,ocr_remote,text,keywords,digest):
         cur=c.execute("""INSERT OR IGNORE INTO docs
         (family_id,patient,name,kind,date,remote,ocr_remote,text,keywords,digest,added)
         VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-        (int(fid),p,name,kind,date,remote,ocr_remote,text,json.dumps(keywords,ensure_ascii=False),digest,datetime.now().isoformat()))
+        (int(fid),p,name,kind,date,remote,ocr_remote,cipher().encrypt((text or "").encode("utf-8")),
+         cipher().encrypt(json.dumps(keywords,ensure_ascii=False).encode("utf-8")),digest,datetime.now().isoformat()))
         return cur.rowcount==1
 
 def search(fid,p,query="",limit=10):
@@ -65,6 +66,14 @@ def search(fid,p,query="",limit=10):
     out=[]
     for row in rows:
         d=dict(row)
+        try:
+            d["text"]=cipher().decrypt(d["text"]).decode("utf-8") if d.get("text") else ""
+            raw_keywords=cipher().decrypt(d["keywords"]).decode("utf-8") if d.get("keywords") else "[]"
+            d["keywords"]=json.loads(raw_keywords)
+        except Exception:
+            # Fail closed: never return undecipherable medical text as if it were valid.
+            logging.exception("Cannot decrypt family document index entry")
+            continue
         blob=" ".join(str(d.get(k) or "") for k in ("name","kind","date","text","keywords")).lower()
         if not terms or all(t in blob for t in terms): out.append(d)
     return out[:max(1,min(int(limit),1000))]
