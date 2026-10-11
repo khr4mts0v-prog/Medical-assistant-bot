@@ -147,8 +147,18 @@ async def text_handler(u,c):
     if low in ("🔎 найти документы","найти документы"):
         if not s["patient"]: return await say(u,"Сначала выберите пациента.")
         s["mode"]="search"; return await say(u,"Введите слова для поиска или «весь список».")
+    if s["mode"]=="ai_consent":
+        if text.upper()=="СОГЛАСЕН":
+            s["ai_consent_family"]=f["id"]; s["mode"]="ai"
+            return await say(u,"Согласие сохранено для этой семьи. Напишите вопрос по документам.")
+        s["mode"]=None
+        return await say(u,"Анализ ИИ отменён. Документы не отправлены в ИИ.")
     if low in ("🧠 анализ документов","анализ документов"):
         if not s["patient"]: return await say(u,"Сначала выберите пациента.")
+        if not HF_TOKEN: return await say(u,"HF_API_TOKEN не настроен. Поиск и OCR работают, но ИИ пока недоступен.")
+        if s.get("ai_consent_family")!=f["id"]:
+            s["mode"]="ai_consent"
+            return await say(u,"Важно: для ответа ИИ подходящие фрагменты OCR-текста будут отправлены в Hugging Face и выбранному провайдеру модели. Не отправляйте документы, если не согласны с обработкой третьей стороной. Чтобы разрешить анализ для этой семьи, напишите СОГЛАСЕН. Любой другой текст отменит действие.")
         s["mode"]="ai"; return await say(u,"Напишите вопрос по документам выбранного пациента.")
     if low in ("📚 история пациента","история пациента"):
         if not s["patient"]: return await say(u,"Сначала выберите пациента.")
