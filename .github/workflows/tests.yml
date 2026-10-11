@@ -13,4 +13,5 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install cryptography==44.0.0
+      - run: python -m compileall -q .
       - run: python -m unittest discover -s tests -v
