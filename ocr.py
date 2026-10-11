@@ -12,6 +12,9 @@ def ocr_file(path):
         import fitz
         result = []
         with fitz.open(path) as pdf:
+            max_pages = max(1, int(os.getenv("MAX_PDF_PAGES", "100")))
+            if len(pdf) > max_pages:
+                raise ValueError(f"PDF has {len(pdf)} pages; limit is {max_pages}")
             for i, page in enumerate(pdf):
                 text = page.get_text().strip()
                 if len(text) < 25:
