@@ -31,7 +31,7 @@ def answer_question(query, patient, hf_token, context=""):
         response = requests.post(url, headers={"Authorization": f"Bearer {hf_token}"}, json={
             "model": model, "messages": [
                 {"role":"system","content":system},
-                {"role":"user","content":f"Пациент: {patient}\nВопрос: {query}\nДокументы:\n{context[:18000]}"}
+                {"role":"user","content":f"Вопрос: {query}\nДокументы из выбранного семейного архива:\n{context[:18000]}"}
             ], "temperature":0.2, "max_tokens":1200
         }, timeout=90)
         response.raise_for_status()
