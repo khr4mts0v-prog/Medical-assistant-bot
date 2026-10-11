@@ -32,9 +32,9 @@ OCR text and keywords, plus per-family Yandex OAuth tokens, are encrypted at res
 2. Install Docker Engine, Docker Compose plugin, Nginx and Certbot.
 3. Copy `.env.example` to `.env` and fill in BOT_TOKEN, FERNET_KEY, Yandex OAuth credentials, HTTPS redirect URL and (if available) HF_API_TOKEN.
 4. Register an application in Yandex OAuth. Enable Disk read/write access and set the callback URL to exactly `https://YOUR-DOMAIN.example/oauth/yandex/callback`.
-5. Configure Nginx from `nginx/medical-archive.conf.example`, replace the example domain and TLS certificate paths, then obtain a certificate with Certbot.
+5. First configure an HTTP-only Nginx site for the domain and obtain a TLS certificate with Certbot. Then enable `nginx/medical-archive.conf.example`, replacing the example domain and certificate paths.
 6. Ensure `YANDEX_REDIRECT_URI` exactly matches the registered callback URL. The app inside Docker listens on port 8080; Compose only exposes it on localhost.
-7. Run `docker compose up -d --build`; inspect `docker compose logs -f` for startup errors.
+7. Create the bind-mounted data directory with the correct container UID: `mkdir -p data && sudo chown -R 10001:10001 data`. Run `docker compose up -d --build`; inspect `docker compose logs -f` for startup errors.
 8. Open the Telegram bot, run `/newfamily My Family`, then `/connect_disk`. Authorize the correct Yandex account in the browser.
 9. Invite relatives with `/invite TELEGRAM_ID member`. They can get their ID with `/id`. Use `/families` to switch archives.
 10. Test uploads, OCR, search, history, and AI using synthetic documents first.
