@@ -1,63 +1,40 @@
-import logging
+import os
 import requests
 
-# ----------------------
-# Классификация документа
-# ----------------------
-def classify_document(text: str, hf_token: str) -> str:
-    """
-    Определяет тип документа (УЗИ, ЭКГ, анализы, консультации и т.д.)
-    """
-    # Расширенный список типов документов
-    doc_types = [
-        "УЗИ", "ЭКГ", "анализы", "консультация офтальмолога", "консультация ЛОРа",
-        "рентген", "КТ", "МРТ", "лабораторное исследование", "визит к терапевту",
-        "визит к кардиологу", "визит к неврологу", "вакцинация", "скрининг",
-    ]
-    # Запрос к нейросети для классификации
-    url = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
-    headers = {"Authorization": f"Bearer {hf_token}"}
-    try:
-        # Берём первые несколько слов для сопоставления с типом документа
-        for dtype in doc_types:
-            if dtype.lower() in text.lower():
-                logging.info(f"Классификация документа определена как: {dtype}")
-                return dtype
-        logging.info("Классификация документа: неизвестно, присвоено 'документ'")
-        return "документ"
-    except Exception as e:
-        logging.error(f"Ошибка классификации документа: {e}")
-        return "документ"
+TYPES = {
+    "анализы": ["анализ крови", "гемоглобин", "ферритин", "лаборатор"],
+    "УЗИ": ["узи", "ультразвуков"], "ЭКГ": ["экг", "электрокардиограмм"],
+    "МРТ": ["мрт"], "КТ": ["компьютерная томограф"],
+    "рентген": ["рентген"], "выписка": ["эпикриз", "выписка"],
+    "назначение": ["назначено", "рекомендовано", "дозировка"],
+}
+def classify_document(text, hf_token=None):
+    text = (text or "").lower()
+    return max(TYPES, key=lambda k: sum(w in text for w in TYPES[k])) if any(w in text for ws in TYPES.values() for w in ws) else "документ"
 
-# ----------------------
-# Извлечение ключевых слов
-# ----------------------
-def extract_keywords(text: str) -> list:
-    """
-    Простое извлечение ключевых слов: первые 7 слов
-    """
-    words = [w.strip(",.!?") for w in text.split()]
-    keywords = list(dict.fromkeys(words))[:7]
-    logging.info(f"Ключевые слова извлечены: {keywords}")
-    return keywords
+def extract_keywords(text):
+    stop = {"этот", "того", "при", "для", "или", "что"}
+    return list(dict.fromkeys(w.strip(".,:;()") for w in text.lower().split() if len(w.strip(".,:;()")) > 4 and w.strip(".,:;()") not in stop))[:8]
 
-# ----------------------
-# Ответ на пользовательский запрос
-# ----------------------
-def answer_question(query: str, patient: str, hf_token: str) -> str:
-    """
-    Отправляет запрос к нейросети и возвращает ответ
-    """
-    url = "https://api-inference.huggingface.co/models/gpt2"
-    headers = {"Authorization": f"Bearer {hf_token}"}
-    payload = {"inputs": query}
+def answer_question(query, patient, hf_token, context=""):
+    if not context:
+        return "В архиве нет подходящих документов. Сначала загрузите документы пациента."
+    if not hf_token:
+        return "Не задан HF_API_TOKEN. Поиск работает, но ИИ не настроен."
+    system = ("Ты медицинский аналитик. Отвечай по-русски. Разделяй факты из документов и гипотезы; "
+              "не выдумывай диагнозы, даты или назначения. Указывай названия источников. "
+              "Обсуждая лечение, предложи вопросы лечащему врачу, не назначай и не отменяй лечение. "
+              "Если данных недостаточно, скажи об этом.")
+    model = os.getenv("HF_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+    url = os.getenv("HF_CHAT_COMPLETIONS_URL", "https://router.huggingface.co/v1/chat/completions")
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        resp.raise_for_status()
-        result = resp.json()
-        if isinstance(result, list) and "generated_text" in result[0]:
-            return result[0]["generated_text"]
-        return str(result)
+        response = requests.post(url, headers={"Authorization": f"Bearer {hf_token}"}, json={
+            "model": model, "messages": [
+                {"role":"system","content":system},
+                {"role":"user","content":f"Пациент: {patient}\nВопрос: {query}\nДокументы:\n{context[:18000]}"}
+            ], "temperature":0.2, "max_tokens":1200
+        }, timeout=90)
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
-        logging.error(f"Ошибка генерации ответа нейросетью: {e}")
-        return "Ошибка генерации"
+        return f"Не удалось получить ответ ИИ ({type(e).__name__}: {e}). Проверьте токен и модель."
