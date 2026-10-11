@@ -30,6 +30,16 @@ def patients(fid):
     with connect() as c:
         return [r["name"] for r in c.execute("SELECT name FROM patients WHERE family_id=? ORDER BY name",(int(fid),))]
 
+def patient_by_id(fid, patient_id):
+    with connect() as c:
+        r=c.execute("SELECT name FROM patients WHERE family_id=? AND id=?",(int(fid),int(patient_id))).fetchone()
+        return r["name"] if r else None
+
+def patient_id(fid, name):
+    with connect() as c:
+        r=c.execute("SELECT id FROM patients WHERE family_id=? AND name=? COLLATE NOCASE",(int(fid),name)).fetchone()
+        return r["id"] if r else None
+
 def add_doc(fid,p,name,kind,date,remote,ocr_remote,text,keywords,digest):
     with connect() as c:
         cur=c.execute("""INSERT OR IGNORE INTO docs
