@@ -1,7 +1,7 @@
 import asyncio, hashlib, logging, os, tempfile
 from pathlib import Path
-from urllib.parse import urlencode
 from dotenv import load_dotenv
+load_dotenv()
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 import database as db
@@ -12,7 +12,6 @@ from ocr import ocr_file
 from AIAnalise import classify_document, extract_keywords, answer_question
 from utils import format_filename, parse_date_from_text, normalize_extension, safe_name
 
-load_dotenv()
 TOKEN=os.getenv("BOT_TOKEN","").strip()
 HF_TOKEN=os.getenv("HF_API_TOKEN","").strip()
 ROOT=os.getenv("YADISK_ROOT_FOLDER","MedArchive").strip("/")
@@ -108,8 +107,8 @@ async def callback(u,c):
     if q.data=="add_patient":
         state(c)["mode"]="add_patient"; return await q.edit_message_text("Введите имя пациента.")
     if q.data.startswith("patient:"):
-        name=q.data[len("patient:"):]
-        if name not in db.patients(f["id"]): return await q.edit_message_text("Пациент не найден в этом семейном архиве.")
+        name=db.patient_by_id(f["id"],q.data[len("patient:"):])
+        if not name: return await q.edit_message_text("Пациент не найден в этом семейном архиве.")
         state(c).update({"patient":name,"mode":None})
         return await q.edit_message_text("Выбран пациент: "+name)
 
@@ -117,7 +116,7 @@ async def choose_patient(u,c):
     f=active_family(u,c)
     if not f: return await say(u,"Сначала выберите семейный архив: /families")
     names=db.patients(f["id"])
-    buttons=[[InlineKeyboardButton(n,callback_data="patient:"+n)] for n in names]
+    buttons=[[InlineKeyboardButton(n,callback_data="patient:"+str(db.patient_id(f["id"],n)))] for n in names]
     buttons.append([InlineKeyboardButton("➕ Добавить пациента",callback_data="add_patient")])
     await say(u,"Пациенты в «"+f["name"]+"»:",InlineKeyboardMarkup(buttons))
 
