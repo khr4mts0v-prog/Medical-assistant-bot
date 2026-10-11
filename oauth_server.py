@@ -30,7 +30,7 @@ async def callback(request):
     pending=tenancy.consume_oauth_state(state)
     if not pending:
         return web.Response(text="Ссылка истекла или уже использована. Создайте новую в Telegram.",status=400)
-    if not tenancy.role_for_user(pending["family_id"],pending["telegram_id"]):
+    if tenancy.role_for_user(pending["family_id"],pending["telegram_id"]) not in ("owner","admin"):
         return web.Response(text="У пользователя больше нет доступа к этому семейному архиву.",status=403)
     payload={"grant_type":"authorization_code","code":code,"client_id":CLIENT_ID,"client_secret":CLIENT_SECRET,"redirect_uri":REDIRECT_URI}
     try:
