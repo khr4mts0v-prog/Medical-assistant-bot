@@ -22,14 +22,17 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertEqual(database.patients(self.a), ["Patient A"])
         self.assertEqual(database.patients(self.b), ["Patient B"])
 
-    def test_document_search_is_scoped(self):
+    def test_document_search_is_scoped_and_text_encrypted(self):
         database.add_doc(self.a, "Patient A", "a.pdf", "analysis", "01-01-2026",
-                         "FamilyA/a.pdf", "FamilyA/a.txt", "secret alpha", [], "digest-a")
+                         "FamilyA/a.pdf", "FamilyA/a.txt", "secret alpha", ["alpha"], "digest-a")
         database.add_doc(self.b, "Patient B", "b.pdf", "analysis", "01-01-2026",
-                         "FamilyB/b.pdf", "FamilyB/b.txt", "secret beta", [], "digest-b")
+                         "FamilyB/b.pdf", "FamilyB/b.txt", "secret beta", ["beta"], "digest-b")
         self.assertEqual(len(database.search(self.a, "Patient A", "alpha")), 1)
         self.assertEqual(database.search(self.a, "Patient A", "beta"), [])
         self.assertEqual(database.context(self.a, "Patient A", "beta"), "")
+        with tenancy.connect() as conn:
+            stored=conn.execute("SELECT text FROM docs WHERE family_id=?",(self.a,)).fetchone()["text"]
+        self.assertNotIn(b"secret alpha", bytes(stored))
 
     def test_membership_is_family_specific(self):
         self.assertEqual(tenancy.role_for_user(self.a, 101), "owner")
