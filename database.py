@@ -1,12 +1,22 @@
 """Family-scoped SQLite index. Every query requires family_id."""
-import json, os, sqlite3
+import json, os, sqlite3, logging
 from pathlib import Path
 from datetime import datetime
 from tenancy import connect, init as init_tenancy
 
 def init():
     init_tenancy()
+    # Preserve a previous single-family database instead of crashing on its old schema.
+    # It is deliberately not auto-assigned to a family because ownership is unknown.
     with connect() as c:
+        tables={r["name"] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "patients" in tables:
+            cols={r["name"] for r in c.execute("PRAGMA table_info(patients)")}
+            if "family_id" not in cols:
+                c.execute("ALTER TABLE patients RENAME TO legacy_patients")
+                if "docs" in tables:
+                    c.execute("ALTER TABLE docs RENAME TO legacy_docs")
+                logging.warning("Legacy single-family archive preserved as legacy_patients/legacy_docs; import only after assigning it to the correct family.")
         c.executescript("""
         CREATE TABLE IF NOT EXISTS patients(
           id INTEGER PRIMARY KEY, family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
