@@ -1,54 +1,65 @@
+"""Family-scoped SQLite index. Every query requires family_id."""
 import json, os, sqlite3
 from pathlib import Path
 from datetime import datetime
+from tenancy import connect, init as init_tenancy
 
-DB = Path(os.getenv("DB_PATH", "data/archive.sqlite3"))
-DB.parent.mkdir(parents=True, exist_ok=True)
+def init():
+    init_tenancy()
+    with connect() as c:
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS patients(
+          id INTEGER PRIMARY KEY, family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
+          name TEXT NOT NULL COLLATE NOCASE, UNIQUE(family_id,name));
+        CREATE TABLE IF NOT EXISTS docs(
+          id INTEGER PRIMARY KEY, family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
+          patient TEXT NOT NULL COLLATE NOCASE, name TEXT, kind TEXT, date TEXT,
+          remote TEXT, ocr_remote TEXT, text TEXT, keywords TEXT, digest TEXT, added TEXT,
+          UNIQUE(family_id,patient,digest));
+        CREATE INDEX IF NOT EXISTS docs_family_patient ON docs(family_id,patient,date);
+        """)
+init()
 
-def connect():
-    db = sqlite3.connect(DB)
-    db.row_factory = sqlite3.Row
-    return db
+def add_patient(fid,name):
+    name=" ".join((name or "").split())[:100]
+    if not name: raise ValueError("Имя пациента не может быть пустым")
+    with connect() as c:
+        c.execute("INSERT OR IGNORE INTO patients(family_id,name) VALUES(?,?)",(int(fid),name))
 
-with connect() as db:
-    db.executescript("""
-    CREATE TABLE IF NOT EXISTS patients(id INTEGER PRIMARY KEY, name TEXT UNIQUE COLLATE NOCASE);
-    CREATE TABLE IF NOT EXISTS docs(
-      id INTEGER PRIMARY KEY, patient TEXT COLLATE NOCASE, name TEXT, kind TEXT, date TEXT,
-      remote TEXT, ocr_remote TEXT, text TEXT, keywords TEXT, digest TEXT, added TEXT,
-      UNIQUE(patient,digest));
-    CREATE INDEX IF NOT EXISTS docs_patient ON docs(patient,date);
-    """)
+def patients(fid):
+    with connect() as c:
+        return [r["name"] for r in c.execute("SELECT name FROM patients WHERE family_id=? ORDER BY name",(int(fid),))]
 
-def add_patient(name):
-    with connect() as db:
-        db.execute("INSERT OR IGNORE INTO patients(name) VALUES(?)", (name.strip(),))
+def add_doc(fid,p,name,kind,date,remote,ocr_remote,text,keywords,digest):
+    with connect() as c:
+        cur=c.execute("""INSERT OR IGNORE INTO docs
+        (family_id,patient,name,kind,date,remote,ocr_remote,text,keywords,digest,added)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        (int(fid),p,name,kind,date,remote,ocr_remote,text,json.dumps(keywords,ensure_ascii=False),digest,datetime.now().isoformat()))
+        return cur.rowcount==1
 
-def patients():
-    with connect() as db:
-        return [r["name"] for r in db.execute("SELECT name FROM patients ORDER BY name")]
+def search(fid,p,query="",limit=10):
+    with connect() as c:
+        rows=c.execute("SELECT * FROM docs WHERE family_id=? AND patient=? COLLATE NOCASE ORDER BY added DESC",(int(fid),p)).fetchall()
+    terms=(query or "").lower().split()
+    out=[]
+    for row in rows:
+        d=dict(row)
+        blob=" ".join(str(d.get(k) or "") for k in ("name","kind","date","text","keywords")).lower()
+        if not terms or all(t in blob for t in terms): out.append(d)
+    return out[:max(1,min(int(limit),1000))]
 
-def add_doc(p, name, kind, date, remote, ocr_remote, text, keywords, digest):
-    with connect() as db:
-        cur = db.execute("""INSERT OR IGNORE INTO docs
-        (patient,name,kind,date,remote,ocr_remote,text,keywords,digest,added)
-        VALUES(?,?,?,?,?,?,?,?,?,?)""",
-        (p,name,kind,date,remote,ocr_remote,text,json.dumps(keywords,ensure_ascii=False),digest,datetime.now().isoformat()))
-        return cur.rowcount == 1
-
-def search(p, query="", limit=10):
-    with connect() as db:
-        rows = db.execute("SELECT * FROM docs WHERE patient=? COLLATE NOCASE ORDER BY added DESC", (p,)).fetchall()
-    terms = query.lower().split()
-    rows = [dict(r) for r in rows if not terms or any(t in (r["name"]+" "+r["kind"]+" "+r["date"]+" "+r["text"]+" "+r["keywords"]).lower() for t in terms)]
-    return rows[:limit]
-
-def context(p, query, limit=8):
-    rows = search(p, query, limit)
+def context(fid,p,query,limit=8):
+    rows=search(fid,p,query,limit)
     return "\n\n---\n\n".join(
-      f"Источник: {r['name']} | {r['kind']} | дата: {r['date']} | Я.Диск: {r['remote']}\n{r['text'][:2500]}"
-      for r in rows)
-    
-def history(p):
-    rows = search(p, "", 1000)
-    return "\n\n".join(f"{r['date']} — {r['kind']}\n{r['name']}\nОригинал: {r['remote']}\n{r['text'][:3500]}" for r in sorted(rows,key=lambda x:x['date']))
+      f"Источник: {r['name']} | {r['kind']} | дата: {r['date']}\n{r['text'][:2500]}" for r in rows)
+
+def history(fid,p):
+    rows=search(fid,p,"",1000)
+    rows.sort(key=lambda x:(x["date"] or "",x["added"] or ""))
+    return "\n\n".join(f"{r['date']} — {r['kind']}\n{r['name']}\nОригинал: {r['remote']}\n{r['text'][:3500]}" for r in rows)
+
+def document_count(fid,p):
+    with connect() as c:
+        r=c.execute("SELECT COUNT(*) n FROM docs WHERE family_id=? AND patient=?",(int(fid),p)).fetchone()
+        return r["n"]
