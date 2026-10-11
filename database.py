@@ -75,7 +75,7 @@ def search(fid,p,query="",limit=10):
             logging.exception("Cannot decrypt family document index entry")
             continue
         blob=" ".join(str(d.get(k) or "") for k in ("name","kind","date","text","keywords")).lower()
-        if not terms or all(t in blob for t in terms): out.append(d)
+        if not terms or any(t in blob for t in terms): out.append(d)
     return out[:max(1,min(int(limit),1000))]
 
 def context(fid,p,query,limit=8):
