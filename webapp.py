@@ -141,11 +141,12 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current
         try:
             text=ocr_file(str(local)); kind=classify_document(text); keywords=extract_keywords(text); date=parse_date_from_text(text)
             digest=hashlib.sha256(local.read_bytes()).hexdigest(); ex=normalize_extension(name)
+            if db.document_exists(fid,patient,digest):
+                return page("Дубликат", f'<p>Этот файл уже сохранён в архиве.</p><p><a href="/families/{fid}/patients/{html.escape(patient,quote=True)}">Назад к пациенту</a></p>')
             stored=f"{Path(format_filename(patient,kind,date,ex)).stem}_{digest[:8]}.{ex}"
             ocr_stored=Path(stored).stem+".txt"
             if STORAGE_BACKEND == "local":
                 saved_path = save_local_file(fid,patient,stored,local)
-                ocr_path = save_local_file(fid,patient,ocr_stored,Path(td)/"unused") if False else None
                 ocr_tmp=Path(td)/ocr_stored
                 ocr_tmp.write_text(text,encoding="utf-8")
                 save_local_file(fid,patient,ocr_stored,ocr_tmp)
