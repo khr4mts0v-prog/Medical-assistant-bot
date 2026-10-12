@@ -108,8 +108,12 @@ def download_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
     if not d:
         raise HTTPException(404,"Документ не найден")
     path=Path(str(d.get("remote") or "")).resolve()
-    from local_storage import DATA_ROOT
-    if path != DATA_ROOT and DATA_ROOT not in path.parents:
+    from local_storage import document_dir
+    try:
+        expected_dir=document_dir(fid,str(d.get("patient") or ""))
+    except (ValueError, OSError):
+        raise HTTPException(404,"Документ не найден")
+    if path.parent != expected_dir.resolve():
         raise HTTPException(404,"Документ не найден")
     if not path.is_file():
         raise HTTPException(404,"Файл отсутствует в локальном хранилище")
