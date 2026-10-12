@@ -50,6 +50,12 @@ def patient_id(fid, name):
         r=c.execute("SELECT id FROM patients WHERE family_id=? AND name=? COLLATE NOCASE",(int(fid),name)).fetchone()
         return r["id"] if r else None
 
+def document_exists(fid, patient, digest):
+    with connect() as c:
+        row=c.execute("SELECT 1 FROM docs WHERE family_id=? AND patient=? COLLATE NOCASE AND digest=?",
+                      (int(fid),patient,digest)).fetchone()
+        return row is not None
+
 def add_doc(fid,p,name,kind,date,remote,ocr_remote,text,keywords,digest):
     with connect() as c:
         cur=c.execute("""INSERT OR IGNORE INTO docs
@@ -87,7 +93,6 @@ def search(fid,p,query="",limit=10):
             raw_keywords=cipher().decrypt(d["keywords"]).decode("utf-8") if d.get("keywords") else "[]"
             d["keywords"]=json.loads(raw_keywords)
         except Exception:
-            # Fail closed: never return undecipherable medical text as if it were valid.
             logging.exception("Cannot decrypt family document index entry")
             continue
         blob=" ".join(str(d.get(k) or "") for k in ("name","kind","date","text","keywords")).lower()
