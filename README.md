@@ -9,8 +9,10 @@ Family medical-document archive with a Telegram bot and an experimental web inte
 - Family spaces, patient lists, family-scoped search/history.
 - Upload PDF and common image formats; OCR with Tesseract (Russian + English).
 - Local document storage on the VPS by default; optional Yandex Disk backend.
-- Optional Hugging Face analysis.
-- OCR text, keywords and Yandex OAuth tokens encrypted in SQLite using Fernet.
+- Multi-label content classification for mixed documents, with page-level type signals.
+- OCR-indexed lab markers, diagnosis/medication snippets and structured-data search.
+- Optional Hugging Face question answering over selected archive snippets.
+- OCR text, keywords, structured analysis and Yandex OAuth tokens encrypted in SQLite using Fernet.
 - Docker Compose deployment and tenant-isolation tests.
 
 ## Web MVP setup
@@ -21,13 +23,14 @@ Family medical-document archive with a Telegram bot and an experimental web inte
 4. Expose the web interface only behind HTTPS with Nginx. Compose binds application ports to localhost.
 5. Run `docker compose up -d --build`.
 6. Open the HTTPS endpoint and sign in with the configured HTTP Basic account. Create a family, add a patient, then test using a small synthetic PDF/image.
-7. The patient page allows uploads, OCR, search and opening the original file.
+7. The patient page allows uploads, OCR, full-text/structured search and opening the original file. Mixed files can carry multiple content labels; extracted facts retain page/source-line information for manual verification.
 
 The web interface runs separately from the Telegram bot but uses the same SQLite database and shared code. The web login is a single configured test owner; this MVP does not yet support individual web accounts or inviting web users. Web-created family membership uses a negative numeric ID namespace to avoid collisions with Telegram IDs.
 
 ## Security and limitations
 
 - **Test MVP only. Do not upload real medical records yet.**
+- The initial multi-label analyzer uses explainable text patterns and OCR line extraction, not a clinically validated classifier. Extracted values are candidates linked to source lines/pages and must be checked against the original; no diagnosis or treatment decision is automated.
 - Expose the web interface only behind HTTPS. Application ports must remain bound to localhost; HTTP Basic is not safe over plain HTTP.
 - Local documents are kept on the VPS, not encrypted as individual files. Files use restrictive directory/file permissions, and OCR text/keywords in SQLite are Fernet-encrypted. Protect the VPS and back up the data volume securely.
 - Configure encrypted off-server backups and securely back up FERNET_KEY. If it is lost, encrypted data cannot be recovered.
