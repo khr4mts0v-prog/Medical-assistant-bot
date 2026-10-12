@@ -142,6 +142,7 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current
                 if size>MAX_UPLOAD_MB*1024*1024: raise HTTPException(413,f"Файл больше {MAX_UPLOAD_MB} МБ")
                 out.write(chunk)
         saved_path = None
+        saved_paths = []
         try:
             text=ocr_file(str(local)); kind=classify_document(text); keywords=extract_keywords(text); date=parse_date_from_text(text)
             digest=hashlib.sha256(local.read_bytes()).hexdigest(); ex=normalize_extension(name)
@@ -151,9 +152,10 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current
             ocr_stored=Path(stored).stem+".txt"
             if STORAGE_BACKEND == "local":
                 saved_path = save_local_file(fid,patient,stored,local)
+                saved_paths.append(saved_path)
                 ocr_tmp=Path(td)/ocr_stored
                 ocr_tmp.write_text(text,encoding="utf-8")
-                save_local_file(fid,patient,ocr_stored,ocr_tmp)
+                saved_paths.append(save_local_file(fid,patient,ocr_stored,ocr_tmp))
                 remote=str(saved_path)
                 oremote=str(saved_path.parent/ocr_stored)
             else:
@@ -166,7 +168,7 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current
                     op=Path(od)/"ocr.txt"; op.write_text(text,encoding="utf-8"); disk.upload_file(str(op),oremote)
             if not db.add_doc(fid,patient,stored,kind,date,remote,oremote,text,keywords,digest):
                 if STORAGE_BACKEND == "local":
-                    for candidate in (Path(remote),Path(oremote)):
+                    for candidate in saved_paths:
                         try: candidate.unlink()
                         except FileNotFoundError: pass
                 return page("Дубликат",'<p>Файл уже есть в индексе.</p><p><a href="/">На главную</a></p>')
@@ -176,6 +178,10 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current
             return page("Сохранено",f'<p>Документ сохранён. Тип: {html.escape(kind)}; дата: {html.escape(date)}; символов OCR: {len(text)}.</p><p><a href="/families/{fid}/patients/{html.escape(patient,quote=True)}">Назад к пациенту</a></p>')
         except HTTPException: raise
         except Exception as e:
+            if STORAGE_BACKEND == "local":
+                for candidate in saved_paths:
+                    try: candidate.unlink()
+                    except FileNotFoundError: pass
             logging.exception("Web upload failed (%s)",type(e).__name__)
             raise HTTPException(502,f"Не удалось обработать документ ({type(e).__name__}). Проверьте OCR и выбранное хранилище.") from e
 
