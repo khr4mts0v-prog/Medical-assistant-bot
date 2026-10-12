@@ -50,6 +50,12 @@ def patient_id(fid, name):
         r=c.execute("SELECT id FROM patients WHERE family_id=? AND name=? COLLATE NOCASE",(int(fid),name)).fetchone()
         return r["id"] if r else None
 
+def document_exists(fid, patient, digest):
+    with connect() as c:
+        row=c.execute("SELECT 1 FROM docs WHERE family_id=? AND patient=? COLLATE NOCASE AND digest=?",
+                      (int(fid),patient,digest)).fetchone()
+        return row is not None
+
 def add_doc(fid,p,name,kind,date,remote,ocr_remote,text,keywords,digest):
     with connect() as c:
         cur=c.execute("""INSERT OR IGNORE INTO docs
@@ -58,6 +64,22 @@ def add_doc(fid,p,name,kind,date,remote,ocr_remote,text,keywords,digest):
         (int(fid),p,name,kind,date,remote,ocr_remote,cipher().encrypt((text or "").encode("utf-8")),
          cipher().encrypt(json.dumps(keywords,ensure_ascii=False).encode("utf-8")),digest,datetime.now().isoformat()))
         return cur.rowcount==1
+
+def get_doc(fid, doc_id):
+    """Return one document only when it belongs to the requested family."""
+    with connect() as c:
+        row=c.execute("SELECT * FROM docs WHERE family_id=? AND id=?",(int(fid),int(doc_id))).fetchone()
+    if not row:
+        return None
+    d=dict(row)
+    try:
+        d["text"]=cipher().decrypt(d["text"]).decode("utf-8") if d.get("text") else ""
+        raw_keywords=cipher().decrypt(d["keywords"]).decode("utf-8") if d.get("keywords") else "[]"
+        d["keywords"]=json.loads(raw_keywords)
+    except Exception:
+        logging.exception("Cannot decrypt family document index entry")
+        return None
+    return d
 
 def search(fid,p,query="",limit=10):
     with connect() as c:
@@ -71,7 +93,6 @@ def search(fid,p,query="",limit=10):
             raw_keywords=cipher().decrypt(d["keywords"]).decode("utf-8") if d.get("keywords") else "[]"
             d["keywords"]=json.loads(raw_keywords)
         except Exception:
-            # Fail closed: never return undecipherable medical text as if it were valid.
             logging.exception("Cannot decrypt family document index entry")
             continue
         blob=" ".join(str(d.get(k) or "") for k in ("name","kind","date","text","keywords")).lower()
