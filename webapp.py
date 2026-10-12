@@ -95,7 +95,7 @@ def patient_page(fid:int,patient:str,q:str="",uid:int=Depends(current_user)):
     if not rows: b.append('<p>Документы не найдены.</p>')
     for d in rows:
         link = f'<p><a href="/families/{fid}/documents/{int(d["id"])}">Открыть оригинал</a></p>' if STORAGE_BACKEND == "local" and d.get("remote") else ""
-        b.append(f'<div class="card"><strong>{html.escape(str(d.get("name") or "Документ"))}</strong><br>Тип: {html.escape(str(d.get("kind") or "—"))} · Дата: {html.escape(str(d.get("date") or "—"))}<p>{html.escape((d.get("text") or "")[:600])}</p>{link}<small>{html.escape(str(d.get("remote") or ""))}</small></div>')
+        b.append(f'<div class="card"><strong>{html.escape(str(d.get("name") or "Документ"))}</strong><br>Тип: {html.escape(str(d.get("kind") or "—"))} · Содержимое: {html.escape(", ".join((d.get("analysis") or {}).get("types", [])))} · Дата: {html.escape(str(d.get("date") or "—"))}<p>{html.escape((d.get("text") or "")[:600])}</p>{link}<small>{html.escape(str(d.get("remote") or ""))}</small></div>')
     b.append('</div>')
     return page("Пациент","".join(b))
 
