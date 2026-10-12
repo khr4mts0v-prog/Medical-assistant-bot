@@ -107,7 +107,14 @@ def analyze_document(text):
     """Classify the whole file and pages; extract candidate facts with source page/line."""
     text = text or ""
     types, scores = _matched_types(text)
-    head_types, _ = _matched_types(text[:1800])
+    page_markers = list(PAGE_RE.finditer(text))
+    if page_markers:
+        page_start = page_markers[0].end()
+        page_end = page_markers[1].start() if len(page_markers) > 1 else len(text)
+        header_text = text[page_start:min(page_end, page_start + 1800)]
+    else:
+        header_text = text[:1800]
+    head_types, _ = _matched_types(header_text)
     primary = head_types[0] if head_types else (types[0] if types else "документ")
     labs = _extract_lab_results(text)
     diagnoses = _extract_lines(text, [r"\bдиагноз\b", r"\bосновной диагноз\b", r"\bзаключительный диагноз\b"])
