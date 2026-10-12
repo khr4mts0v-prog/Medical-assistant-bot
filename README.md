@@ -1,41 +1,46 @@
-# Medical Archive Bot
+# Medical Archive
 
-Telegram bot for family medical-document archives. Each family is a separate tenant, with its own Yandex Disk OAuth connection and family-scoped document index.
+Family medical-document archive with a Telegram bot and an experimental web interface. Each family is a separate tenant, with its own Yandex Disk OAuth connection and family-scoped document index.
 
-## Current MVP features
+## Features
 
-- Family spaces and Telegram membership roles.
-- Per-family Yandex Disk OAuth connection.
-- Upload of PDF and common image formats.
-- OCR with Tesseract (Russian + English).
-- Family-scoped patient list, search and history.
-- Optional Hugging Face Inference Providers analysis with per-family consent.
-- Encryption of OCR text, keywords and Yandex OAuth tokens in SQLite.
-- Docker Compose deployment and tenant-isolation unit tests.
+- Telegram interface (requires access to Telegram Bot API from the server).
+- Experimental web interface at / using HTTP Basic authentication.
+- Family spaces, patient lists, family-scoped search/history.
+- Upload PDF and common image formats; OCR with Tesseract (Russian + English).
+- Originals and OCR text files stored on the family's Yandex Disk.
+- Optional Hugging Face analysis.
+- OCR text, keywords and Yandex OAuth tokens encrypted in SQLite using Fernet.
+- Docker Compose deployment and tenant-isolation tests.
 
-## Important
+## Web MVP setup
 
-This is an MVP under active development, not a clinically validated product. Do not upload real medical documents until you have configured secrets, HTTPS/OAuth, backups and reviewed the test results. AI sends selected document excerpts to Hugging Face and the selected inference provider after the user consents; model output can be wrong and is not a medical diagnosis.
+1. Copy .env.example to .env; set FERNET_KEY, WEB_USERNAME, and a long unique WEB_PASSWORD.
+2. Set Yandex OAuth values. Register the callback exactly as https://YOUR-DOMAIN.example/oauth/yandex/callback.
+3. Set up a domain, HTTPS certificate and Nginx using nginx/medical-archive.conf.example.
+4. Run docker compose up -d --build.
+5. Open https://YOUR-DOMAIN.example/. The browser asks for the configured HTTP Basic username and password.
+6. Create a family, connect its Yandex Disk, add a patient, then test with a synthetic document.
 
-## Quick start
+The web interface runs separately from the Telegram bot but uses the same SQLite database and shared code. The web login is a single configured test owner; this MVP does not yet support individual web accounts or inviting web users. Web-created family membership uses a negative numeric ID namespace to avoid collisions with Telegram IDs.
 
-1. Copy `.env.example` to `.env`.
-2. Set `BOT_TOKEN`, generate `FERNET_KEY`, configure Yandex OAuth credentials and HTTPS callback. `HF_API_TOKEN` is optional for OCR/search but required for AI analysis.
-3. On VPS, follow [DEPLOYMENT.md](DEPLOYMENT.md). Tesseract language packs and Python dependencies are included in the Docker image.
-4. Start the bot and run `/newfamily Family Name`.
-5. Run `/connect_disk` and authorize the Yandex account belonging to that family.
-6. Invite family members with `/invite TELEGRAM_ID member`. They can retrieve their ID with `/id`.
-7. Use `/families` to switch between archives.
+## Telegram quick start
 
-## Commands
+1. Set BOT_TOKEN in .env.
+2. Start the service and open the bot.
+3. Run /newfamily Family Name, then /connect_disk.
+4. Invite relatives with /invite TELEGRAM_ID member.
 
-- `/start` — start the bot
-- `/id` — show your Telegram numeric ID
-- `/newfamily Name` — create a family archive
-- `/families` — switch family
-- `/invite ID [member|admin]` — invite a Telegram account
-- `/connect_disk` — connect the active family's Yandex Disk
-- `/help` — usage
+## Security and limitations
+
+- **Test MVP only. Do not upload real medical records yet.**
+- Expose the web interface only behind HTTPS. The application ports are bound to localhost by Compose.
+- HTTP Basic sends credentials on every request; never use over plain HTTP.
+- Configure encrypted off-server backups and securely back up FERNET_KEY. If it is lost, encrypted data cannot be recovered.
+- Web and Telegram share the database file on one host. Do not run independent copies against separate databases expecting automatic sync.
+- AI sends selected OCR excerpts to Hugging Face and its selected inference provider after explicit consent. Output can be wrong and is not a diagnosis.
+- This is not a clinically validated product. Before real records, add per-user web accounts, CSRF protection where applicable, rate limits, stronger audit logging, backup/restore testing and comprehensive isolation tests.
+- The starter VPS has about 1 GB RAM and one vCPU; concurrent OCR may exhaust memory. Keep test PDFs small and process one upload at a time.
 
 ## Development checks
 
@@ -44,4 +49,4 @@ python -m compileall -q .
 python -m unittest discover -s tests -v
 ```
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for HTTPS reverse proxy, security and rollout requirements.
+See DEPLOYMENT.md for rollout and security checks.
