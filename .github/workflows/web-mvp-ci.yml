@@ -2,9 +2,9 @@ name: Web MVP CI
 
 on:
   pull_request:
-    branches: [feature/medical-archive-mvp]
+    branches: [main, feature/medical-archive-mvp, feature/web-archive-mvp]
   push:
-    branches: [feature/web-archive-mvp]
+    branches: [feature/medical-archive-mvp, feature/web-archive-mvp, feature/local-document-storage]
 
 jobs:
   test:
