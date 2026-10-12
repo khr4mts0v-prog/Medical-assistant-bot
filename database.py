@@ -59,6 +59,22 @@ def add_doc(fid,p,name,kind,date,remote,ocr_remote,text,keywords,digest):
          cipher().encrypt(json.dumps(keywords,ensure_ascii=False).encode("utf-8")),digest,datetime.now().isoformat()))
         return cur.rowcount==1
 
+def get_doc(fid, doc_id):
+    """Return one document only when it belongs to the requested family."""
+    with connect() as c:
+        row=c.execute("SELECT * FROM docs WHERE family_id=? AND id=?",(int(fid),int(doc_id))).fetchone()
+    if not row:
+        return None
+    d=dict(row)
+    try:
+        d["text"]=cipher().decrypt(d["text"]).decode("utf-8") if d.get("text") else ""
+        raw_keywords=cipher().decrypt(d["keywords"]).decode("utf-8") if d.get("keywords") else "[]"
+        d["keywords"]=json.loads(raw_keywords)
+    except Exception:
+        logging.exception("Cannot decrypt family document index entry")
+        return None
+    return d
+
 def search(fid,p,query="",limit=10):
     with connect() as c:
         rows=c.execute("SELECT * FROM docs WHERE family_id=? AND patient=? COLLATE NOCASE ORDER BY added DESC",(int(fid),p)).fetchall()
