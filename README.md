@@ -1,49 +1,35 @@
 # Medical Archive
 
-Family medical-document archive with a Telegram bot and an experimental web interface. Each family is a separate tenant, with family-scoped document index and isolated document storage.
+Family medical-document archive with a web interface and optional Telegram bot. Each family is a separate tenant, with family-scoped document index and isolated document storage.
 
-## Features
+## Web MVP
 
-- Telegram interface (requires access to Telegram Bot API from the server).
-- Experimental web interface at / using HTTP Basic authentication.
-- Family spaces, patient lists, family-scoped search/history.
 - Upload PDF and common image formats; OCR with Tesseract (Russian + English).
 - Local document storage on the VPS by default; optional Yandex Disk backend.
-- Multi-label content classification for mixed documents, with page-level type signals.
+- Rule-based, explainable multi-label classification, separately tracking document form and clinical content tags.
+- Page-level type signals for mixed multi-page files.
 - OCR-indexed lab markers, diagnosis/medication snippets and structured-data search.
-- Optional Hugging Face question answering over selected archive snippets.
+- Optional Hugging Face question answering over selected archive snippets, independent from classification.
 - OCR text, keywords, structured analysis and Yandex OAuth tokens encrypted in SQLite using Fernet.
-- Docker Compose deployment and tenant-isolation tests.
 
-## Web MVP setup
+## Classification design and limitations
 
-1. Copy .env.example to .env; set FERNET_KEY, WEB_USERNAME, and a long unique WEB_PASSWORD.
-2. For local-only document storage, keep `DOCUMENT_STORAGE_BACKEND=local` (default). Originals and OCR sidecar files are saved under `./data/documents/family_<id>/<patient>/` on the host, persisted through the Docker data volume.
-3. Optionally, set up Yandex OAuth and use `DOCUMENT_STORAGE_BACKEND=yandex` when the integration is available. Register the callback exactly as `https://YOUR-DOMAIN.example/oauth/yandex/callback`.
-4. Expose the web interface only behind HTTPS with Nginx. Compose binds application ports to localhost.
-5. Run `docker compose up -d --build`.
-6. Open the HTTPS endpoint and sign in with the configured HTTP Basic account. Create a family, add a patient, then test using a small synthetic PDF/image.
-7. The patient page allows uploads, OCR, full-text/structured search and opening the original file. Mixed files can carry multiple content labels; extracted facts retain page/source-line information for manual verification.
+The classifier does not call an external AI. It scores explicit document-title/form evidence more highly than incidental mentions, separates document types (e.g. discharge summary, laboratory report, ultrasound conclusion, prescription) from content tags (e.g. diagnoses, medications, vaccination, pregnancy), and stores page-level evidence. When evidence is weak, it returns "не определено" and marks the document for manual review instead of forcing a label.
 
-The web interface runs separately from the Telegram bot but uses the same SQLite database and shared code. The web login is a single configured test owner; this MVP does not yet support individual web accounts or inviting web users. Web-created family membership uses a negative numeric ID namespace to avoid collisions with Telegram IDs.
+This is a rule-based MVP, not a clinically validated classifier. Synthetic unit tests protect known patterns and known failure cases, but do not establish real-world accuracy. To estimate quality, create a de-identified representative evaluation set of actual document types and OCR conditions, adjudicate gold labels, report per-class precision/recall/F1 and the unknown/manual-review rate, and inspect errors before tuning rules. Never claim perfect classification from unit tests alone. Mixed PDFs and poor OCR should remain reviewable. Extracted values are candidates linked to source lines/pages and must be checked against the original; no diagnosis or treatment decision is automated.
 
-## Security and limitations
+## Security
 
-- **Test MVP only. Do not upload real medical records yet.**
-- The initial multi-label analyzer uses explainable text patterns and OCR line extraction, not a clinically validated classifier. Extracted values are candidates linked to source lines/pages and must be checked against the original; no diagnosis or treatment decision is automated.
+- Test MVP only. Do not upload real medical records yet.
 - Expose the web interface only behind HTTPS. Application ports must remain bound to localhost; HTTP Basic is not safe over plain HTTP.
-- Local documents are kept on the VPS, not encrypted as individual files. Files use restrictive directory/file permissions, and OCR text/keywords in SQLite are Fernet-encrypted. Protect the VPS and back up the data volume securely.
+- Local documents are kept on the VPS, not encrypted as individual files. OCR text, keywords and structured analysis in SQLite are Fernet-encrypted. Protect the VPS and back up the data volume securely.
 - Configure encrypted off-server backups and securely back up FERNET_KEY. If it is lost, encrypted data cannot be recovered.
-- Web and Telegram share the database file and local storage volume on one host. Do not run independent copies against separate databases expecting automatic sync.
-- AI sends selected OCR excerpts to Hugging Face and its selected inference provider after explicit consent. Output can be wrong and is not a diagnosis.
-- This is not a clinically validated product. Before real records, add per-user web accounts, CSRF protection where applicable, rate limits, stronger audit logging, backup/restore testing and comprehensive isolation tests.
+- Before real records, review user access controls, CSRF protection where applicable, rate limits, audit logging, backup/restore and tenant isolation.
 - The starter VPS has about 1 GB RAM and one vCPU; concurrent OCR may exhaust memory. Keep test PDFs small and process one upload at a time.
 
 ## Development checks
 
-```bash
-python -m compileall -q .
-python -m unittest discover -s tests -v
-```
+    python -m compileall -q .
+    python -m unittest discover -s tests -v
 
 See DEPLOYMENT.md for rollout and security checks.

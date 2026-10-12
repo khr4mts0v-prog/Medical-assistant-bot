@@ -10,7 +10,7 @@ import database as db, tenancy
 from cloud import YaDiskClient
 from local_storage import save_file as save_local_file
 from ocr import ocr_file
-from AIAnalise import classify_document, extract_keywords
+from AIAnalise import analyze_document, extract_keywords
 from utils import format_filename, normalize_extension, parse_date_from_text, safe_name
 
 app=FastAPI(title="Medical Archive", docs_url=None, redoc_url=None)
@@ -33,7 +33,7 @@ def current_user(credentials: HTTPBasicCredentials=Depends(security))->int:
     return -(int(hashlib.sha256(WEB_USERNAME.encode()).hexdigest()[:12],16) or 1)
 
 def page(title,body,status=200):
-    return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
+    return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
 body{max-width:850px;margin:auto;padding:18px;font:16px/1.5 system-ui,sans-serif}h1{font-size:1.5rem}h2{font-size:1.15rem}.card{border:1px solid #8888;border-radius:12px;padding:14px;margin:12px 0}input,select,button{font:inherit;max-width:100%;padding:9px;margin:4px 0}input[type=text],input[type=search]{width:min(100%,440px)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.muted{opacity:.7}.warn{border-left:4px solid #b8860b;padding:8px 12px}a{overflow-wrap:anywhere}</style></head><body><h1>Медицинский архив</h1>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></body></html>""",status_code=status)
 
 def family(fid,uid):
@@ -94,8 +94,16 @@ def patient_page(fid:int,patient:str,q:str="",uid:int=Depends(current_user)):
     b.append('<div class="card"><h2>Документы</h2>')
     if not rows: b.append('<p>Документы не найдены.</p>')
     for d in rows:
+        a=d.get("analysis") or {}
+        doc_types=a.get("document_types",a.get("types",[]))
+        tags=a.get("content_tags",[])
+        confidence=a.get("confidence","неизвестно")
+        review=a.get("review_required",False)
+        label_text=", ".join(doc_types) or "не определено"
+        tag_text=", ".join(tags)
+        status = " · требует проверки" if review else ""
         link = f'<p><a href="/families/{fid}/documents/{int(d["id"])}">Открыть оригинал</a></p>' if STORAGE_BACKEND == "local" and d.get("remote") else ""
-        b.append(f'<div class="card"><strong>{html.escape(str(d.get("name") or "Документ"))}</strong><br>Тип: {html.escape(str(d.get("kind") or "—"))} · Содержимое: {html.escape(", ".join((d.get("analysis") or {}).get("types", [])))} · Дата: {html.escape(str(d.get("date") or "—"))}<p>{html.escape((d.get("text") or "")[:600])}</p>{link}<small>{html.escape(str(d.get("remote") or ""))}</small></div>')
+        b.append(f'<div class="card"><strong>{html.escape(str(d.get("name") or "Документ"))}</strong><br>Основной тип: {html.escape(str(d.get("kind") or "не определено"))}{status}<br>Типы документа: {html.escape(label_text)}<br>Темы: {html.escape(tag_text or "—")}<br>Уверенность: {html.escape(str(confidence))}<br>Дата: {html.escape(str(d.get("date") or "—"))}<p>{html.escape((d.get("text") or "")[:600])}</p>{link}<small>{html.escape(str(d.get("remote") or ""))}</small></div>')
     b.append('</div>')
     return page("Пациент","".join(b))
 
@@ -109,25 +117,19 @@ def download_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
         raise HTTPException(404,"Документ не найден")
     path=Path(str(d.get("remote") or "")).resolve()
     from local_storage import document_dir
-    try:
-        expected_dir=document_dir(fid,str(d.get("patient") or ""))
-    except (ValueError, OSError):
-        raise HTTPException(404,"Документ не найден")
-    if path.parent != expected_dir.resolve():
-        raise HTTPException(404,"Документ не найден")
-    if not path.is_file():
-        raise HTTPException(404,"Файл отсутствует в локальном хранилище")
+    try: expected_dir=document_dir(fid,str(d.get("patient") or ""))
+    except (ValueError, OSError): raise HTTPException(404,"Документ не найден")
+    if path.parent != expected_dir.resolve(): raise HTTPException(404,"Документ не найден")
+    if not path.is_file(): raise HTTPException(404,"Файл отсутствует в локальном хранилище")
     return FileResponse(path,filename=str(d.get("name") or path.name),media_type="application/octet-stream")
 
 @app.post("/families/{fid}/patients/{patient}/upload",response_class=HTMLResponse)
 def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current_user)):
     family(fid,uid)
     if patient not in db.patients(fid): raise HTTPException(404,"Пациент не найден")
-    if STORAGE_BACKEND not in {"local","yandex"}:
-        raise HTTPException(503,"Неизвестный backend хранения")
+    if STORAGE_BACKEND not in {"local","yandex"}: raise HTTPException(503,"Неизвестный backend хранения")
     token=tenancy.get_yadisk_token(fid) if STORAGE_BACKEND == "yandex" else None
-    if STORAGE_BACKEND == "yandex" and not token:
-        raise HTTPException(400,"Сначала подключите Яндекс Диск")
+    if STORAGE_BACKEND == "yandex" and not token: raise HTTPException(400,"Сначала подключите Яндекс Диск")
     name=Path(file.filename or "document.bin").name
     ext=Path(name).suffix.lower()
     if ext not in ALLOWED: raise HTTPException(400,"Формат файла не поддерживается")
@@ -141,23 +143,24 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current
                 size+=len(chunk)
                 if size>MAX_UPLOAD_MB*1024*1024: raise HTTPException(413,f"Файл больше {MAX_UPLOAD_MB} МБ")
                 out.write(chunk)
-        saved_path = None
-        saved_paths = []
+        saved_paths=[]
         try:
-            text=ocr_file(str(local)); kind=classify_document(text); keywords=extract_keywords(text); date=parse_date_from_text(text)
-            digest=hashlib.sha256(local.read_bytes()).hexdigest(); ex=normalize_extension(name)
+            text=ocr_file(str(local))
+            analysis=analyze_document(text)
+            kind=analysis["primary_type"]
+            keywords=extract_keywords(text,analysis)
+            date=parse_date_from_text(text)
+            digest=hashlib.sha256(local.read_bytes()).hexdigest()
+            ex=normalize_extension(name)
             if db.document_exists(fid,patient,digest):
-                return page("Дубликат", f'<p>Этот файл уже сохранён в архиве.</p><p><a href="/families/{fid}/patients/{html.escape(patient,quote=True)}">Назад к пациенту</a></p>')
+                return page("Дубликат",f'<p>Этот файл уже сохранён в архиве.</p><p><a href="/families/{fid}/patients/{html.escape(patient,quote=True)}">Назад к пациенту</a></p>')
             stored=f"{Path(format_filename(patient,kind,date,ex)).stem}_{digest[:8]}.{ex}"
             ocr_stored=Path(stored).stem+".txt"
             if STORAGE_BACKEND == "local":
-                saved_path = save_local_file(fid,patient,stored,local)
-                saved_paths.append(saved_path)
-                ocr_tmp=Path(td)/ocr_stored
-                ocr_tmp.write_text(text,encoding="utf-8")
+                saved_path=save_local_file(fid,patient,stored,local); saved_paths.append(saved_path)
+                ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(text,encoding="utf-8")
                 saved_paths.append(save_local_file(fid,patient,ocr_stored,ocr_tmp))
-                remote=str(saved_path)
-                oremote=str(saved_path.parent/ocr_stored)
+                remote=str(saved_path); oremote=str(saved_path.parent/ocr_stored)
             else:
                 disk=YaDiskClient(token); folder=f"{ROOT}/family_{fid}/{safe_name(patient)}"
                 docs,ocr=folder+"/docs",folder+"/OCR"
@@ -166,7 +169,7 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current
                 disk.upload_file(str(local),remote)
                 with tempfile.TemporaryDirectory() as od:
                     op=Path(od)/"ocr.txt"; op.write_text(text,encoding="utf-8"); disk.upload_file(str(op),oremote)
-            if not db.add_doc(fid,patient,stored,kind,date,remote,oremote,text,keywords,digest):
+            if not db.add_doc(fid,patient,stored,kind,date,remote,oremote,text,keywords,digest,analysis=analysis):
                 if STORAGE_BACKEND == "local":
                     for candidate in saved_paths:
                         try: candidate.unlink()
@@ -175,7 +178,9 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current
             if STORAGE_BACKEND == "yandex":
                 with tempfile.TemporaryDirectory() as hd:
                     hp=Path(hd)/"history.txt"; hp.write_text(db.history(fid,patient),encoding="utf-8"); disk.upload_file(str(hp),folder+"/history.txt")
-            return page("Сохранено",f'<p>Документ сохранён. Тип: {html.escape(kind)}; дата: {html.escape(date)}; символов OCR: {len(text)}.</p><p><a href="/families/{fid}/patients/{html.escape(patient,quote=True)}">Назад к пациенту</a></p>')
+            status="Требуется проверить тип вручную." if analysis["review_required"] else "Тип определён автоматически; проверьте по оригиналу."
+            other_types=", ".join(analysis["document_types"]) or "не определено"
+            return page("Сохранено",f'<p>Документ сохранён.</p><p>Основной тип: {html.escape(kind)}.</p><p>Типы документа: {html.escape(other_types)}.</p><p>Уверенность: {html.escape(analysis["confidence"])}.</p><p>{html.escape(status)}</p><p><a href="/families/{fid}/patients/{html.escape(patient,quote=True)}">Назад к пациенту</a></p>')
         except HTTPException: raise
         except Exception as e:
             if STORAGE_BACKEND == "local":
