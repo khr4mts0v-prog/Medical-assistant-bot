@@ -21,3 +21,25 @@ services:
     cap_drop:
       - ALL
     init: true
+
+  medical-archive-web:
+    build: .
+    container_name: medical-archive-web
+    command: ["uvicorn", "webapp:app", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /app/data/archive.sqlite3
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    init: true
