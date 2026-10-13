@@ -22,6 +22,22 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertEqual(database.patients(self.a), ["Patient A"])
         self.assertEqual(database.patients(self.b), ["Patient B"])
 
+
+    def test_patient_aliases_are_encrypted_and_family_scoped(self):
+        database.add_patient(self.a, "Олег", aliases=[
+            "Иванов Иван Петрович", "Иванов И.П.", "Иванов И."
+        ])
+        record = next(row for row in database.patient_records(self.a) if row["name"] == "Олег")
+        self.assertEqual(record["aliases"], ["Олег", "Иванов Иван Петрович", "Иванов И.П.", "Иванов И."])
+        self.assertTrue(record["aliases_configured"])
+        self.assertNotIn("Олег", [row["name"] for row in database.patient_records(self.b)])
+        with tenancy.connect() as conn:
+            stored = conn.execute(
+                "SELECT aliases_enc FROM patients WHERE family_id=? AND name='Олег'", (self.a,)
+            ).fetchone()["aliases_enc"]
+        self.assertNotIn(b"Ivanov", bytes(stored))
+        self.assertNotIn("Иванов".encode("utf-8"), bytes(stored))
+
     def test_document_search_is_scoped_and_text_encrypted(self):
         database.add_doc(self.a, "Patient A", "a.pdf", "analysis", "01-01-2026",
                          "FamilyA/a.pdf", "FamilyA/a.txt", "secret alpha", ["alpha"], "digest-a")

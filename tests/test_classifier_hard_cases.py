@@ -59,6 +59,35 @@ class ClassificationHardCasesTests(unittest.TestCase):
             "не определено",
         )
 
+    def test_bare_modality_acronyms_abstain(self):
+        for text in ("УЗИ", "ЭКГ", "МРТ", "КТ", "ФГДС", "рентген"):
+            with self.subTest(text=text):
+                self.assert_primary(text, "не определено")
+
+    def test_completed_exam_with_missing_conclusion_is_not_a_report(self):
+        self.assert_primary(
+            "Ранее выполнено УЗИ, заключение отсутствует.",
+            "не определено",
+        )
+
+    def test_historical_exam_mention_is_not_a_report(self):
+        self.assert_primary(
+            "В анамнезе выполнена МРТ, сейчас жалоб нет.",
+            "не определено",
+        )
+
+    def test_passive_referral_for_ct_is_classified_as_referral(self):
+        self.assert_primary(
+            "Пациент направлен на КТ органов грудной клетки.",
+            "направление",
+        )
+
+    def test_planned_exam_list_is_not_a_completed_report(self):
+        self.assert_primary(
+            "План обследования: ЭКГ, УЗИ, анализ крови.",
+            "не определено",
+        )
+
     def test_mixed_pages_keep_each_page_class_separate(self):
         result = analyze_document(
             "--- Страница 1 ---\nВыписной эпикриз из стационара\nДиагноз: ОРВИ\n"
