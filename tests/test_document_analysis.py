@@ -243,6 +243,15 @@ class DocumentMetadataTests(unittest.TestCase):
 Валидация врачом: 23.04.2026 02:41"""
         self.assertEqual(extract_document_date(text), "23-04-2026")
 
+    def test_ultrasound_ocr_without_exam_date_must_not_use_birth_date(self):
+        from document_metadata import extract_document_date
+
+        text = """УЛЬТРАЗВУКОВОЕ ИССЛЕДОВАНИЕ ЩИТОВИДНОЙ ЖЕЛЕЗЫ
+ФИО: Пациент Тестовый
+Дата рождения: 10.03.2019
+Заключение: ультразвуковые признаки изменений щитовидной железы."""
+        self.assertIsNone(extract_document_date(text))
+
     def test_registered_patient_full_name(self):
         from document_metadata import extract_registered_patient
         roster = ["Иванов Иван Иванович", "Петров Пётр Петрович"]
