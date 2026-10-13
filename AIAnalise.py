@@ -258,13 +258,19 @@ def _classify_segment(text):
     scores, evidence = _score_types(text)
     normalized = _normalize(text)
 
-    for label, similarity in _fuzzy_header_matches(text):
-        if similarity >= 0.88:
-            scores[label] = max(scores.get(label, 0), 10)
-            evidence.setdefault(label, []).append({
-                "weight": 10,
-                "reason": f"приближённое совпадение заголовка ({similarity:.2f})",
-            })
+    # Fuzzy OCR matching is a fallback: it must not override a clear exact
+    # title that identifies the document form.
+    exact_header_text = _normalize("\\n".join((text or "").splitlines()[:2]))
+    exact_header_scores, _ = _score_types(exact_header_text)
+    has_strong_exact_header = any(score >= 9 for score in exact_header_scores.values())
+    if not has_strong_exact_header:
+        for label, similarity in _fuzzy_header_matches(text):
+            if similarity >= 0.88:
+                scores[label] = max(scores.get(label, 0), 10)
+                evidence.setdefault(label, []).append({
+                    "weight": 10,
+                    "reason": f"приближённое совпадение заголовка ({similarity:.2f})",
+                })
 
     # Classify the document's form, not every medical topic mentioned in its body.
     # In particular, a requested future investigation is not its resulting report.
@@ -291,6 +297,27 @@ def _classify_segment(text):
         r"заключение\s*:\s*(?:признак\w*|данных\s+за|без\s+особенностей|"
         r"эхографическ\w*|кт-картин\w*|мр-картин\w*|синусов\w+\s+ритм))",
         normalized))
+    imaging_labels = (
+        "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
+        "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
+    )
+    # An explicit modality in the opening lines wins over incidental references
+    # to other modalities in the body.
+    explicit_header_modalities = [
+        label for label in imaging_labels if exact_header_scores.get(label, 0) >= 9
+    ]
+    if explicit_header_modalities:
+        winner = max(explicit_header_modalities, key=lambda label: exact_header_scores[label])
+        for label in imaging_labels:
+            if label != winner:
+                scores.pop(label, None)
+                evidence.pop(label, None)
+    elif not report_context:
+        # Bare lists of medical terms are not imaging reports; abstain unless
+        # there is a report heading or result-like context.
+        for label in imaging_labels:
+            scores.pop(label, None)
+            evidence.pop(label, None)
     if referral_context and not report_context:
         scores["направление"] = max(scores.get("направление", 0), 12)
         evidence.setdefault("направление", []).append(
