@@ -90,7 +90,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
         b.append(
             '<div class="card" id="quick-upload"><h2>Быстрая загрузка документов</h2>'
             '<p>Выберите файлы — загрузка начнётся автоматически. Прогресс показывается отдельно для каждого файла. Крестик убирает файл из списка на странице, но не гарантирует остановку уже начавшейся серверной обработки.</p>'
-            '<label>Семейный архив<br><select id="upload-family" required>' + upload_options + '</select></label><br>'
+            '<select id="upload-family" hidden aria-hidden="true">' + upload_options + '</select>'
             '<input id="upload-files" type="file" accept="image/*,application/pdf,.tif,.tiff,.bmp" multiple hidden>' '<button type="button" id="choose-files">＋ Выбрать документы</button>'
             '<div id="upload-queue" aria-live="polite"></div>'
             '<small>До ' + str(MAX_UPLOAD_MB) + ' МБ на файл. OCR и классификация выполняются на сервере после передачи.</small></div>'
