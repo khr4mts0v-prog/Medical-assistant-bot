@@ -318,6 +318,23 @@ def _classify_segment(text):
         scores.pop("лабораторный отчёт", None)
         evidence.pop("лабораторный отчёт", None)
 
+    # A planned or explicitly absent histology result is not a pathology report.
+    # Keep a genuine pathology-report heading authoritative, but do not let a
+    # consultation mention of a missing future/past result win by keyword score.
+    pathology_report_heading = bool(re.search(
+        r"\\b(?:патоморфологическ\\w+\\s+заключени\\w*|гистологическ\\w+\\s+заключени\\w*|"
+        r"цитологическ\\w+\\s+заключени\\w*)\\b",
+        header_text))
+    pathology_result_absent = bool(re.search(
+        r"(?:результат\\w*\\s+гистологическ\\w+\\s+исследовани\\w*|"
+        r"гистологическ\\w+\\s+результат\\w*|результат\\w*\\s+биопси\\w*)"
+        r".{0,100}\\b(?:отсутств\\w*|не\\s+(?:получен\\w*|готов\\w*|выполнен\\w*|провед\\w*)|"
+        r"ожидает\\w*|ожидается|будет\\s+(?:выполнен\\w*|готов\\w*|получен\\w*))\\b",
+        normalized))
+    if pathology_result_absent and not pathology_report_heading:
+        scores.pop("патоморфологическое заключение", None)
+        evidence.pop("патоморфологическое заключение", None)
+
     # A document-type mention explicitly negated in a disclaimer is not evidence
     # that the current file belongs to that type.
     negative_type_patterns = {
