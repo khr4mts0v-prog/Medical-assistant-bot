@@ -27,6 +27,11 @@ def init():
           remote TEXT, ocr_remote TEXT, text TEXT, keywords TEXT, analysis TEXT, digest TEXT, added TEXT,
           UNIQUE(family_id,patient,digest));
         CREATE INDEX IF NOT EXISTS docs_family_patient ON docs(family_id,patient,date);
+        CREATE TABLE IF NOT EXISTS pending_docs(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
+          name TEXT NOT NULL, digest TEXT NOT NULL, file_blob BLOB NOT NULL, text_enc BLOB NOT NULL,
+          analysis_enc BLOB NOT NULL, created TEXT NOT NULL, UNIQUE(family_id,digest));
+        CREATE INDEX IF NOT EXISTS pending_docs_family_created ON pending_docs(family_id,created);
         """)
         patient_cols={row["name"] for row in c.execute("PRAGMA table_info(patients)")}
         if "aliases_enc" not in patient_cols:
@@ -226,3 +231,39 @@ def document_count(fid,p):
     with connect() as c:
         r=c.execute("SELECT COUNT(*) n FROM docs WHERE family_id=? AND patient=?",(int(fid),p)).fetchone()
         return r["n"]
+
+def add_pending_doc(fid,name,digest,file_bytes,text,analysis):
+    """Keep unmatched originals encrypted until a human assigns a patient."""
+    with connect() as c:
+        cur=c.execute("""INSERT OR IGNORE INTO pending_docs
+          (family_id,name,digest,file_blob,text_enc,analysis_enc,created)
+          VALUES(?,?,?,?,?,?,?)""",
+          (int(fid),str(name)[:255],digest,cipher().encrypt(file_bytes),
+           cipher().encrypt((text or "").encode("utf-8")),
+           cipher().encrypt(json.dumps(analysis or {},ensure_ascii=False).encode("utf-8")),
+           datetime.now().isoformat()))
+        return cur.lastrowid if cur.rowcount == 1 else None
+
+def pending_documents(fid):
+    with connect() as c:
+        rows=c.execute("SELECT id,family_id,name,digest,created FROM pending_docs WHERE family_id=? ORDER BY created DESC",(int(fid),)).fetchall()
+    return [dict(r) for r in rows]
+
+def get_pending_doc(fid,pending_id):
+    with connect() as c:
+        row=c.execute("SELECT * FROM pending_docs WHERE family_id=? AND id=?",(int(fid),int(pending_id))).fetchone()
+    if not row: return None
+    d=dict(row)
+    try:
+        d["file_bytes"]=cipher().decrypt(d["file_blob"])
+        d["text"]=cipher().decrypt(d["text_enc"]).decode("utf-8")
+        d["analysis"]=json.loads(cipher().decrypt(d["analysis_enc"]).decode("utf-8"))
+    except Exception:
+        logging.exception("Cannot decrypt pending document")
+        return None
+    return d
+
+def delete_pending_doc(fid,pending_id):
+    with connect() as c:
+        cur=c.execute("DELETE FROM pending_docs WHERE family_id=? AND id=?",(int(fid),int(pending_id)))
+        return cur.rowcount == 1
