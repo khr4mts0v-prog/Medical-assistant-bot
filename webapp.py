@@ -58,6 +58,17 @@ def family(fid,uid):
 
 def home_url(fid=None): return RedirectResponse("/" if fid is None else f"/?family_id={int(fid)}",status_code=303)
 
+def explicit_document_date(text):
+    """Return a date only when OCR explicitly labels it as a document/exam date."""
+    import re
+    from datetime import datetime
+    match=re.search(r"(?:дата\\s+(?:документа|исследования|осмотра|выдачи|проведения|при[её]ма)|исследование\\s+от|осмотр\\s+от)\\s*[:№]?\\s*(\\d{1,2}[./-]\\d{1,2}[./-]\\d{4})",text or "",re.I)
+    if not match: return ""
+    for fmt in ("%d-%m-%Y","%d.%m.%Y","%d/%m/%Y"):
+        try: return datetime.strptime(match.group(1),fmt).strftime("%d-%m-%Y")
+        except ValueError: pass
+    return ""
+
 @app.get("/",response_class=HTMLResponse)
 def home(family_id:int|None=None,uid:int=Depends(current_user)):
     fs=tenancy.families_for_user(uid)
@@ -91,7 +102,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
             '<small>До ' + str(MAX_UPLOAD_MB) + ' МБ на файл. OCR и классификация выполняются на сервере после передачи.</small></div>'
             '<script>(function(){const input=document.getElementById("upload-files"),queue=document.getElementById("upload-queue"),family=document.getElementById("upload-family");let items=[],seq=0;'
             'function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c]})}'
-            'function render(){queue.innerHTML=items.map(function(x){return \'<div class="upload-item"><div class="upload-top"><div class="upload-name"><strong>\'+esc(x.file.name)+\'</strong><div class="upload-status">\'+(x.file.size/1048576).toFixed(2)+\' МБ · \'+esc(x.status)+\'</div></div><button class="upload-remove" type="button" data-remove="\'+x.id+\'" aria-label="Удалить из очереди">×</button></div><div class="upload-track"><div class="upload-fill" style="width:\'+x.progress+\'%"></div></div><small>\'+x.progress+\'%</small></div>\'}).join("");queue.querySelectorAll("[data-remove]").forEach(function(b){b.addEventListener("click",function(){const id=Number(b.dataset.remove),item=items.find(function(x){return x.id===id});if(item&&item.xhr){item.cancelled=true;item.xhr.abort()}items=items.filter(function(x){return x.id!==id});render()})})}'
+            'function render(){queue.innerHTML=items.map(function(x){return \'<div class="upload-item"><div class="upload-top"><div class="upload-name"><strong>\'+esc(x.file.name)+\'</strong><div class="upload-status">\'+(x.file.size/1048576).toFixed(2)+\' МБ · \'+esc(x.status)+\'</div></div><button class="upload-remove" type="button" data-remove="\'+x.id+\'" aria-label="Убрать файл из списка">×</button></div><div class="upload-track"><div class="upload-fill" style="width:\'+x.progress+\'%"></div></div><small>\'+x.progress+\'%</small></div>\'}).join("");queue.querySelectorAll("[data-remove]").forEach(function(b){b.addEventListener("click",function(){const id=Number(b.dataset.remove),item=items.find(function(x){return x.id===id});if(item&&item.xhr){item.cancelled=true;item.status="Отменено в браузере; результат сервера неизвестен";item.xhr.abort()}items=items.filter(function(x){return x.id!==id});render()})})}window.addEventListener("beforeunload",function(e){if(items.some(function(x){return x.xhr&&!x.cancelled})){e.preventDefault();e.returnValue=""}});
             'function upload(item){item.status="Загрузка";const xhr=new XMLHttpRequest(),form=new FormData();item.xhr=xhr;form.append("family_id",family.value);form.append("files",item.file,item.file.name);xhr.open("POST","/upload");xhr.upload.onprogress=function(e){if(e.lengthComputable){item.progress=Math.round(e.loaded/e.total*100);item.status=item.progress>=100?"Передан · обработка на сервере":"Загрузка";render()}};xhr.onload=function(){item.xhr=null;if(item.cancelled)return;item.progress=100;const body=(xhr.responseText||"").toLowerCase();if(xhr.status>=200&&xhr.status<300){if(body.includes("добавлен во входящие"))item.status="Загружен · ручная проверка";else if(body.includes("сохранён пациенту"))item.status="Загружен · сохранён";else if(body.includes("дубликат"))item.status="Дубликат";else item.status="Обработка завершена"}else item.status="Ошибка HTTP "+xhr.status;render()};xhr.onerror=function(){item.xhr=null;if(!item.cancelled){item.status="Ошибка сети";render()}};xhr.onabort=function(){item.xhr=null};xhr.send(form)}'
             'input.addEventListener("change",function(){const selected=Array.from(input.files||[]);input.value="";selected.forEach(function(file){const item={id:++seq,file:file,status:"В очереди",progress:0,xhr:null,cancelled:false};if(!/\\.(pdf|png|jpe?g|webp|tiff?|bmp)$/i.test(file.name)){item.status="Формат не поддерживается";item.progress=0;items.push(item);render();return}if(file.size>'+(MAX_UPLOAD_MB*1024*1024)+'){item.status="Превышен лимит размера";items.push(item);render();return}items.push(item);render();upload(item)})});'
             '})();</script>'
@@ -348,17 +359,8 @@ def assign_selected_pending(fid:int,patient:str=Form(...),pending_ids:list[int]=
         kind=str(analysis.get("primary_type") or "не определено")
         if kind not in DOCUMENT_TYPE_RULES: kind="не определено"
         title=str(analysis.get("display_title") or (kind if kind!="не определено" else Path(d["name"]).stem))[:180].strip()
-        # Do not mistake a patient's date of birth for the document date.
-        # Bulk mode fills a date only when OCR explicitly labels it as a document/exam date.
-        import re
-        date_match=re.search(r"(?:дата\\s+(?:документа|исследования|осмотра|выдачи|проведения|при[её]ма)|исследование\\s+от|осмотр\\s+от)\\s*[:№]?\\s*(\\d{1,2}[./-]\\d{1,2}[./-]\\d{4})",d.get("text") or "",re.I)
-        date=""
-        if date_match:
-            try:
-                from datetime import datetime
-                date=datetime.strptime(date_match.group(1).replace(".","-").replace("/","-"),"%d-%m-%Y").strftime("%d-%m-%Y")
-            except ValueError:
-                date=""
+        # Avoid confusing a patient's date of birth with the document date.
+        date=explicit_document_date(d.get("text") or "")
         try:
             response=assign_pending_document(fid,pending_id,patient,kind,title,date,uid)
             results.append("<li><strong>"+html.escape(d["name"])+"</strong>: назначен пациенту "+html.escape(patient)+"; индивидуальные тип и дата сохранены.</li>")
