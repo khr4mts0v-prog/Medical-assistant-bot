@@ -216,7 +216,7 @@ def _fuzzy_header_matches(text):
     # Apply this only to heading comparison; never mutate source text or values.
     confusables = str.maketrans({
         "a": "а", "c": "с", "e": "е", "o": "о", "p": "р",
-        "x": "х", "y": "у", "k": "к", "m": "м", "t": "т",
+        "x": "х", "y": "у", "k": "к", "m": "м", "r": "р", "t": "т",
         "b": "в", "h": "н",
     })
     header = header.translate(confusables)
