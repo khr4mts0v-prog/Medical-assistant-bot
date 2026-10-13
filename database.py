@@ -153,6 +153,13 @@ def get_doc(fid, doc_id):
         return None
     return d
 
+def update_doc_metadata(fid, doc_id, kind, date, analysis):
+    """Update display metadata while preserving the original and OCR text."""
+    with connect() as c:
+        cur=c.execute("UPDATE docs SET kind=?,date=?,analysis=? WHERE family_id=? AND id=?",
+                      (kind,date,cipher().encrypt(json.dumps(analysis,ensure_ascii=False).encode("utf-8")),int(fid),int(doc_id)))
+        return cur.rowcount == 1
+
 def search(fid,p,query="",limit=10):
     """Search OCR plus structured metadata. Multi-term matches rank above partial matches."""
     with connect() as c:
