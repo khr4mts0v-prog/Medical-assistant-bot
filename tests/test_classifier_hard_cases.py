@@ -150,7 +150,7 @@ class ClassificationHardCasesTests(unittest.TestCase):
         )
 
 
-    def test_transposed_characters_in_heading_are_tolerated(self):
+    def test_heading_with_spacing_and_body_context_still_classifies(self):
         self.assert_primary(
             "ЗАКЛЮЧЕНИЕ МРТ\\nОчаговых изменений не выявлено.",
             "заключение МРТ",
