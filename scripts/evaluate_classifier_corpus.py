@@ -11,6 +11,7 @@ FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures"
 CORPORA = [
     FIXTURES / "realistic_medical_documents.json",
     FIXTURES / "public_anonymized_examples.json",
+    FIXTURES / "adversarial_medical_documents.json",
 ]
 
 
