@@ -135,8 +135,22 @@ def create_family(name:str=Form(...),uid:int=Depends(current_user)):
     return home_url(fid)
 
 @app.post("/families/{fid}/patients")
-def add_patient(fid:int,name:str=Form(...),uid:int=Depends(current_user)):
-    family(fid,uid); db.add_patient(fid,name); return home_url(fid)
+def add_patient(fid:int,name:str=Form(...),birth_date:str=Form(""),aliases:str=Form(""),uid:int=Depends(current_user)):
+    family(fid,uid)
+    from datetime import datetime
+    birth_date=(birth_date or "").strip()
+    if birth_date:
+        try: birth_date=datetime.strptime(birth_date,"%Y-%m-%d").strftime("%d-%m-%Y")
+        except ValueError: raise HTTPException(400,"Проверьте дату рождения")
+    alias_list=[x.strip() for x in (aliases or "").replace(";",",").split(",") if x.strip()]
+    db.add_patient(fid,name,aliases=alias_list,birth_date=birth_date or None)
+    return home_url(fid)
+
+@app.get("/families/{fid}/patients/new",response_class=HTMLResponse)
+def new_patient_page(fid:int,uid:int=Depends(current_user)):
+    family(fid,uid)
+    body=('<p><a href="/?family_id='+str(fid)+'">← В архив</a></p><h2>Новый пациент</h2><form class="card" method="post" action="/families/'+str(fid)+'/patients"><label>Полное ФИО<br><input name="name" required maxlength="100" placeholder="Иванов Александр Сергеевич"></label><br><label>Дата рождения<br><input type="date" name="birth_date"></label><br><label>Другие варианты имени (через запятую)<br><input name="aliases" maxlength="500" placeholder="Саша, Александр"></label><p class="muted">Дата рождения помогает сверять документы, но не является единственным подтверждением личности.</p><button type="submit">Создать карточку</button></form>')
+    return page("Новый пациент",body)
 
 @app.get("/families/{fid}/patients/{patient}",response_class=HTMLResponse)
 def patient_page(fid:int,patient:str,q:str="",uid:int=Depends(current_user)):
