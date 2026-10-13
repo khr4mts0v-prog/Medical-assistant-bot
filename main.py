@@ -12,6 +12,7 @@ from ocr import ocr_file
 from AIAnalise import analyze_document, extract_keywords, answer_question, DOCUMENT_TYPE_RULES, DOCUMENT_CATEGORIES, DOCUMENT_CATEGORY_ORDER, DOCUMENT_TAXONOMY
 from utils import format_filename, parse_date_from_text, normalize_extension, safe_name
 from document_metadata import extract_document_date, extract_registered_patient, infer_document_title, format_archive_filename
+from upload_recovery import cleanup_unqueued_upload
 
 TOKEN=os.getenv("BOT_TOKEN","").strip()
 HF_TOKEN=os.getenv("HF_API_TOKEN","").strip()
@@ -690,12 +691,7 @@ async def _process_file(u, c, path, name):
             return
         await _advance_pending(u, c)
     except Exception as exc:
-        if not queued:
-            try:
-                staged.unlink(missing_ok=True)
-                (root / (item_id + ".pending")).unlink(missing_ok=True)
-            except OSError:
-                pass
+        cleanup_unqueued_upload(staged, root / (item_id + ".pending"), queued)
         logging.exception("Document processing failed")
         if queued:
             await say(u, f"Документ уже помещён в зашифрованную очередь, но обработка прервалась ({type(exc).__name__}). Файл сохранён для повтора. Напишите /retry_save; повторно отправлять документ не нужно.")
