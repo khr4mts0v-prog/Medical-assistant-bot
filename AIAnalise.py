@@ -249,6 +249,18 @@ def _classify_segment(text):
             scores.pop(label, None)
             evidence.pop(label, None)
 
+    # Instructions that mention an existing prescription are not prescriptions.
+    prescription_heading = bool(re.search(
+        r"\b(?:рецепт|лист\s+назначени\w*|назначени\w+\s+(?:лекарственн\w+|препарат\w+))\b",
+        header_text))
+    advice_about_existing_meds = bool(re.search(
+        r"\b(?:не\s+отменяйте|не\s+прекращайте|не\s+меняйте|обсудите\s+с\s+врачом)\b.{0,100}\b"
+        r"(?:назначенн\w*\s+препарат\w*|лекарств\w*|препарат\w*)",
+        normalized))
+    if advice_about_existing_meds and not prescription_heading:
+        scores.pop("назначение или рецепт", None)
+        evidence.pop("назначение или рецепт", None)
+
     ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
     if not ranked or ranked[0][1] < 6:
         primary, confidence, document_types, margin = "не определено", "low", [], 0
