@@ -80,7 +80,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
         for x in fs: b.append(f'<option value="{x["id"]}"{" selected" if f and x["id"]==f["id"] else ""}>{html.escape(x["name"])}</option>')
         b.append('</select><button>Открыть</button></form>')
     else: b.append('<p>Архивов пока нет.</p>')
-    b.append('<form method="post" action="/families"><label>Название архива<br><input name="name" required maxlength="80"></label> <button>Создать архив</button></form></div>')
+    b.append('</div>')
     if fs:
         selected_for_actions = f["id"] if f else fs[0]["id"]
         pending_for_actions = len(db.pending_documents(selected_for_actions))
@@ -115,7 +115,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
             b.append(f'<div class="card"><h2>Входящие документы</h2><p>Нет документов, ожидающих ручной проверки.</p><a href="/families/{f["id"]}/inbox">Открыть раздел</a></div>')
     if f:
         fid=f["id"]
-        b.append(f'<div class="card" id="family-settings"><h2>Архив: {html.escape(f["name"])}</h2><p>Хранение документов: {"локально на VPS" if STORAGE_BACKEND == "local" else "Яндекс Диск"}</p>')
+        b.append(f'<div class="card" id="patients-section"><h2>Архив: {html.escape(f["name"])}</h2><p>Хранение документов: {"локально на VPS" if STORAGE_BACKEND == "local" else "Яндекс Диск"}</p>')
         if STORAGE_BACKEND == "yandex" and not tenancy.disk_connected(fid):
             b.append(f'<p><a href="/families/{fid}/connect-disk">Подключить Яндекс Диск</a></p>')
         b.append(f'<h2 id="patients">Пациенты</h2><p><a href="/families/{fid}/patients/new">＋ Добавить пациента</a></p>')
@@ -125,6 +125,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
             ep=html.escape(p,quote=True)
             b.append(f'<div class="card"><strong>{html.escape(p)}</strong> · документов: {db.document_count(fid,p)}<form class="row" method="get" action="/families/{fid}/patients/{ep}"><input type="search" name="q" placeholder="Поиск по документам"><button>Искать</button></form><a href="/families/{fid}/patients/{ep}">История документов</a></div>')
         b.append('</div>')
+    b.append('<div class="card" id="family-settings"><h2>Настройки архива</h2><form method="post" action="/families"><label>Название нового семейного архива<br><input name="name" required maxlength="80"></label> <button>Создать архив</button></form></div>')
     b.append('<div class="warn"><strong>Важно:</strong> не загружайте реальные медицинские документы до настройки резервного копирования и полной проверки прав доступа.</div>')
     return page("Главная","".join(b))
 
