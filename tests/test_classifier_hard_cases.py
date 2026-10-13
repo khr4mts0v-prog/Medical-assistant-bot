@@ -152,26 +152,26 @@ class ClassificationHardCasesTests(unittest.TestCase):
 
     def test_heading_with_spacing_and_body_context_still_classifies(self):
         self.assert_primary(
-            "ЗАКЛЮЧЕНИЕ МРТ\\nОчаговых изменений не выявлено.",
+            "ЗАКЛЮЧЕНИЕ МРТ\nОчаговых изменений не выявлено.",
             "заключение МРТ",
         )
 
     def test_split_word_in_heading_is_tolerated(self):
         self.assert_primary(
-            "ЗАКЛЮЧЕ НИЕ МРТ\\nОчаговых изменений не выявлено.",
+            "ЗАКЛЮЧЕ НИЕ МРТ\nОчаговых изменений не выявлено.",
             "заключение МРТ",
         )
 
     def test_latin_cyrillic_lookalikes_in_heading_are_tolerated(self):
         self.assert_primary(
-            "ЗАКЛЮЧЕНИЕ МRТ\\nОчаговых изменений не выявлено.",
+            "ЗАКЛЮЧЕНИЕ МRТ\nОчаговых изменений не выявлено.",
             "заключение МРТ",
         )
 
     def test_typo_support_does_not_change_clinical_values(self):
         result = self.assert_primary(
-            "РЕЗУЛТАТЫ ЛАБОРАТОРНЫХ ИССЛЕДОВАНИЙ\\n"
-            "Гемоглобин 115 г/л\\nФерритин 16 мкг/л",
+            "РЕЗУЛТАТЫ ЛАБОРАТОРНЫХ ИССЛЕДОВАНИЙ\n"
+            "Гемоглобин 115 г/л\nФерритин 16 мкг/л",
             "лабораторный отчёт",
         )
         values = {(item["name"], item["value"]) for item in result["lab_results"]}
