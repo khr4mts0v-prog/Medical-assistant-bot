@@ -12,7 +12,7 @@ from local_storage import save_file as save_local_file
 from ocr import ocr_file
 from AIAnalise import analyze_document, extract_keywords
 from utils import format_filename, normalize_extension, parse_date_from_text, safe_name
-from document_metadata import extract_registered_patient
+from document_metadata import extract_registered_patient, extract_patient_birth_date
 
 app=FastAPI(title="Medical Archive", docs_url=None, redoc_url=None)
 security=HTTPBasic()
@@ -284,6 +284,19 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), uid:
                 text=ocr_file(str(local))
                 analysis=analyze_document(text)
                 patient=extract_registered_patient(text,roster)
+                document_dob=extract_patient_birth_date(text)
+                # A DOB can disambiguate only when it uniquely matches a registered patient.
+                dob_matches=[p for p in roster if document_dob and p.get("birth_date")==document_dob]
+                if len(dob_matches)==1:
+                    dob_patient=dob_matches[0]["name"]
+                    if patient and patient!=dob_patient:
+                        patient=None  # name and DOB conflict: require human review
+                    elif not patient:
+                        patient=dob_patient
+                elif document_dob and patient:
+                    registered=next((p for p in roster if p["name"]==patient),None)
+                    if registered and registered.get("birth_date") and registered["birth_date"]!=document_dob:
+                        patient=None
                 digest=hashlib.sha256(local.read_bytes()).hexdigest()
                 if not patient:
                     pending_id=db.add_pending_doc(family_id,name,digest,local.read_bytes(),text,analysis)
