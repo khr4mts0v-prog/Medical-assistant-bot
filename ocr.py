@@ -11,7 +11,7 @@ def ocr_file(path):
         # Upscale to improve character recognition, but cap dimensions to bound RAM.
         max_dimension = max(image.size)
         target_dimension = min(max_dimension * 2, 3000)
-        if max_dimension and target_dimension > max_dimension:
+        if max_dimension and target_dimension != max_dimension:
             scale = target_dimension / max_dimension
             size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
             image = image.resize(size, Image.Resampling.LANCZOS)
