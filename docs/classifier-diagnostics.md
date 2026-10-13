@@ -36,7 +36,7 @@ python scripts/probe_public_datasets.py --dataset ruclinner
 python scripts/probe_public_datasets.py --dataset all
 \`\`\`
 
-The GitHub Actions workflow **Public dataset diagnostics** can also be started manually from the Actions tab, or runs weekly. It downloads the public data at runtime and prints only aggregate predicted-label counts. It does not commit the source data, create an artifact, or print individual record text/IDs.
+The GitHub Actions workflow **Public dataset diagnostics** can also be started manually from the Actions tab, or runs weekly. By default, the RuClinNER probe checks up to 500 rows per split; pass `--limit-per-split 0` to process every row. It downloads the public data at runtime and prints only aggregate predicted-label counts. It does not commit the source data, create an artifact, or print individual record text/IDs.
 
 Important limitations:
 - RuMedPrimeData contains de-identified visit-level symptoms and anamnesis, not document-form labels. Treat it as a false-positive/abstention probe, not an accuracy benchmark.
