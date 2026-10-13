@@ -20,6 +20,10 @@ class ExplicitDocumentDateTests(unittest.TestCase):
         text = "Осмотр от 07/09/2025"
         self.assertEqual(webapp.explicit_document_date(text), "07-09-2025")
 
+    def test_extracts_explicit_date_with_hyphens(self):
+        text = "Дата документа: 17-03-2025"
+        self.assertEqual(webapp.explicit_document_date(text), "17-03-2025")
+
     def test_invalid_explicit_date_is_ignored(self):
         text = "Дата документа: 31.02.2026"
         self.assertEqual(webapp.explicit_document_date(text), "")
