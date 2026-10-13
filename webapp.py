@@ -401,12 +401,22 @@ def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)
     family(fid,uid)
     d=db.get_pending_doc(fid,pending_id)
     if not d: raise HTTPException(404,"Документ не найден во входящих")
-    patients=db.patients(fid)
+    patients=db.patient_records(fid)
     from AIAnalise import DOCUMENT_TYPE_RULES
     kinds=["не определено"]+sorted(DOCUMENT_TYPE_RULES.keys())
-    patient_options="".join('<option value="'+html.escape(p,quote=True)+'">'+html.escape(p)+'</option>' for p in patients)
-    kind_options="".join('<option value="'+html.escape(k,quote=True)+'"'+(' selected' if k==d["analysis"].get("primary_type") else '')+'>'+html.escape(k)+'</option>' for k in kinds)
-    body=f'<p><a href="/families/{fid}/inbox">← К нераспознанным</a></p><h2>Ручная классификация</h2><div class="card"><strong>Файл:</strong> {html.escape(d["name"])}<details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape(d["text"][:12000])}</pre></details></div>'
+    patient_options="".join('<option value="'+html.escape(p["name"],quote=True)+'">'+html.escape(p["name"])+(' · рожд. '+html.escape(p["birth_date"]) if p.get("birth_date") else '')+'</option>' for p in patients)
+    labels={"лабораторный отчёт":"Анализы","заключение УЗИ":"УЗИ","заключение КТ":"КТ","заключение МРТ":"МРТ","рентгенологическое заключение":"Рентген","направление":"Направление","протокол осмотра или приёма":"Приём врача","консультация специалиста":"Заключение / консультация","выписной эпикриз":"Выписка","выписка из медицинской карты":"Выписка из карты","назначение или рецепт":"Назначение / рецепт","заключение ЭКГ":"ЭКГ","не определено":"Не определено"}
+    kind_options="".join('<option value="'+html.escape(k,quote=True)+'"'+(' selected' if k==d["analysis"].get("primary_type") else '')+'>'+html.escape(labels.get(k,k[:1].upper()+k[1:]))+'</option>' for k in kinds)
+    ext=Path(d["name"]).suffix.lower()
+    preview_url=f"/families/{fid}/inbox/{pending_id}/preview"
+    if ext in {".jpg",".jpeg",".png",".webp",".bmp",".tif",".tiff"}:
+        preview=f'<img class="preview-image" src="{preview_url}" alt="Превью документа">'
+    elif ext==".pdf":
+        preview=f'<p><a href="{preview_url}" target="_blank" rel="noopener">Открыть PDF в новой вкладке ↗</a></p>'
+    else:
+        preview=""
+    body=f'<p><a href="/families/{fid}/inbox">← К входящим</a></p><h2>Классификация документа</h2><div class="card"><strong>Файл:</strong> {html.escape(d["name"])}{preview}<details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape(d["text"][:12000])}</pre></details></div>'
+    body+=f'<p><a href="/families/{fid}/patients/new">＋ Добавить пациента</a></p>'
     body+=f'<form method="post" action="/families/{fid}/inbox/{pending_id}/assign"><label>Пациент<br><select name="patient" required>{patient_options}</select></label><br><label>Тип документа<br><select name="kind" required>{kind_options}</select></label><br><label>Название в архиве<br><input name="title" required maxlength="180" value="{html.escape(str(d["analysis"].get("display_title") or d["analysis"].get("primary_type") or d["name"]),quote=True)}"></label><br><label>Дата документа (ДД-ММ-ГГГГ)<br><input name="date" placeholder="17-03-2025" maxlength="10"></label><p><button type="submit">Сохранить в историю пациента</button></p></form>'
     return page("Ручная классификация",body)
 
