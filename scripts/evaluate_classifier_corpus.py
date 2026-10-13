@@ -12,6 +12,7 @@ CORPORA = [
     FIXTURES / "realistic_medical_documents.json",
     FIXTURES / "public_anonymized_examples.json",
     FIXTURES / "adversarial_medical_documents.json",
+    FIXTURES / "adversarial_medical_documents_round2.json",
 ]
 
 
@@ -50,6 +51,7 @@ def main():
 
     pairs = []
     page_pairs = []
+    mismatches = []
     for filename, item in records:
         result = analyze_document(item["text"])
         expected = item["expected_type"]
@@ -57,12 +59,14 @@ def main():
             predicted = result["primary_type"]
             pairs.append((expected, predicted))
             if expected != predicted:
+                mismatches.append("document mismatch: " + item["id"])
                 print(f"DOCUMENT MISMATCH {item['id']} [{filename}]: expected={expected!r}, predicted={predicted!r}")
         for page_number, page_type in item.get("expected_page_types", {}).items():
             actual = {str(page["page"]): page["primary_type"] for page in result["page_types"]}
             predicted = actual.get(str(page_number), "не определено")
             page_pairs.append((page_type, predicted))
             if page_type != predicted:
+                mismatches.append("page mismatch: " + item["id"])
                 print(f"PAGE MISMATCH {item['id']} page {page_number}: expected={page_type!r}, predicted={predicted!r}")
 
     print(f"Loaded {len(records)} documents:")
@@ -73,6 +77,12 @@ def main():
     if page_pairs:
         print("\n=== Page-level evaluation ===")
         print_metrics(page_pairs)
+    if len(pairs) < 40:
+        mismatches.append("corpus has fewer than 40 document examples")
+    if mismatches:
+        print("\nREGRESSION GATE FAILED: " + str(len(mismatches)) + " issue(s)")
+        raise SystemExit(1)
+    print("\nREGRESSION GATE PASSED")
 
 
 if __name__ == "__main__":
