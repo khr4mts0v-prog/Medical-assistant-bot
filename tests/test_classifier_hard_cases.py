@@ -120,5 +120,42 @@ class ClassificationHardCasesTests(unittest.TestCase):
         )
 
 
+    def test_missing_character_in_mri_heading_is_tolerated(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИ МРТ\n"
+            "Магнитно-резонансная томография головного мозга. "
+            "Очаговых изменений не выявлено.",
+            "заключение МРТ",
+        )
+
+    def test_missing_character_in_lab_heading_is_tolerated(self):
+        self.assert_primary(
+            "РЕЗУЛТАТЫ ЛАБОРАТОРНЫХ ИССЛЕДОВАНИЙ\n"
+            "Показатель: 12,4; референсный интервал: 4,0–15,0.",
+            "лабораторный отчёт",
+        )
+
+    def test_inserted_character_in_consultation_heading_is_tolerated(self):
+        self.assert_primary(
+            "КОНСУЛЬТАЦИЯ ВРАЧА-НЕВРОЛОГАА\n"
+            "Жалобы: головная боль. Заключение специалиста прилагается.",
+            "консультация специалиста",
+        )
+
+    def test_typo_tolerance_does_not_search_entire_body_for_headings(self):
+        self.assert_primary(
+            "ПАМЯТКА ДЛЯ ПАЦИЕНТА\n"
+            "При необходимости обсудите с врачом заключени МРТ и результаты обследования.",
+            "не определено",
+        )
+
+    def test_clean_heading_still_classifies_after_typo_support_added(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ МРТ\n"
+            "Очаговых изменений вещества головного мозга не выявлено.",
+            "заключение МРТ",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
