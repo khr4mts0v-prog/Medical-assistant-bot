@@ -46,7 +46,7 @@ def summarize(name, texts):
         print(f"  {label}: {count}", flush=True)
 
 
-def probe_rumedprime():
+def probe_rumedprime(limit_records):
     print("Downloading RuMedPrimeData from Zenodo (temporary in-memory processing)...", flush=True)
     response = requests.get(RUMEDPRIME_URL, timeout=(15, 120))
     response.raise_for_status()
@@ -64,6 +64,8 @@ def probe_rumedprime():
                 raise RuntimeError("Expected symptoms/anamnesis fields in the public TSV")
             for row in reader:
                 texts.append("\n".join(str(row.get(field, "") or "") for field in clinical_fields))
+                if limit_records and len(texts) >= limit_records:
+                    break
                 if limit_records and len(texts) >= limit_records:
                     break
     print(f"RuMedPrimeData: collected {len(texts)} records; limit={limit_records or 'all'}", flush=True)
