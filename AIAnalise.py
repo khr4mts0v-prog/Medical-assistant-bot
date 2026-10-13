@@ -4,6 +4,7 @@ Extracted values/snippets are search aids only, never clinical conclusions.
 """
 import os
 import re
+from difflib import SequenceMatcher
 import requests
 
 CLASSIFICATION_VERSION = "2.0"
@@ -50,7 +51,12 @@ DOCUMENT_TYPE_RULES = {
     "заключение МРТ": [
         (r"\b(?:заключение|протокол)\w*\s+(?:мрт|магнитно[- ]резонансн\w+\s+томографи\w*)", 10, "заголовок МРТ"),
         (r"\bмагнитно[- ]резонансн\w+\s+томографи\w*", 9, "магнитно-резонансная томография"),
-        (r"\bмрт\b", 8, "маркер МРТ"),
+        (r"\bмрт\b", 3, "слабый маркер МРТ"),
+    ],
+    "заключение функциональной диагностики": [
+        (r"\b(?:заключение|протокол|результат\w*|результаты)\s+(?:ээг|электроэнцефалограмм\w*|эхокг|эхокардиографи\w*|холтеровск\w+\s+мониторировани\w*|суточн\w+\s+мониторировани\w*|спирометр\w*|спирографи\w*)", 10, "заголовок функционального исследования"),
+        (r"\b(?:электроэнцефалограмм\w*|эхокардиографи\w*|холтеровск\w+\s+мониторировани\w*|спирометр\w*|спирографи\w*)\b", 9, "метод функциональной диагностики"),
+        (r"\b(?:ээг|эхокг)\b", 8, "сокращение функционального исследования"),
     ],
     "консультация специалиста": [
         (r"\bконсультаци\w+\s+(?:врач\w+|невролог\w*|кардиолог\w*|педиатр\w*|терапевт\w*|офтальмолог\w*|эндокринолог\w*|хирург\w*|ортопед\w*|гинеколог\w*|уролог\w*|логопед\w*)", 9, "заголовок консультации специалиста"),
@@ -101,6 +107,8 @@ DOCUMENT_TYPE_RULES = {
     ],
     "направление": [
         (r"\bнаправлени\w+\s+(?:на|к)\s+(?:исследовани\w*|консультаци\w*|госпитализаци\w*|при[её]м\w*|рентген\w*|узи\b|мрт\b|кт\b)", 10, "направление на исследование/консультацию"),
+        (r"\bнаправлени\w+\s+на\s+медицинск\w+\s+обследовани\w*", 11, "направление на медицинское обследование"),
+        (r"\bнаправлени\w+\s+на\s+диагностическ\w+\s+исследовани\w*", 11, "направление на диагностическое исследование"),
         (r"\bмедицинск\w+\s+направлени\w*", 10, "медицинское направление"),
         (r"\bнаправление\s+на\s+анализ\w*", 9, "направление на анализы"),
     ],
@@ -111,7 +119,7 @@ DOCUMENT_TYPE_RULES = {
     ],
     "медицинская карта или наблюдение": [
         (r"\bмедицинск\w+\s+карт\w*\b", 9, "медицинская карта"),
-        (r"\bдневник\s+(?:наблюдени\w*|пациент\w*)\b", 8, "дневник наблюдения"),
+        (r"\bдневник\s+(?:наблюдени\w*|пациент\w*|динамическ\w+\s+наблюдени\w*)\b", 8, "дневник наблюдения или динамического наблюдения"),
         (r"\bлист\s+динамическ\w+\s+наблюдени\w*", 8, "лист динамического наблюдения"),
     ],
 }
@@ -176,26 +184,263 @@ def _score_types(text):
     return scores, evidence
 
 
+# Conservative typo tolerance applies only to the opening lines, where form
+# headings usually live. It must not "correct" clinical values or body text.
+FUZZY_HEADER_ANCHORS = {
+    "выписной эпикриз": ("выписной эпикриз", "выписка из стационара"),
+    "лабораторный отчёт": ("результаты лабораторных исследований", "общий анализ крови",
+                           "общий анализ мочи", "биохимический анализ"),
+    "заключение УЗИ": ("заключение узи", "протокол узи", "протокол ультразвукового исследования"),
+    "заключение ЭКГ": ("заключение экг", "протокол экг", "электрокардиограмма"),
+    "рентгенологическое заключение": ("заключение рентгена", "протокол рентгена",
+                                      "рентгенологическое исследование"),
+    "заключение КТ": ("заключение кт", "протокол кт", "компьютерная томография"),
+    "заключение МРТ": ("заключение мрт", "протокол мрт", "магнитно-резонансная томография"),
+    "заключение функциональной диагностики": (
+        "заключение ээг", "протокол ээг", "заключение эхокг",
+        "протокол эхокг", "заключение спирометрии",
+    ),
+    "консультация специалиста": ("консультация врача", "консультация невролога",
+                                  "консультация педиатра", "заключение специалиста"),
+    "назначение или рецепт": ("лист назначений", "рецептурный бланк", "схема лечения"),
+    "медицинская справка": ("медицинская справка",),
+    "вакцинальный документ": ("прививочная карта", "сертификат вакцинации"),
+    "операционный протокол": ("операционный протокол", "протокол операции"),
+    "эндоскопическое заключение": ("заключение эндоскопии", "протокол эндоскопии",
+                                   "протокол гастроскопии", "протокол колоноскопии"),
+    "патоморфологическое заключение": ("патоморфологическое заключение",
+                                       "гистологическое заключение"),
+    "направление": ("медицинское направление", "направление на обследование",
+                    "направление на исследование"),
+    "протокол осмотра или приёма": ("протокол осмотра", "протокол приёма",
+                                    "первичный приём врача"),
+}
+
+
+def _fuzzy_header_matches(text):
+    header = _normalize((text or "").splitlines()[0] if (text or "").splitlines() else "")
+    if not header:
+        return []
+    # OCR/keyboarding can mix visually identical Latin and Cyrillic glyphs.
+    # Apply this only to heading comparison; never mutate source text or values.
+    confusables = str.maketrans({
+        "a": "а", "c": "с", "e": "е", "o": "о", "p": "р",
+        "x": "х", "y": "у", "k": "к", "m": "м", "r": "р", "t": "т",
+        "b": "в", "h": "н",
+    })
+    header = header.translate(confusables)
+
+    # Strong, modality-anchored recovery: tolerate OCR damage in "заключение"
+    # or "протокол" only when a modality token occurs in the same short heading.
+    # This avoids confusing "направление на МРТ" with an MRI report.
+    modality_headers = (
+        ("заключение УЗИ", r"\bузи\b"),
+        ("заключение ЭКГ", r"\bэкг\b"),
+        ("рентгенологическое заключение", r"\bрентген\w*\b"),
+        ("заключение КТ", r"\bкт\b"),
+        ("заключение МРТ", r"\bмрт\b"),
+        ("эндоскопическое заключение", r"\b(?:фгдс|гастроскопи\w*|колоноскопи\w*|эндоскопи\w*)\b"),
+    )
+    for label, modality_pattern in modality_headers:
+        modality = re.search(modality_pattern, header)
+        if not modality:
+            continue
+        prefix = re.sub(r"[^а-я]", "", header[:modality.start()])
+        for marker in ("заключение", "протокол"):
+            # Prefix length is bounded so "заключение врача ... МРТ" cannot
+            # accidentally masquerade as a radiology-report heading.
+            if len(marker) - 2 <= len(prefix) <= len(marker) + 2:
+                similarity = SequenceMatcher(None, prefix, marker).ratio()
+                if similarity >= 0.80:
+                    return [(label, similarity)]
+    # OCR can split a word with an accidental space. Generate a second,
+    # conservative comparison form only for the heading matcher.
+    compact_header = re.sub(r"(?<=[а-я])\s+(?=[а-я])", "", header)
+    # Compare contiguous 1-5 word spans, not arbitrary body text. A minimum
+    # length and high threshold reduce accidental matches on short abbreviations.
+    words = re.findall(r"[а-яa-z0-9-]+", header)
+    spans = []
+    for start in range(len(words)):
+        for width in range(1, min(5, len(words) - start) + 1):
+            span = " ".join(words[start:start + width])
+            if len(span.replace(" ", "")) >= 9:
+                spans.append(span)
+    compact_words = re.findall(r"[а-яa-z0-9-]+", compact_header)
+    for start in range(len(compact_words)):
+        for width in range(1, min(5, len(compact_words) - start) + 1):
+            span = " ".join(compact_words[start:start + width])
+            if len(span.replace(" ", "")) >= 9:
+                spans.append(span)
+    matches = []
+    for label, anchors in FUZZY_HEADER_ANCHORS.items():
+        normalized_anchors = [_normalize(anchor).translate(confusables) for anchor in anchors]
+        best = max((SequenceMatcher(None, span, anchor).ratio()
+                    for span in spans for anchor in normalized_anchors), default=0)
+        if best >= 0.88:
+            matches.append((label, best))
+    # Similar long headings can make a shorter label look almost as close
+    # (e.g. "заключение МРТ" vs "заключение КТ"). Keep only a clear winner;
+    # ambiguous fuzzy matches must abstain rather than add both document types.
+    matches.sort(key=lambda item: item[1], reverse=True)
+    if len(matches) > 1 and matches[0][1] - matches[1][1] < 0.05:
+        return []
+    return matches[:1]
+
+
 def _classify_segment(text):
     scores, evidence = _score_types(text)
     normalized = _normalize(text)
 
-    # A modality mentioned as a recommendation/referral is not itself a report.
-    # Without report-form evidence, avoid classifying "get an MRI/US" as a result.
-    mention_context = bool(re.search(
-        r"\b(?:рекомендован\w*|рекомендовал\w*|направлен\w*|направление|"
+    # Fuzzy OCR matching is a fallback. Do not add a competing imaging type
+    # when the opening lines already contain a clear exact imaging heading.
+    exact_header_text = _normalize("\n".join((text or "").splitlines()[:2]))
+    exact_header_scores, _ = _score_types(exact_header_text)
+    imaging_labels = (
+        "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
+        "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
+    )
+    exact_imaging_heading = any(exact_header_scores.get(label, 0) >= 9 for label in imaging_labels)
+    for label, similarity in _fuzzy_header_matches(text):
+        if similarity >= 0.88 and not (exact_imaging_heading and label in imaging_labels
+                                       and exact_header_scores.get(label, 0) < 9):
+            scores[label] = max(scores.get(label, 0), 10)
+            evidence.setdefault(label, []).append({
+                "weight": 10,
+                "reason": f"приближённое совпадение заголовка ({similarity:.2f})",
+            })
+
+    # Classify the document's form, not every medical topic mentioned in its body.
+    # In particular, a requested future investigation is not its resulting report.
+    referral_context = bool(re.search(
+        r"\b(?:направлени\w*\s+(?:на|к)\b|направляется\s+на\b|"
+        r"просим\s+(?:выполнить|провести)\b|цель\s+направлени\w*|"
+        r"для\s+прохождения\s+(?:узи|мрт|кт|рентген\w*))", normalized))
+    future_test_context = bool(re.search(
+        r"\b(?:рекомендован\w*|рекомендовал\w*|направлен\w*|"
         r"выполнить|пройти|записаться|при\s+необходимости|планируется|"
-        r"назначено\s+(?:провести|выполнить))\b", normalized))
-    report_context = bool(re.search(
-        r"\b(?:протокол\w*|заключение\w*|результат\w*|описание\w*|"
-        r"проведено|выполнено|данные\s+исследования|ход\s+исследования)\b", normalized))
-    if mention_context and not report_context:
+        r"просим\s+(?:выполнить|провести)|назначено\s+(?:провести|выполнить))\b",
+        normalized))
+    # "Просим выдать протокол" in a referral is not evidence that a protocol exists.
+    report_heading = bool(re.search(
+        r"\b(?:заключение|протокол)\s+(?:узи|ультразвуков\w+\s+исследовани\w*|"
+        r"экг|электрокардиограмм\w*|мрт|магнитно[- ]резонансн\w+\s+томографи\w*|"
+        r"кт|компьютерн\w+\s+томографи\w*|рентген\w*|рентгенографи\w*|"
+        r"гастроскопи\w*|колоноскопи\w*|эндоскопи\w*)\b",
+        exact_header_text))
+    fuzzy_imaging_heading = any(
+        label in (
+            "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
+            "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
+        )
+        for label, _ in _fuzzy_header_matches(text)
+    )
+    standalone_imaging_title = (
+        len((text or "").splitlines()) == 1
+        and bool(re.fullmatch(
+            r"\s*(?:узи|мрт|кт|экг)\s+[\w-]+(?:\s+[\w-]+){0,5}\s*",
+            (text or "").strip(), re.IGNORECASE
+        ))
+    )
+    report_content_signal = bool(re.search(
+        r"\b(?:результат\w*\s+исследовани\w*|описание\s+(?:исследовани\w*|снимк\w*)|"
+        r"исследовани\w*\s+(?:выполнено|проведено)|"
+        r"(?:выполнено|проведено)\s+(?:узи|мрт|кт|рентген\w*|исследовани\w*)|"
+        r"заключение\s*:\s*(?:признак\w*|данных\s+за|без\s+особенностей|"
+        r"эхографическ\w*|кт-картин\w*|мр-картин\w*|синусов\w+\s+ритм))",
+        normalized))
+    report_context = report_heading or fuzzy_imaging_heading or standalone_imaging_title or (report_content_signal and not referral_context)
+    imaging_labels = (
+        "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
+        "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
+    )
+    # An explicit modality in the opening lines wins over incidental references
+    # to other modalities in the body.
+    explicit_header_modalities = [
+        label for label in imaging_labels if exact_header_scores.get(label, 0) >= 9
+    ]
+    if explicit_header_modalities:
+        winner = max(explicit_header_modalities, key=lambda label: exact_header_scores[label])
+        for label in imaging_labels:
+            if label != winner:
+                scores.pop(label, None)
+                evidence.pop(label, None)
+    elif not report_context and not any(score >= 9 for score in exact_header_scores.values()):
+        # Bare lists of medical terms are not imaging reports; abstain unless
+        # there is a report heading, result-like context, or strong exact title.
+        for label in imaging_labels:
+            scores.pop(label, None)
+            evidence.pop(label, None)
+    if referral_context and not report_context:
+        scores["направление"] = max(scores.get("направление", 0), 12)
+        evidence.setdefault("направление", []).append(
+            {"weight": 12, "reason": "контекст направления на будущее исследование"})
+    if future_test_context and not report_context:
         for label in (
             "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
             "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
         ):
             scores.pop(label, None)
             evidence.pop(label, None)
+
+    # A planned lab test in the plan section must not turn a visit note into a lab report.
+    visit_heading = bool(re.search(
+        r"\b(?:протокол\s+)?(?:первичн\w*|повторн\w*)\s+при[её]м\w*|"
+        r"протокол\s+осмотра|амбулаторн\w+\s+при[её]м", normalized))
+    # Only the document's opening lines can establish its form. A test listed
+    # later in a visit plan is not a laboratory result document.
+    header_text = _normalize("\n".join((text or "").splitlines()[:2]))
+    lab_report_heading = bool(re.search(
+        r"\b(?:общ\w+\s+анализ\w*\s+(?:крови|мочи)|"
+        r"биохимическ\w+\s+анализ|результат\w*\s+лабораторн\w+\s+исследовани\w*)\b",
+        header_text))
+    if visit_heading and not lab_report_heading:
+        scores.pop("лабораторный отчёт", None)
+        evidence.pop("лабораторный отчёт", None)
+
+    # A planned or explicitly absent histology result is not a pathology report.
+    # Keep a genuine pathology-report heading authoritative, but do not let a
+    # consultation mention of a missing future/past result win by keyword score.
+    pathology_report_heading = bool(re.search(
+        r"\b(?:патоморфологическ\w+\s+заключени\w*|гистологическ\w+\s+заключени\w*|"
+        r"цитологическ\w+\s+заключени\w*)\b",
+        header_text))
+    pathology_result_absent = bool(re.search(
+        r"(?:результат\w*\s+гистологическ\w+\s+исследовани\w*|"
+        r"гистологическ\w+\s+результат\w*|результат\w*\s+биопси\w*)"
+        r".{0,100}\b(?:отсутств\w*|не\s+(?:получен\w*|готов\w*|выполнен\w*|провед\w*)|"
+        r"ожидает\w*|ожидается|будет\s+(?:выполнен\w*|готов\w*|получен\w*))\b",
+        normalized))
+    if pathology_result_absent and not pathology_report_heading:
+        scores.pop("патоморфологическое заключение", None)
+        evidence.pop("патоморфологическое заключение", None)
+
+    # A document-type mention explicitly negated in a disclaimer is not evidence
+    # that the current file belongs to that type.
+    negative_type_patterns = {
+        "выписной эпикриз": r"не\s+(?:(?:является|содержит|представляет)\b.{0,200}\b)?(?:выписн\w*\s+эпикриз|эпикриз)\b",
+        "медицинская справка": r"не\s+(?:(?:является|содержит|представляет)\b.{0,200}\b)?медицинск\w*\s+справк",
+        "направление": r"не\s+(?:(?:является|содержит|представляет)\b.{0,200}\b)?направлени\w*",
+        "заключение УЗИ": r"не\s+(?:(?:является|содержит|представляет)\b.{0,200}\b)?(?:заключени\w*|протокол\w*)\s+(?:узи|ультразвуков\w*)",
+        "заключение МРТ": r"не\s+(?:(?:является|содержит|представляет)\b.{0,200}\b)?(?:заключени\w*|протокол\w*)\s+(?:мрт|магнитно[- ]резонансн\w*)",
+                "назначение или рецепт": r"\bне\s+(?:(?:является|содержит|представляет|оформля\w*|составля\w*|выдава\w*)\b.{0,160}\b)?(?:рецепт\w*|лист\s+назначени\w*|назначени\w+\s+(?:лекарственн\w+|препарат\w*))\b",
+"лабораторный отчёт": r"\bне\s+(?:(?:является|содержит|представляет|оформля\w*|составля\w*)\b.{0,200}\b)?(?:лабораторн\w+\s+отч[её]т|(?:отдельн\w+\s+)?результат\w*\s+(?:анализ\w*|лабораторн\w+\s+исследовани\w*))",
+    }
+    for label, pattern in negative_type_patterns.items():
+        if re.search(pattern, normalized):
+            scores.pop(label, None)
+            evidence.pop(label, None)
+
+    # Instructions that mention an existing prescription are not prescriptions.
+    prescription_heading = bool(re.search(
+        r"\b(?:рецепт|лист\s+назначени\w*|назначени\w+\s+(?:лекарственн\w+|препарат\w+))\b",
+        header_text))
+    advice_about_existing_meds = bool(re.search(
+        r"\b(?:не\s+отменяйте|не\s+прекращайте|не\s+меняйте|не\s+изменяйте|обсудите\s+с\s+врачом)\b.{0,100}\b"
+        r"(?:назначенн\w*\s+препарат\w*|лекарств\w*|препарат\w*)",
+        normalized))
+    if advice_about_existing_meds and not prescription_heading:
+        scores.pop("назначение или рецепт", None)
+        evidence.pop("назначение или рецепт", None)
 
     ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
     if not ranked or ranked[0][1] < 6:

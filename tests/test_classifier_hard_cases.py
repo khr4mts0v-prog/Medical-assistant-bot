@@ -70,5 +70,248 @@ class ClassificationHardCasesTests(unittest.TestCase):
         self.assertNotIn("заключение УЗИ", page_map[2]["document_types"])
 
 
+    def test_referral_requests_ultrasound_protocol_but_has_no_result(self):
+        self.assert_primary(
+            "НАПРАВЛЕНИЕ НА МЕДИЦИНСКОЕ ОБСЛЕДОВАНИЕ\n"
+            "Вид обследования: ультразвуковое исследование органов брюшной полости.\n"
+            "Просим выполнить исследование и выдать протокол с описанием и заключением.\n"
+            "Результаты обследования в настоящем документе отсутствуют.",
+            "направление",
+        )
+
+    def test_visit_note_with_planned_cbc_is_not_lab_report(self):
+        self.assert_primary(
+            "ПРОТОКОЛ ПЕРВИЧНОГО ПРИЁМА ВРАЧА-ТЕРАПЕВТА\n"
+            "Жалобы: утомляемость. Объективно: температура 36,6.\n"
+            "План: общий анализ крови; повторная консультация после получения результатов.",
+            "протокол осмотра или приёма",
+        )
+
+    def test_disclaimer_negation_does_not_make_certificate(self):
+        self.assert_primary(
+            "ПАМЯТКА ДЛЯ ПАЦИЕНТА\n"
+            "При необходимости можно записаться на УЗИ или обсудить МРТ.\n"
+            "Данная памятка не является направлением, протоколом исследования, "
+            "заключением врача или медицинской справкой.",
+            "не определено",
+        )
+
+    def test_actual_ultrasound_report_still_classifies_as_report(self):
+        self.assert_primary(
+            "ПРОТОКОЛ УЛЬТРАЗВУКОВОГО ИССЛЕДОВАНИЯ\n"
+            "Исследование выполнено. Печень без особенностей.\n"
+            "Заключение: эхографических признаков патологии не выявлено.",
+            "заключение УЗИ",
+        )
+
+    def test_referral_to_mri_not_report_despite_requested_protocol(self):
+        result = self.assert_primary(
+            "МЕДИЦИНСКОЕ НАПРАВЛЕНИЕ на МРТ головного мозга. "
+            "Просим провести исследование и направить протокол лечащему врачу.",
+            "направление",
+        )
+        self.assertNotIn("заключение МРТ", result["document_types"])
+
+    def test_negative_mentions_of_document_types_do_not_win(self):
+        self.assert_primary(
+            "ПАМЯТКА. Это не выписной эпикриз и не медицинская справка. "
+            "Документ не содержит результатов обследования.",
+            "не определено",
+        )
+
+
+    def test_missing_character_in_mri_heading_is_tolerated(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИ МРТ\n"
+            "Магнитно-резонансная томография головного мозга. "
+            "Очаговых изменений не выявлено.",
+            "заключение МРТ",
+        )
+
+    def test_missing_character_in_lab_heading_is_tolerated(self):
+        self.assert_primary(
+            "РЕЗУЛТАТЫ ЛАБОРАТОРНЫХ ИССЛЕДОВАНИЙ\n"
+            "Показатель: 12,4; референсный интервал: 4,0–15,0.",
+            "лабораторный отчёт",
+        )
+
+    def test_inserted_character_in_consultation_heading_is_tolerated(self):
+        self.assert_primary(
+            "КОНСУЛЬТАЦИЯ ВРАЧА-НЕВРОЛОГАА\n"
+            "Жалобы: головная боль. Заключение специалиста прилагается.",
+            "консультация специалиста",
+        )
+
+    def test_typo_tolerance_does_not_search_entire_body_for_headings(self):
+        self.assert_primary(
+            "ПАМЯТКА ДЛЯ ПАЦИЕНТА\n"
+            "При необходимости обсудите с врачом заключени МРТ и результаты обследования.",
+            "не определено",
+        )
+
+
+    def test_heading_with_spacing_and_body_context_still_classifies(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ МРТ\nОчаговых изменений не выявлено.",
+            "заключение МРТ",
+        )
+
+    def test_split_word_in_heading_is_tolerated(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕ НИЕ МРТ\nОчаговых изменений не выявлено.",
+            "заключение МРТ",
+        )
+
+    def test_latin_cyrillic_lookalikes_in_heading_are_tolerated(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ МRТ\nОчаговых изменений не выявлено.",
+            "заключение МРТ",
+        )
+
+    def test_typo_support_does_not_change_clinical_values(self):
+        result = self.assert_primary(
+            "РЕЗУЛТАТЫ ЛАБОРАТОРНЫХ ИССЛЕДОВАНИЙ\n"
+            "Гемоглобин 115 г/л\nФерритин 16 мкг/л",
+            "лабораторный отчёт",
+        )
+        values = {(item["name"], item["value"]) for item in result["lab_results"]}
+        self.assertIn(("гемоглобин", "115"), values)
+        self.assertIn(("ферритин", "16"), values)
+
+    def test_fuzzy_heading_does_not_classify_short_ambiguous_text(self):
+        self.assert_primary("МРТ", "не определено")
+
+    def test_clean_heading_still_classifies_after_typo_support_added(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ МРТ\n"
+            "Очаговых изменений вещества головного мозга не выявлено.",
+            "заключение МРТ",
+        )
+
+
+
+    # Additional adversarial cases: document intent, not isolated medical keywords.
+
+    def test_mri_report_is_not_confused_with_ct_report(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ МРТ\n"
+            "Магнитно-резонансная томография поясничного отдела. "
+            "Протрузий не выявлено.",
+            "заключение МРТ",
+        )
+
+    def test_ct_report_is_not_confused_with_mri_report(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ КТ\n"
+            "Компьютерная томография органов грудной клетки. "
+            "Очаговых изменений не выявлено.",
+            "заключение КТ",
+        )
+
+    def test_xray_report_is_not_confused_with_ct_report(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ РЕНТГЕНОЛОГИЧЕСКОГО ИССЛЕДОВАНИЯ\n"
+            "Рентгенография органов грудной клетки. Очаговых изменений не выявлено.",
+            "рентгенологическое заключение",
+        )
+
+    def test_vaccination_history_mention_is_not_vaccination_record(self):
+        self.assert_primary(
+            "ПРОТОКОЛ ПРИЁМА ПЕДИАТРА\n"
+            "Со слов родителей, прививки выполнены по возрасту. "
+            "Представлена медицинская карта ребёнка.",
+            "протокол осмотра или приёма",
+        )
+
+    def test_medical_certificate_is_not_a_doctors_consultation(self):
+        self.assert_primary(
+            "МЕДИЦИНСКАЯ СПРАВКА\n"
+            "Выдана для предъявления по месту учёбы. "
+            "Подробности обращения в настоящей копии не приводятся.",
+            "медицинская справка",
+        )
+
+    def test_medication_list_is_not_a_discharge_summary_without_discharge_context(self):
+        self.assert_primary(
+            "ЛИСТ НАЗНАЧЕНИЙ\n"
+            "Препарат А — учебная запись; дозировка определяется врачом. "
+            "Документ не содержит сведений о выписке из стационара.",
+            "назначение или рецепт",
+        )
+
+    def test_biopsy_mentioned_in_consultation_is_not_pathology_result(self):
+        self.assert_primary(
+            "КОНСУЛЬТАЦИЯ ВРАЧА-ХИРУРГА\n"
+            "Обсуждена необходимость биопсии. Результат гистологического "
+            "исследования на дату приёма отсутствует.",
+            "консультация специалиста",
+        )
+
+    def test_pregnancy_topic_does_not_override_explicit_visit_protocol(self):
+        self.assert_primary(
+            "ПРОТОКОЛ ПРИЁМА ВРАЧА-АКУШЕРА-ГИНЕКОЛОГА\n"
+            "Беременность 12 недель. Жалобы и объективные данные внесены "
+            "в карту амбулаторного пациента.",
+            "протокол осмотра или приёма",
+        )
+
+    def test_bare_medical_values_without_report_heading_abstain(self):
+        self.assert_primary(
+            "Гемоглобин 121 г/л; ферритин 24 мкг/л; глюкоза 5,0 ммоль/л.",
+            "не определено",
+        )
+
+    def test_generic_diagnosis_and_treatment_words_do_not_create_document_type(self):
+        self.assert_primary(
+            "Краткая заметка семьи: диагноз обсудить с врачом, "
+            "назначения уточнить на следующем приёме.",
+            "не определено",
+        )
+
+
+    def test_future_mri_protocol_in_referral_is_not_a_report(self):
+        self.assert_primary(
+            "НАПРАВЛЕНИЕ НА МРТ ГОЛОВНОГО МОЗГА\n"
+            "Просим провести исследование и направить протокол лечащему врачу.\n"
+            "Описание снимков и заключение будут сформированы после обследования.\n"
+            "Результаты КТ и рентгена здесь не приводятся.",
+            "направление",
+        )
+
+    def test_mentioned_but_absent_lab_result_does_not_override_observation_diary(self):
+        self.assert_primary(
+            "ДНЕВНИК ДИНАМИЧЕСКОГО НАБЛЮДЕНИЯ\n"
+            "Запись от 09.10.2026. Состояние описано в динамике.\n"
+            "Это не отдельный результат лабораторного исследования.",
+            "медицинская карта или наблюдение",
+        )
+
+    def test_prescription_mentioned_as_not_issued_does_not_override_consultation(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ ВРАЧА-ОФТАЛЬМОЛОГА\n"
+            "Осмотр выполнен; рекомендации указаны в конце записи.\n"
+            "В тексте не оформлялись направление, рецепт или заключение диагностического аппарата.",
+            "консультация специалиста",
+        )
+
+    def test_advice_not_to_change_existing_medication_is_not_a_prescription(self):
+        self.assert_primary(
+            "ПАМЯТКА ПО БЕЗОПАСНОМУ ПРИЁМУ ЛЕКАРСТВ\n"
+            "Не изменяйте дозу ранее назначенного препарата без согласования с врачом.\n"
+            "Этот текст не является рецептом или листом назначений.",
+            "не определено",
+        )
+
+
+    def test_referral_with_full_modality_name_and_future_description_is_not_report(self):
+        self.assert_primary(
+            "НАПРАВЛЕНИЕ НА МРТ ГОЛОВНОГО МОЗГА\n"
+            "Пациент направляется на магнитно-резонансную томографию по плановому показанию.\n"
+            "Просим провести исследование и направить протокол лечащему врачу.\n"
+            "Описание снимков и заключение будут сформированы после обследования.",
+            "направление",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

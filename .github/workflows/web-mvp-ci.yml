@@ -18,3 +18,5 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m compileall -q .
       - run: python -m unittest discover -s tests -v
+      - name: Evaluate classifier corpus
+        run: python scripts/evaluate_classifier_corpus.py
