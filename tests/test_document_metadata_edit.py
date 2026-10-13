@@ -53,7 +53,7 @@ class DocumentMetadataEditTests(unittest.TestCase):
         self.assertEqual(doc["ocr_remote"],"/tmp/ocr.txt")
 
     def test_update_is_scoped_to_family_and_document(self):
-        self.assertFalse(db.update_doc_metadata(self.fid+999,self.doc_id,"заключение УЗИ","17-03-2025",{}))
+        self.assertFalse(self.db.update_doc_metadata(self.fid+999,self.doc_id,"заключение УЗИ","17-03-2025",{}))
         self.assertFalse(db.update_doc_metadata(self.fid,self.doc_id+999,"заключение УЗИ","17-03-2025",{}))
 
 if __name__ == "__main__":
