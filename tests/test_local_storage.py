@@ -7,6 +7,8 @@ TMP = tempfile.TemporaryDirectory()
 os.environ["LOCAL_STORAGE_PATH"] = os.path.join(TMP.name, "documents")
 
 import local_storage
+# Other test modules may import local_storage before this test sets its isolated path.
+local_storage.DATA_ROOT = Path(os.environ["LOCAL_STORAGE_PATH"]).resolve()
 
 class LocalStorageTests(unittest.TestCase):
     def test_files_are_separated_by_family_and_patient(self):
