@@ -14,6 +14,12 @@ class PublicDatasetProbeTests(unittest.TestCase):
         self.assertIn(504, retry.status_forcelist)
         self.assertIn(429, retry.status_forcelist)
 
+    def test_network_timeouts_are_bounded(self):
+        self.assertGreater(probe.CONNECT_TIMEOUT_SECONDS, 0)
+        self.assertLessEqual(probe.CONNECT_TIMEOUT_SECONDS, 15)
+        self.assertGreater(probe.READ_TIMEOUT_SECONDS, 0)
+        self.assertLessEqual(probe.READ_TIMEOUT_SECONDS, 60)
+
     def test_any_selected_source_failure_returns_nonzero(self):
         output = io.StringIO()
         with mock.patch.object(sys, "argv", ["probe_public_datasets.py", "--dataset", "all"]), \
@@ -36,6 +42,8 @@ class PublicDatasetProbeTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertIn("DIAGNOSTIC COMPLETE", output.getvalue())
+        self.assertIn("BEGIN source=RuMedPrimeData", output.getvalue())
+        self.assertIn("BEGIN source=RuClinNER", output.getvalue())
 
 
 if __name__ == "__main__":
