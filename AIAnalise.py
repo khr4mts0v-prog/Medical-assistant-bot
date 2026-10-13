@@ -4,6 +4,7 @@ Extracted values/snippets are search aids only, never clinical conclusions.
 """
 import os
 import re
+from difflib import SequenceMatcher
 import requests
 
 CLASSIFICATION_VERSION = "2.0"
@@ -178,9 +179,68 @@ def _score_types(text):
     return scores, evidence
 
 
+# Conservative typo tolerance applies only to the opening lines, where form
+# headings usually live. It must not "correct" clinical values or body text.
+FUZZY_HEADER_ANCHORS = {
+    "выписной эпикриз": ("выписной эпикриз", "выписка из стационара"),
+    "лабораторный отчёт": ("результаты лабораторных исследований", "общий анализ крови",
+                           "общий анализ мочи", "биохимический анализ"),
+    "заключение УЗИ": ("заключение узи", "протокол узи", "протокол ультразвукового исследования"),
+    "заключение ЭКГ": ("заключение экг", "протокол экг", "электрокардиограмма"),
+    "рентгенологическое заключение": ("заключение рентгена", "протокол рентгена",
+                                      "рентгенологическое исследование"),
+    "заключение КТ": ("заключение кт", "протокол кт", "компьютерная томография"),
+    "заключение МРТ": ("заключение мрт", "протокол мрт", "магнитно-резонансная томография"),
+    "консультация специалиста": ("консультация врача", "консультация невролога",
+                                  "консультация педиатра", "заключение специалиста"),
+    "назначение или рецепт": ("лист назначений", "рецептурный бланк", "схема лечения"),
+    "медицинская справка": ("медицинская справка",),
+    "вакцинальный документ": ("прививочная карта", "сертификат вакцинации"),
+    "операционный протокол": ("операционный протокол", "протокол операции"),
+    "эндоскопическое заключение": ("заключение эндоскопии", "протокол эндоскопии",
+                                   "протокол гастроскопии", "протокол колоноскопии"),
+    "патоморфологическое заключение": ("патоморфологическое заключение",
+                                       "гистологическое заключение"),
+    "направление": ("медицинское направление", "направление на обследование",
+                    "направление на исследование"),
+    "протокол осмотра или приёма": ("протокол осмотра", "протокол приёма",
+                                    "первичный приём врача"),
+}
+
+
+def _fuzzy_header_matches(text):
+    header = _normalize("\\n".join((text or "").splitlines()[:2]))
+    if not header:
+        return []
+    # Compare contiguous 1-5 word spans, not arbitrary body text. A minimum
+    # length and high threshold reduce accidental matches on short abbreviations.
+    words = re.findall(r"[а-яa-z0-9-]+", header)
+    spans = []
+    for start in range(len(words)):
+        for width in range(1, min(5, len(words) - start) + 1):
+            span = " ".join(words[start:start + width])
+            if len(span.replace(" ", "")) >= 9:
+                spans.append(span)
+    matches = []
+    for label, anchors in FUZZY_HEADER_ANCHORS.items():
+        best = max((SequenceMatcher(None, span, _normalize(anchor)).ratio()
+                    for span in spans for anchor in anchors), default=0)
+        if best >= 0.88:
+            matches.append((label, best))
+    return matches
+
+
 def _classify_segment(text):
     scores, evidence = _score_types(text)
     normalized = _normalize(text)
+
+    for label, similarity in _fuzzy_header_matches(text):
+        if similarity >= 0.88:
+            scores[label] = max(scores.get(label, 0), 10)
+            evidence.setdefault(label, []).append({
+                "weight": 10,
+                "reason": f"приближённое совпадение заголовка ({similarity:.2f})",
+            })
 
     # Classify the document's form, not every medical topic mentioned in its body.
     # In particular, a requested future investigation is not its resulting report.
