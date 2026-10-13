@@ -13,8 +13,9 @@ import zipfile
 from collections import Counter
 from pathlib import Path
 
-import pyarrow.parquet as pq
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -22,6 +23,36 @@ from AIAnalise import analyze_document  # noqa: E402
 
 RUMEDPRIME_URL = "https://zenodo.org/records/5765873/files/RuMedPrimeData.zip?download=1"
 RUCLINNER_BASE = "https://huggingface.co/datasets/medlinx/RuClinNER/resolve/main/data"
+
+
+def build_retry_session():
+    """Retry transient download failures such as Zenodo/Hugging Face HTTP 504s."""
+    retry = Retry(
+        total=3,
+        connect=3,
+        read=2,
+        status=3,
+        backoff_factor=1.5,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset({"GET"}),
+        respect_retry_after_header=True,
+        raise_on_status=True,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session = requests.Session()
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+SESSION = build_retry_session()
+
+
+def describe_error(exc):
+    """Return a concise error summary without echoing URLs or response bodies."""
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return f"{type(exc).__name__} (HTTP {status})" if status else type(exc).__name__
 
 
 def summarize(name, texts):
@@ -48,7 +79,7 @@ def summarize(name, texts):
 
 def probe_rumedprime(limit_records):
     print("Downloading RuMedPrimeData from Zenodo (temporary in-memory processing)...", flush=True)
-    response = requests.get(RUMEDPRIME_URL, timeout=(15, 120))
+    response = SESSION.get(RUMEDPRIME_URL, timeout=(15, 120))
     response.raise_for_status()
     texts = []
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
@@ -66,13 +97,14 @@ def probe_rumedprime(limit_records):
                 texts.append("\n".join(str(row.get(field, "") or "") for field in clinical_fields))
                 if limit_records and len(texts) >= limit_records:
                     break
-                if limit_records and len(texts) >= limit_records:
-                    break
     print(f"RuMedPrimeData: collected {len(texts)} records; limit={limit_records or 'all'}", flush=True)
     summarize("RuMedPrimeData / symptoms + anamnesis", texts)
 
 
 def probe_ruclinner(limit_per_split):
+    import pyarrow.parquet as pq
+
+    had_failures = False
     configs = ("medterm", "drugrel", "covid_rmj")
     splits = ("train", "test")
     for config in configs:
@@ -80,13 +112,14 @@ def probe_ruclinner(limit_per_split):
             url = f"{RUCLINNER_BASE}/{config}/{split}.parquet?download=true"
             try:
                 print(f"Downloading RuClinNER {config}/{split}...", flush=True)
-                response = requests.get(url, timeout=(15, 90))
+                response = SESSION.get(url, timeout=(15, 90))
                 response.raise_for_status()
                 parquet = pq.ParquetFile(io.BytesIO(response.content))
                 available = set(parquet.schema_arrow.names)
                 columns = [field for field in ("text", "annotation") if field in available]
                 if not columns:
-                    print(f"[RuClinNER/{config}/{split}] SKIPPED: no text/annotation column", flush=True)
+                    print(f"[RuClinNER/{config}/{split}] FAILED: no text/annotation column", flush=True)
+                    had_failures = True
                     continue
 
                 labels = Counter()
@@ -116,7 +149,9 @@ def probe_ruclinner(limit_per_split):
                 print("Confidence distribution: " + str(dict(confidence)), flush=True)
             except Exception as exc:
                 # Do not print record contents, request URLs with tokens, or environment data.
-                print(f"\n[RuClinNER/{config}/{split}] SKIPPED: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
+                print(f"\n[RuClinNER/{config}/{split}] FAILED: {describe_error(exc)}", flush=True)
+                had_failures = True
+    return not had_failures
 
 
 def main():
@@ -131,16 +166,24 @@ def main():
         parser.error("record limits cannot be negative")
     print("DIAGNOSTIC ONLY: these corpora do not contain gold document-type labels.", flush=True)
     print("Only aggregate predictions are printed; raw text is not saved as a fixture or artifact.", flush=True)
+    failed_sources = []
     if args.dataset in ("all", "rumedprime"):
         try:
             probe_rumedprime(args.limit_rumedprime)
         except Exception as exc:
-            print(f"\n[RuMedPrimeData] FAILED: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
-            if args.dataset == "rumedprime":
-                raise
+            print(f"\n[RuMedPrimeData] FAILED: {describe_error(exc)}", flush=True)
+            failed_sources.append("RuMedPrimeData")
     if args.dataset in ("all", "ruclinner"):
-        probe_ruclinner(args.limit_per_split)
+        if not probe_ruclinner(args.limit_per_split):
+            failed_sources.append("RuClinNER")
+
+    if failed_sources:
+        print("\nDIAGNOSTIC FAILED: one or more selected data sources could not be processed: "
+              + ", ".join(failed_sources), flush=True)
+        return 1
+    print("\nDIAGNOSTIC COMPLETE: all selected data sources processed.", flush=True)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
