@@ -223,18 +223,31 @@ def _classify_segment(text):
     visit_heading = bool(re.search(
         r"\b(?:протокол\s+)?(?:первичн\w*|повторн\w*)\s+при[её]м\w*|"
         r"протокол\s+осмотра|амбулаторн\w+\s+при[её]м", normalized))
+    # Only the document's opening lines can establish its form. A test listed
+    # later in a visit plan is not a laboratory result document.
+    header_text = _normalize("\\n".join((text or "").splitlines()[:4]))
     lab_report_heading = bool(re.search(
         r"\b(?:общ\w+\s+анализ\w*\s+(?:крови|мочи)|"
         r"биохимическ\w+\s+анализ|результат\w*\s+лабораторн\w+\s+исследовани\w*)\b",
-        normalized))
+        header_text))
     if visit_heading and not lab_report_heading:
         scores.pop("лабораторный отчёт", None)
         evidence.pop("лабораторный отчёт", None)
 
-    # Negative/disclaimer mentions are not positive evidence for the denied form.
-    if re.search(r"\bне\s+является\b.{0,100}\bмедицинск\w*\s+справк", normalized):
-        scores.pop("медицинская справка", None)
-        evidence.pop("медицинская справка", None)
+    # A document-type mention explicitly negated in a disclaimer is not evidence
+    # that the current file belongs to that type.
+    negative_type_patterns = {
+        "выписной эпикриз": r"не\\s+(?:является|содержит|представляет)\\b.{0,100}\\b(?:выписн\\w*\\s+эпикриз|эпикриз)\\b",
+        "медицинская справка": r"не\\s+(?:является|содержит|представляет)\\b.{0,100}\\bмедицинск\\w*\\s+справк",
+        "направление": r"не\\s+(?:является|содержит|представляет)\\b.{0,100}\\bнаправлени\\w*",
+        "заключение УЗИ": r"не\\s+(?:является|содержит|представляет)\\b.{0,100}\\b(?:заключени\\w*|протокол\\w*)\\s+(?:узи|ультразвуков\\w*)",
+        "заключение МРТ": r"не\\s+(?:является|содержит|представляет)\\b.{0,100}\\b(?:заключени\\w*|протокол\\w*)\\s+(?:мрт|магнитно[- ]резонансн\\w*)",
+        "лабораторный отчёт": r"не\\s+(?:является|содержит|представляет)\\b.{0,100}\\b(?:лабораторн\\w+\\s+отч[её]т|результат\\w*\\s+анализ\\w*)",
+    }
+    for label, pattern in negative_type_patterns.items():
+        if re.search(pattern, normalized):
+            scores.pop(label, None)
+            evidence.pop(label, None)
 
     ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
     if not ranked or ranked[0][1] < 6:
