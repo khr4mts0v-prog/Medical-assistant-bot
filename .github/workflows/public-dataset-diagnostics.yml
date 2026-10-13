@@ -1,6 +1,8 @@
 name: Public dataset diagnostics
 
 on:
+  pull_request:
+    branches: ["feature/realistic-classifier-corpus"]
   workflow_dispatch:
     inputs:
       dataset:
