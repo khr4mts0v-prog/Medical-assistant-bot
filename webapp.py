@@ -36,6 +36,19 @@ def page(title,body,status=200):
     return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
 body{max-width:850px;margin:auto;padding:18px;font:16px/1.5 system-ui,sans-serif}h1{font-size:1.5rem}h2{font-size:1.15rem}.card{border:1px solid #8888;border-radius:12px;padding:14px;margin:12px 0}input,select,button{font:inherit;max-width:100%;padding:9px;margin:4px 0}input[type=text],input[type=search]{width:min(100%,440px)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.muted{opacity:.7}.warn{border-left:4px solid #b8860b;padding:8px 12px}a{overflow-wrap:anywhere}</style></head><body><h1>Медицинский архив</h1>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></body></html>""",status_code=status)
 
+def display_document_title(document, analysis):
+    saved=(analysis or {}).get("display_title")
+    if saved: return str(saved)
+    text=str(document.get("text") or "")
+    import re
+    if re.search(r"ультразвуков\w*\s+исследован\w*.{0,100}почек\s+и\s+мочевого\s+пузыря",text,re.I|re.S):
+        return "УЗИ почек и мочевого пузыря"
+    if re.search(r"ультразвуков\w*\s+исследован\w*.{0,100}щитовидной\s+железы",text,re.I|re.S):
+        return "УЗИ щитовидной железы"
+    kind=str(document.get("kind") or "не определено")
+    if kind!="не определено": return kind[:1].upper()+kind[1:]
+    return "Документ — требуется классификация"
+
 def family(fid,uid):
     if not tenancy.role_for_user(fid,uid): raise HTTPException(403,"Нет доступа к этому семейному архиву")
     f=tenancy.get_family(fid)
@@ -103,7 +116,7 @@ def patient_page(fid:int,patient:str,q:str="",uid:int=Depends(current_user)):
         tag_text=", ".join(tags)
         status = " · требует проверки" if review else ""
         link = f'<p><a href="/families/{fid}/documents/{int(d["id"])}">Открыть оригинал</a></p>' if STORAGE_BACKEND == "local" and d.get("remote") else ""
-        title = a.get("display_title") or d.get("name") or "Документ"
+        title = display_document_title(d, a)
         edit_url = f"/families/{fid}/documents/{int(d['id'])}/edit"
         edit_label = "Редактировать карточку" if review or d.get("kind") == "не определено" else "Изменить данные"
         b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Пациент: {html.escape(str(d.get("patient") or patient))}<br>Обследование: {html.escape(str(d.get("kind") or "не определено"))}{status}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}<br><span class="muted">Уверенность: {html.escape(str(confidence))}</span>{link}<p><a href="{edit_url}">{edit_label}</a></p><details><summary>Показать распознанный текст (OCR)</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape((d.get("text") or "")[:12000])}</pre></details></div>')
@@ -135,7 +148,7 @@ def edit_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
     kinds=["не определено"]+sorted(DOCUMENT_TYPE_RULES.keys())
     options="".join("<option value=\"" + html.escape(k,quote=True) + "\"" + (" selected" if k==d.get("kind") else "") + ">" + html.escape(k) + "</option>" for k in kinds)
     analysis=d.get("analysis") or {}
-    title=analysis.get("display_title") or Path(d.get("name") or "Документ").stem
+    title=display_document_title(d, analysis)
     patient=html.escape(str(d.get("patient") or ""),quote=True)
     body="<p><a href=\"/families/"+str(fid)+"/patients/"+patient+"\">← Назад к документам</a></p>"
     body+="<h2>Редактирование карточки документа</h2><div class=\"card\"><strong>Пациент:</strong> "+html.escape(str(d.get("patient") or ""))+"<br><strong>Исходный файл:</strong> "+html.escape(str(d.get("name") or ""))+"</div>"
