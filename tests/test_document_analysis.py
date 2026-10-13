@@ -203,6 +203,31 @@ class DocumentMetadataTests(unittest.TestCase):
         self.assertEqual(extract_document_date(text), "06-10-2026")
         self.assertEqual(infer_document_title(text, result["primary_type"]), "Анализ на поверхностные микозы")
 
+    def test_kidney_and_bladder_ultrasound_title(self):
+        from AIAnalise import analyze_document, classify_document
+        from document_metadata import extract_document_date, infer_document_title
+
+        text = """УЛЬТРАЗВУКОВОЕ ИССЛЕДОВАНИЕ ПОЧЕК И МОЧЕВОГО ПУЗЫРЯ
+Дата осмотра: 17.03.2025 08:18
+ЗАКЛЮЧЕНИЕ: Ультразвуковые признаки гипотонии лоханки левой почки."""
+        result = analyze_document(text)
+        self.assertEqual(classify_document(text), "заключение УЗИ")
+        self.assertEqual(infer_document_title(text, result["primary_type"]), "УЗИ почек и мочевого пузыря")
+        self.assertEqual(extract_document_date(text), "17-03-2025")
+
+    def test_thyroid_ultrasound_title_and_exam_date(self):
+        from AIAnalise import analyze_document, classify_document
+        from document_metadata import extract_document_date, infer_document_title
+
+        text = """УЛЬТРАЗВУКОВОЕ ИССЛЕДОВАНИЕ ЩИТОВИДНОЙ ЖЕЛЕЗЫ
+Дата осмотра: 17.03.2025 12:45
+ЗАКЛЮЧЕНИЕ: Ультразвуковые признаки изменений щитовидной железы.
+РЕКОМЕНДАЦИИ: ультразвуковой контроль в динамике."""
+        result = analyze_document(text)
+        self.assertEqual(classify_document(text), "заключение УЗИ")
+        self.assertEqual(infer_document_title(text, result["primary_type"]), "УЗИ щитовидной железы")
+        self.assertEqual(extract_document_date(text), "17-03-2025")
+
     def test_registered_patient_full_name(self):
         from document_metadata import extract_registered_patient
         roster = ["Иванов Иван Иванович", "Петров Пётр Петрович"]
