@@ -185,11 +185,12 @@ def main():
     print(f"CONFIG dataset={args.dataset}; rumedprime_limit={args.limit_rumedprime}; ruclinner_limit_per_split={args.limit_per_split}; request_timeout_connect={CONNECT_TIMEOUT_SECONDS}s; request_timeout_read={READ_TIMEOUT_SECONDS}s", flush=True)
     failed_sources = []
     if args.dataset in ("all", "rumedprime"):
+        source_started = time.monotonic()
         try:
             print("BEGIN source=RuMedPrimeData", flush=True)
             probe_rumedprime(args.limit_rumedprime)
         except Exception as exc:
-            print(f"\n[RuMedPrimeData] FAILED: {describe_error(exc)}", flush=True)
+            print(f"\n[RuMedPrimeData] FAILED: {describe_error(exc)}; elapsed_seconds={time.monotonic() - source_started:.1f}", flush=True)
             failed_sources.append("RuMedPrimeData")
     if args.dataset in ("all", "ruclinner"):
         print("BEGIN source=RuClinNER", flush=True)
