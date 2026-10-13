@@ -1,3 +1,5 @@
+[Reading 567 lines from start (total: 567 lines, 0 remaining)]
+
 """Explainable rule-based classification for Russian family medical archives.
 Document form is separated from clinical content tags. Weak evidence yields "не определено".
 Extracted values/snippets are search aids only, never clinical conclusions.
@@ -6,7 +8,7 @@ import os
 import re
 import requests
 
-CLASSIFICATION_VERSION = "2.0"
+CLASSIFICATION_VERSION = "2.2"
 DOCUMENT_TYPE_RULES = {
     "выписной эпикриз": [
         (r"\bвыписн\w*\s+эпикриз\b", 10, "заголовок: выписной эпикриз"),
@@ -14,6 +16,11 @@ DOCUMENT_TYPE_RULES = {
         (r"\bвыписк\w+\s+из\s+(?:стационар\w+|истори\w+\s+болезни)\b", 9, "выписка из стационара/истории болезни"),
         (r"\bвыписан\w*\s+(?:из|со)\s+стационар\w*", 5, "указание на выписку"),
         (r"\bрекомендаци\w+\s+при\s+выписк\w*", 3, "рекомендации при выписке"),
+    ],
+    "выписка из медицинской карты": [
+        (r"\bформа\s*(?:n|№)?\s*0?27\s*/\s*у\b", 12, "форма 027/у — выписка из медицинской карты"),
+        (r"\bвыписк\w+\s+из\s+медицинск\w+\s+карт\w*\b", 12, "выписка из медицинской карты"),
+        (r"\bвыписк\w+\s+из\s+(?:амбулаторн\w+|стационарн\w+)\s+карт\w*\b", 10, "выписка из амбулаторной/стационарной карты"),
     ],
     "лабораторный отчёт": [
         (r"\b(?:результат\w*\s+)?лабораторн\w+\s+исследован\w*", 9, "заголовок лабораторного исследования"),
@@ -74,7 +81,29 @@ DOCUMENT_TYPE_RULES = {
         (r"\b(?:сертификат|паспорт|календарь)\w*\s+(?:профилактическ\w+\s+)?привив\w*", 10, "вакцинальный сертификат/паспорт"),
         (r"\bсертификат\s+(?:о\s+)?вакцинаци\w*", 10, "сертификат вакцинации"),
         (r"\bпрививочн\w+\s+карт\w*", 10, "прививочная карта"),
+        (r"\bкарт\w+\s+профилактическ\w+\s+привив\w*", 12, "карта профилактических прививок"),
+        (r"\bсведени\w+\s+о\s+профилактическ\w+\s+привив\w*", 10, "сведения о профилактических прививках"),
         (r"\bлист\s+профилактическ\w+\s+привив\w*", 8, "лист прививок"),
+    ],
+    "история развития ребёнка": [
+        (r"\bистори\w+\s+развити\w+\s+реб[её]нк\w*\b", 12, "история развития ребёнка"),
+        (r"\bформа\s*(?:n|№)?\s*112\s*/\s*у\b", 12, "учётная форма 112/у"),
+    ],
+    "контрольная карта диспансерного наблюдения": [
+        (r"\bконтрольн\w+\s+карт\w+\s+диспансерн\w+\s+наблюдени\w*\b", 12, "контрольная карта диспансерного наблюдения"),
+        (r"\bформа\s*(?:n|№)?\s*030\s*/\s*у\b", 12, "учётная форма 030/у"),
+    ],
+    "медицинское свидетельство о рождении": [
+        (r"\bмедицинск\w+\s+свидетельств\w+\s+о\s+рождени\w*\b", 12, "медицинское свидетельство о рождении"),
+        (r"\bформа\s*(?:n|№)?\s*103\s*/\s*у\b", 12, "учётная форма 103/у"),
+    ],
+    "медицинское свидетельство о смерти": [
+        (r"\bмедицинск\w+\s+свидетельств\w+\s+о\s+смерти\b", 12, "медицинское свидетельство о смерти"),
+        (r"\bформа\s*(?:n|№)?\s*106(?:-2)?\s*/\s*у\b", 12, "учётная форма 106/у или 106-2/у"),
+    ],
+    "справка о временной нетрудоспособности": [
+        (r"\bсправк\w+\s+о\s+временно\w+\s+нетрудоспособност\w*\b", 12, "справка о временной нетрудоспособности"),
+        (r"\bформа\s*(?:n|№)?\s*095\s*/\s*[сc]\s*-?\s*у\b", 12, "учётная форма 095/с-у"),
     ],
     "документ по беременности и родам": [
         (r"\bобменн\w+\s+карт\w*\b", 10, "обменная карта"),
@@ -100,7 +129,11 @@ DOCUMENT_TYPE_RULES = {
         (r"\bбиопси\w+\s+(?:материал|результат|заключени)", 8, "биопсия"),
     ],
     "направление": [
-        (r"\bнаправлени\w+\s+(?:на|к)\s+(?:исследовани\w*|консультаци\w*|госпитализаци\w*|при[её]м\w*|рентген\w*|узи\b|мрт\b|кт\b)", 10, "направление на исследование/консультацию"),
+        (r"\bнаправлени\w+\s+(?:на|к)\s+(?:обследовани\w*|исследовани\w*|консультаци\w*|госпитализаци\w*|при[её]м\w*|рентген\w*|узи\b|мрт\b|кт\b)", 10, "направление на исследование/консультацию"),
+        (r"\bнаправлен\w*\s+(?:на|к)\s+(?:обследовани\w*|исследовани\w*|консультаци\w*|госпитализаци\w*|при[её]м\w*|рентген\w*|узи\b|мрт\b|кт\b)", 10, "пациент направлен на исследование/консультацию"),
+        (r"\bнаправля\w*\s+(?:на|к)\s+(?:обследовани\w*|исследовани\w*|консультаци\w*|госпитализаци\w*|при[её]м\w*|рентген\w*|узи\b|мрт\b|кт\b)", 10, "пациента направляют на исследование/консультацию"),
+        (r"\bнаправлени\w+\s+на\s+медико[- ]социальн\w+\s+экспертиз\w*", 12, "направление на медико-социальную экспертизу"),
+        (r"\bформа\s*(?:n|№)?\s*088\s*/\s*у(?:\s*-?\s*06)?\b", 12, "учётная форма направления на МСЭ"),
         (r"\bмедицинск\w+\s+направлени\w*", 10, "медицинское направление"),
         (r"\bнаправление\s+на\s+анализ\w*", 9, "направление на анализы"),
     ],
@@ -109,12 +142,82 @@ DOCUMENT_TYPE_RULES = {
         (r"\bпервичн\w+\s+при[её]м\w*\b|\bповторн\w+\s+при[её]м\w*\b", 8, "первичный/повторный приём"),
         (r"\bамбулаторн\w+\s+при[её]м\b", 8, "амбулаторный приём"),
     ],
+    "санаторно-курортная документация": [
+        (r"\bсанаторно[- ]курортн\w+\s+карт\w*\b", 12, "санаторно-курортная карта"),
+        (r"\bсправк\w+\s+для\s+получени\w+\s+пут[её]вк\w*\s+на\s+санаторно[- ]курортн\w+\b", 12, "справка для путёвки на санаторно-курортное лечение"),
+        (r"\bформа\s*(?:n|№)?\s*0?7[026]\s*/\s*у\b", 10, "форма санаторно-курортной документации"),
+    ],
     "медицинская карта или наблюдение": [
         (r"\bмедицинск\w+\s+карт\w*\b", 9, "медицинская карта"),
         (r"\bдневник\s+(?:наблюдени\w*|пациент\w*)\b", 8, "дневник наблюдения"),
         (r"\bлист\s+динамическ\w+\s+наблюдени\w*", 8, "лист динамического наблюдения"),
     ],
 }
+
+# Hierarchical archive taxonomy: stable leaf labels are API-compatible; categories
+# are navigation/grouping metadata and never replace the primary leaf class.
+DOCUMENT_CATEGORIES = {
+    "Клинические записи и выписки": [
+        "выписной эпикриз", "выписка из медицинской карты",
+        "история развития ребёнка", "контрольная карта диспансерного наблюдения",
+        "протокол осмотра или приёма", "медицинская карта или наблюдение",
+    ],
+    "Лабораторная диагностика": ["лабораторный отчёт"],
+    "Инструментальная диагностика": [
+        "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
+        "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
+    ],
+    "Патоморфология и операции": ["патоморфологическое заключение", "операционный протокол"],
+    "Консультации, назначения и направления": [
+        "консультация специалиста", "назначение или рецепт", "направление",
+    ],
+    "Профилактика и реабилитация": ["вакцинальный документ", "санаторно-курортная документация"],
+    "Справки и административные документы": [
+        "медицинская справка", "справка о временной нетрудоспособности",
+    ],
+    "Беременность, рождение и смерть": [
+        "документ по беременности и родам", "медицинское свидетельство о рождении",
+        "медицинское свидетельство о смерти",
+    ],
+}
+DOCUMENT_TAXONOMY = {
+    leaf: {"category": category, "type": leaf}
+    for category, leaves in DOCUMENT_CATEGORIES.items()
+    for leaf in leaves
+}
+DOCUMENT_CATEGORY_ORDER = list(DOCUMENT_CATEGORIES)
+
+# Explicit document headings/forms outrank incidental mentions in the body of long forms.
+# Patterns are evaluated only in the leading section to avoid matching cross-references.
+DOCUMENT_TITLE_RULES = [
+    ("выписной эпикриз", r"\bвыписной\s+эпикриз\b"),
+    ("выписка из медицинской карты", r"\bформа\s*(?:n|№)?\s*0?27\s*/\s*у\b|\bвыписка\s+из\s+медицинской\s+карты\b"),
+    ("вакцинальный документ", r"\bкарта\s+профилактических\s+прививок\b|\bформа\s*(?:n|№)?\s*0?63\s*/\s*у\b|\bпрививочная\s+карта\b"),
+    ("санаторно-курортная документация", r"\bсанаторно[- ]курортная\s+карта\b|\bформа\s*(?:n|№)?\s*0?7[026]\s*/\s*у\b|\bсправка\s+для\s+получения\s+пут[её]вки\b"),
+    ("документ по беременности и родам", r"\bобменная\s+карта\b|\bформа\s*(?:n|№)?\s*113\s*/\s*у(?:-20)?\b|\bистория\s+родов\b|\bталон\s*n\s*1\.?\s+сведения\s+женской\s+консультации\s+о\s+беременной\b"),
+    ("медицинская карта или наблюдение", r"\bмедицинская\s+карта\s+пациента\b|\bформа\s*(?:n|№)?\s*025\s*/\s*у\b"),
+    ("история развития ребёнка", r"\bистория\s+развития\s+реб[её]нка\b|\bформа\s*(?:n|№)?\s*112\s*/\s*у\b"),
+    ("контрольная карта диспансерного наблюдения", r"\bконтрольная\s+карта\s+диспансерного\s+наблюдения\b|\bформа\s*(?:n|№)?\s*030\s*/\s*у\b"),
+    ("медицинское свидетельство о рождении", r"\bмедицинское\s+свидетельство\s+о\s+рождении\b|\bформа\s*(?:n|№)?\s*103\s*/\s*у\b"),
+    ("медицинское свидетельство о смерти", r"\bмедицинское\s+свидетельство\s+о\s+смерти\b|\bформа\s*(?:n|№)?\s*106(?:-2)?\s*/\s*у\b"),
+    ("справка о временной нетрудоспособности", r"\bсправка\s+о\s+временной\s+нетрудоспособности\b|\bформа\s*(?:n|№)?\s*095\s*/\s*[сc]\s*-?\s*у\b"),
+    ("медицинская справка", r"\bмедицинская\s+справка\b|\bформа\s*(?:n|№)?\s*079\s*/\s*у\b"),
+    ("направление", r"\bнаправление\s+на\s+(?:обследование|исследование|консультацию|госпитализацию|анализы|кт|мрт|узи|рентген|медико[- ]социальную\s+экспертизу)\b|\bформа\s*(?:n|№)?\s*088\s*/\s*у(?:\s*-?\s*06)?\b|\bмедицинское\s+направление\b"),
+    ("лабораторный отчёт", r"\bрезультаты?\s+лабораторных\s+исследований\b|\bлабораторный\s+отч[её]т\b"),
+    ("заключение УЗИ", r"\bформа\s+протокола\s+ультразвукового\s+исследования\b|\b(?:заключение|протокол)\s+узи\b|\b(?:заключение|протокол)\s+ультразвукового\s+исследования\b"),
+    ("рентгенологическое заключение", r"\bформа\s+протокола\s+рентгенологического\s+исследования\b|\bрентгенологическое\s+заключение\b|\bпротокол\s+рентгенологического\s+исследования\b"),
+    ("заключение ЭКГ", r"\b(?:заключение|протокол)\s+экг\b|\bэлектрокардиографическое\s+заключение\b"),
+    ("заключение КТ", r"\bзаключение\s+кт\b|\bпротокол\s+кт\b"),
+    ("заключение МРТ", r"\bзаключение\s+мрт\b|\bпротокол\s+мрт\b"),
+    ("эндоскопическое заключение", r"\b(?:заключение|протокол)\s+(?:фгдс|гастроскопии|колоноскопии|эндоскопического\s+исследования)\b"),
+    ("операционный протокол", r"\b(?:операционный\s+протокол|протокол\s+операции)\b"),
+    ("патоморфологическое заключение", r"\b(?:гистологическое|патоморфологическое|цитологическое)\s+заключение\b"),
+    ("консультация специалиста", r"\bконсультация\s+(?:врача|невролога|кардиолога|педиатра|терапевта|офтальмолога|эндокринолога|хирурга|ортопеда|гинеколога|уролога)\b"),
+    ("протокол осмотра или приёма", r"\bпротокол\s+(?:осмотра|при[её]ма)\b|\bпервичный\s+при[её]м\b|\bповторный\s+при[её]м\b"),
+    ("назначение или рецепт", r"\bлист\s+назначений\b|\bрецептурн\w+\s+бланк\w*\b|\bформа\s*(?:n|№)?\s*107[- ]?1\s*/\s*у\b"),
+]
+
+
 CONTENT_RULES = {
     "диагнозы": [r"\bдиагноз\b", r"\bосновное\s+заболевание\b", r"\bзаключительный\s+диагноз\b"],
     "лекарства и назначения": [r"\bназначен\w*\b", r"\bпринимать\b", r"\bпрепарат\w*\b", r"\bлекарственн\w+\s+средств\w*\b", r"\bдозировк\w*\b", r"\bрецепт\b"],
@@ -180,22 +283,84 @@ def _classify_segment(text):
     scores, evidence = _score_types(text)
     normalized = _normalize(text)
 
-    # A modality mentioned as a recommendation/referral is not itself a report.
-    # Without report-form evidence, avoid classifying "get an MRI/US" as a result.
+    # A modality mentioned in a plan, history, or referral is not itself a report.
     mention_context = bool(re.search(
-        r"\b(?:рекомендован\w*|рекомендовал\w*|направлен\w*|направление|"
-        r"выполнить|пройти|записаться|при\s+необходимости|планируется|"
+        r"\b(?:рекомендован\w*|рекомендовал\w*|направлен\w*|направля\w*|направление|"
+        r"выполнить|выполнен[аоы]?|проводил\w*|ранее|в\s+анамнезе|"
+        r"пройти|записаться|при\s+необходимости|планируется|"
         r"назначено\s+(?:провести|выполнить))\b", normalized))
-    report_context = bool(re.search(
-        r"\b(?:протокол\w*|заключение\w*|результат\w*|описание\w*|"
-        r"проведено|выполнено|данные\s+исследования|ход\s+исследования)\b", normalized))
-    if mention_context and not report_context:
-        for label in (
-            "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
-            "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
-        ):
+    # Generic phrases like "заключение передать лечащему врачу" are not evidence
+    # of an imaging report: the report marker must be tied to a modality.
+    specific_report_context = bool(re.search(
+        r"\b(?:протокол\w*|заключени\w*|результат\w*|описани\w*)\s+"
+        r"(?:узи\b|экг\b|кт\b|мрт\b|рентген\w*|ультразвуков\w+|"
+        r"компьютерн\w+\s+томографи\w*|магнитно[- ]резонансн\w+\s+томографи\w*|"
+        r"эндоскопическ\w+\s+исследовани\w*)\b|"
+        r"\b(?:протокол\s+ультразвукового\s+исследования|"
+        r"протокол\s+рентгенологического\s+исследования)\b", normalized))
+    # Allow "результат пока отсутствует" and similar variants.
+    negative_report_context = bool(re.search(
+        r"\b(?:заключени\w*|протокол\w*|результат\w*|описани\w*)\b"
+        r".{0,70}\b(?:отсутств\w*|не\s+указан\w*|не\s+представлен\w*|не\s+приложен\w*)\b",
+        normalized))
+    plan_list_context = bool(re.search(
+        r"\b(?:план\s+(?:обследовани\w*|диагностик\w*|анализ\w*)|"
+        r"перечень\s+(?:обследовани\w*|исследовани\w*))\b", normalized))
+    imaging_labels = (
+        "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
+        "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
+    )
+    missing_prescription = bool(re.search(
+        r"\b(?:рецепт|назначени\w*)\b.{0,60}\b(?:не\s+приложен\w*|отсутств\w*|не\s+представлен\w*)\b",
+        normalized))
+    if missing_prescription:
+        scores.pop("назначение или рецепт", None)
+        evidence.pop("назначение или рецепт", None)
+    # An absent/unattached lab result is not itself a lab report. Keep the
+    # class only when actual analytes are present in the text (e.g. a report
+    # may mention older missing results while containing current measurements).
+    if negative_report_context:
+        lab_marker_count = sum(
+            bool(re.search(pattern, normalized, re.IGNORECASE))
+            for pattern in LAB_MARKERS.values()
+        )
+        if lab_marker_count < 2:
+            scores.pop("лабораторный отчёт", None)
+            evidence.pop("лабораторный отчёт", None)
+    if negative_report_context or (mention_context and not specific_report_context):
+        for label in imaging_labels:
             scores.pop(label, None)
             evidence.pop(label, None)
+    if plan_list_context and not specific_report_context:
+        for label in list(scores):
+            if label != "направление":
+                scores.pop(label, None)
+                evidence.pop(label, None)
+    if re.fullmatch(r"(?:узи|экг|мрт|кт|фгдс|рентген)", normalized):
+        for label in imaging_labels:
+            scores.pop(label, None)
+            evidence.pop(label, None)
+
+    # A clear form/document title in the beginning outranks cross-references
+    # embedded in long forms (e.g. X-ray or lab fields inside form 025/у).
+    title_text = normalized[:1200]
+    detected_title = None
+    detected_title_pattern = None
+    for label, pattern in DOCUMENT_TITLE_RULES:
+        if re.search(pattern, title_text, re.IGNORECASE):
+            detected_title = label
+            detected_title_pattern = pattern
+            break
+    report_title_labels = {
+        "лабораторный отчёт", "заключение УЗИ", "заключение ЭКГ",
+        "рентгенологическое заключение", "заключение КТ", "заключение МРТ",
+        "эндоскопическое заключение", "патоморфологическое заключение",
+    }
+    if negative_report_context and detected_title in report_title_labels:
+        detected_title = None
+    if detected_title:
+        scores = {detected_title: max(12, scores.get(detected_title, 0))}
+        evidence = {detected_title: [{"weight": 12, "reason": "явный заголовок/номер формы в начале документа"}]}
 
     ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
     if not ranked or ranked[0][1] < 6:
@@ -225,7 +390,11 @@ def _classify_segment(text):
     if (lab_hits >= 2 or has_lab_heading) and "лабораторные показатели" not in content_tags:
         content_tags.append("лабораторные показатели")
     return {
-        "primary_type": primary, "document_types": document_types, "content_tags": content_tags,
+        "primary_type": primary,
+        "primary_category": DOCUMENT_TAXONOMY.get(primary, {}).get("category", "не определено"),
+        "taxonomy_path": ([DOCUMENT_TAXONOMY[primary]["category"], primary]
+                          if primary in DOCUMENT_TAXONOMY else []),
+        "document_types": document_types, "content_tags": content_tags,
         "confidence": confidence, "score": ranked[0][1] if ranked else 0, "margin": margin,
         "evidence": evidence.get(primary, []) if primary != "не определено" else [],
         "type_scores": {label: score for label, score in ranked},
@@ -238,6 +407,8 @@ def _analyse_pages(text):
         result = _classify_segment(chunk["text"])
         if result["primary_type"] != "не определено" or result["content_tags"]:
             pages.append({"page": chunk["page"], "primary_type": result["primary_type"],
+                          "primary_category": result.get("primary_category", "не определено"),
+                          "taxonomy_path": result.get("taxonomy_path", []),
                           "document_types": result["document_types"], "content_tags": result["content_tags"],
                           "confidence": result["confidence"], "evidence": result["evidence"],
                           "type_scores": result["type_scores"]})
@@ -296,12 +467,16 @@ def analyze_document(text):
     page_results = [_classify_segment(p["text"]) for p in pages]
     aggregate = {}
     for result in page_results:
+        # A page that abstains may contain incidental terms; don't let it affect
+        # the file-level class or turn a low-confidence hit into a prediction.
+        if result["primary_type"] == "не определено":
+            continue
         for label, score in result["type_scores"].items():
             aggregate[label] = aggregate.get(label, 0) + min(score, 12)
     ranked = sorted(aggregate.items(), key=lambda item: (-item[1], item[0]))
     first = page_results[0] if page_results else _classify_segment(text)
     primary = first["primary_type"] if first["primary_type"] != "не определено" else (
-        ranked[0][0] if ranked and ranked[0][1] >= 6 else "не определено")
+        ranked[0][0] if ranked else "не определено")
     document_types = [label for label, score in ranked if score >= 8]
     if primary != "не определено" and primary not in document_types:
         document_types.insert(0, primary)
@@ -331,7 +506,11 @@ def analyze_document(text):
         if tag not in types: types.append(tag)
     return {
         "schema_version": 2, "classification_version": CLASSIFICATION_VERSION,
-        "primary_type": primary, "document_types": document_types, "types": types,
+        "primary_type": primary,
+        "primary_category": DOCUMENT_TAXONOMY.get(primary, {}).get("category", "не определено"),
+        "taxonomy_path": ([DOCUMENT_TAXONOMY[primary]["category"], primary]
+                          if primary in DOCUMENT_TAXONOMY else []),
+        "document_types": document_types, "types": types,
         "content_tags": content_tags, "page_types": page_types, "lab_results": labs,
         "diagnoses": diagnoses, "medications": medications, "dates": dates,
         "confidence": confidence, "review_required": confidence == "low" or primary == "не определено",
@@ -388,3 +567,5 @@ def answer_question(query, patient, hf_token, context=""):
         return response.json()["choices"][0]["message"]["content"]
     except Exception as exc:
         return f"Не удалось получить ответ ИИ ({type(exc).__name__}). Проверьте настройки модели."
+
+[executed on device: marss1k.fvds.ru (ecc850ae-e012-4a56-b726-1ade67f14bec)]

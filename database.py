@@ -28,20 +28,85 @@ def init():
           UNIQUE(family_id,patient,digest));
         CREATE INDEX IF NOT EXISTS docs_family_patient ON docs(family_id,patient,date);
         """)
+        patient_cols={row["name"] for row in c.execute("PRAGMA table_info(patients)")}
+        if "aliases_enc" not in patient_cols:
+            c.execute("ALTER TABLE patients ADD COLUMN aliases_enc BLOB")
+        if "aliases_configured" not in patient_cols:
+            c.execute("ALTER TABLE patients ADD COLUMN aliases_configured INTEGER NOT NULL DEFAULT 0")
         cols={row["name"] for row in c.execute("PRAGMA table_info(docs)")}
         if "analysis" not in cols:
             c.execute("ALTER TABLE docs ADD COLUMN analysis TEXT")
 init()
 
-def add_patient(fid,name):
+def _clean_aliases(name, aliases):
+    values=[name]
+    for alias in aliases or []:
+        alias=" ".join(str(alias or "").split()).strip(" ;,")
+        if alias and len(alias)<=160:
+            values.append(alias)
+    unique=[]
+    seen=set()
+    for value in values:
+        key=" ".join(value.casefold().replace("ё","е").split())
+        if key and key not in seen:
+            seen.add(key); unique.append(value)
+    return unique[:80]
+
+def add_patient(fid,name,aliases=None,aliases_configured=None):
     name=" ".join((name or "").split())[:100]
     if not name: raise ValueError("Имя пациента не может быть пустым")
+    configured = (aliases is not None) if aliases_configured is None else bool(aliases_configured)
+    alias_values=_clean_aliases(name, aliases)
+    encrypted=cipher().encrypt(json.dumps(alias_values,ensure_ascii=False).encode("utf-8"))
     with connect() as c:
-        c.execute("INSERT OR IGNORE INTO patients(family_id,name) VALUES(?,?)",(int(fid),name))
+        c.execute("INSERT OR IGNORE INTO patients(family_id,name,aliases_enc,aliases_configured) VALUES(?,?,?,?)",
+                  (int(fid),name,encrypted,int(configured)))
+        if aliases is not None:
+            row=c.execute("SELECT id,aliases_enc FROM patients WHERE family_id=? AND name=? COLLATE NOCASE",
+                          (int(fid),name)).fetchone()
+            if row:
+                current=[]
+                if row["aliases_enc"]:
+                    try: current=json.loads(cipher().decrypt(row["aliases_enc"]).decode("utf-8"))
+                    except Exception: current=[]
+                merged=_clean_aliases(name,list(current)+list(aliases))
+                c.execute("UPDATE patients SET aliases_enc=?,aliases_configured=1 WHERE id=?",
+                          (cipher().encrypt(json.dumps(merged,ensure_ascii=False).encode("utf-8")),row["id"]))
+
+def update_patient_aliases(fid,name,aliases):
+    alias_values=_clean_aliases(" ".join((name or "").split()),aliases)
+    encrypted=cipher().encrypt(json.dumps(alias_values,ensure_ascii=False).encode("utf-8"))
+    with connect() as c:
+        cur=c.execute("UPDATE patients SET aliases_enc=?,aliases_configured=1 WHERE family_id=? AND name=? COLLATE NOCASE",
+                      (encrypted,int(fid),name))
+        if cur.rowcount != 1:
+            raise ValueError("Пациент не найден в этом семейном архиве")
+
+def patient_aliases_configured(fid,name):
+    with connect() as c:
+        row=c.execute("SELECT aliases_configured FROM patients WHERE family_id=? AND name=? COLLATE NOCASE",
+                      (int(fid),name)).fetchone()
+        return bool(row["aliases_configured"]) if row else False
+
+def patient_records(fid):
+    "Return short display labels and decrypt alias lists only for this family."
+    with connect() as c:
+        rows=c.execute("SELECT id,name,aliases_enc,aliases_configured FROM patients WHERE family_id=? ORDER BY name",
+                       (int(fid),)).fetchall()
+    result=[]
+    for row in rows:
+        aliases=[row["name"]]
+        if row["aliases_enc"]:
+            try:
+                aliases=json.loads(cipher().decrypt(row["aliases_enc"]).decode("utf-8"))
+            except Exception:
+                logging.exception("Cannot decrypt patient aliases; falling back to display name")
+        result.append({"id":row["id"],"name":row["name"],"aliases":_clean_aliases(row["name"],aliases),
+                       "aliases_configured":bool(row["aliases_configured"])})
+    return result
 
 def patients(fid):
-    with connect() as c:
-        return [r["name"] for r in c.execute("SELECT name FROM patients WHERE family_id=? ORDER BY name",(int(fid),))]
+    return [row["name"] for row in patient_records(fid)]
 
 def patient_by_id(fid, patient_id):
     with connect() as c:

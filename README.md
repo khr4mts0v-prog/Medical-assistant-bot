@@ -1,35 +1,95 @@
+[Reading 91 lines from start (total: 91 lines, 0 remaining)]
+
 # Medical Archive
 
-Family medical-document archive with a web interface and optional Telegram bot. Each family is a separate tenant, with family-scoped document index and isolated document storage.
+Семейный медицинский архив: отправляешь фотографию или PDF — система распознаёт документ, определяет пациента и дату заключения, классифицирует документ и сохраняет его с понятным именем. Если обязательное поле определить надёжно нельзя, бот задаёт только нужный вопрос и продолжает обработку того же файла.
 
-## Web MVP
+> **Статус:** MVP для разработки и ограниченного тестирования. Перед хранением реальных медицинских документов нужны проверка безопасности, тест восстановления из резервной копии и оценка качества на репрезентативных документах.
 
-- Upload PDF and common image formats; OCR with Tesseract (Russian + English).
-- Local document storage on the VPS by default; optional Yandex Disk backend.
-- Rule-based, explainable multi-label classification, separately tracking document form and clinical content tags.
-- Page-level type signals for mixed multi-page files.
-- OCR-indexed lab markers, diagnosis/medication snippets and structured-data search.
-- Optional Hugging Face question answering over selected archive snippets, independent from classification.
-- OCR text, keywords, structured analysis and Yandex OAuth tokens encrypted in SQLite using Fernet.
+## Как это работает
 
-## Classification design and limitations
+1. Владелец создаёт семейный архив, подключает Яндекс Диск в Telegram и один раз добавляет пациентов.
+2. Для каждого пациента задаётся короткая метка папки — например, `Олег`, `Юля`, `Саша`, `Маша`. Полные ФИО и варианты написания можно указать один раз: они нужны для распознавания, но не попадают в имя папки.
+3. Пользователь отправляет фото, скан или PDF — вручную выбирать пациента заранее не нужно.
+4. OCR извлекает текст. Правила классификации определяют тип документа, отдельный анализ ищет пациента и дату итогового документа.
+5. Если пациент, дата или тип не определены однозначно, бот спрашивает только недостающие значения. Ожидающая загрузка хранится зашифрованной; повторно отправлять файл не требуется.
+6. После уточнений оригинал и OCR-текст сохраняются, документ попадает в индекс и историю пациента.
 
-The classifier does not call an external AI. It scores explicit document-title/form evidence more highly than incidental mentions, separates document types (e.g. discharge summary, laboratory report, ultrasound conclusion, prescription) from content tags (e.g. diagnoses, medications, vaccination, pregnancy), and stores page-level evidence. When evidence is weak, it returns "не определено" and marks the document for manual review instead of forcing a label.
+Пример структуры:
 
-This is a rule-based MVP, not a clinically validated classifier. Synthetic unit tests protect known patterns and known failure cases, but do not establish real-world accuracy. To estimate quality, create a de-identified representative evaluation set of actual document types and OCR conditions, adjudicate gold labels, report per-class precision/recall/F1 and the unknown/manual-review rate, and inspect errors before tuning rules. Never claim perfect classification from unit tests alone. Mixed PDFs and poor OCR should remain reviewable. Extracted values are candidates linked to source lines/pages and must be checked against the original; no diagnosis or treatment decision is automated.
+```text
+MedArchive/
+└── family_<id>/
+    ├── Олег/
+    │   ├── docs/
+    │   │   └── 12-05-2026 УЗИ малого таза — 8a7f12de.pdf
+    │   ├── OCR/
+    │   │   └── 12-05-2026 УЗИ малого таза — 8a7f12de.txt
+    │   └── history.txt
+    └── Юля/
+```
 
-## Security
+Короткое имя пациента используется как имя папки. Имя файла начинается с **даты заключения**, а не с даты исследования. Короткий суффикс — часть хеша оригинала; он предотвращает перезапись разных документов с одинаковой датой и названием.
 
-- Test MVP only. Do not upload real medical records yet.
-- Expose the web interface only behind HTTPS. Application ports must remain bound to localhost; HTTP Basic is not safe over plain HTTP.
-- Local documents are kept on the VPS, not encrypted as individual files. OCR text, keywords and structured analysis in SQLite are Fernet-encrypted. Protect the VPS and back up the data volume securely.
-- Configure encrypted off-server backups and securely back up FERNET_KEY. If it is lost, encrypted data cannot be recovered.
-- Before real records, review user access controls, CSRF protection where applicable, rate limits, audit logging, backup/restore and tenant isolation.
-- The starter VPS has about 1 GB RAM and one vCPU; concurrent OCR may exhaust memory. Keep test PDFs small and process one upload at a time.
+## Классификация
 
-## Development checks
+Классификатор детерминированный, объяснимый и не отправляет документ во внешнюю LLM для определения класса. Стабильные конечные типы объединены в категории для навигации и уточнения:
 
-    python -m compileall -q .
-    python -m unittest discover -s tests -v
+| Категория | Примеры конечных типов |
+|---|---|
+| Клинические записи и выписки | Выписной эпикриз, выписка из карты, история развития ребёнка, медицинская карта, протокол приёма |
+| Лабораторная диагностика | Лабораторный отчёт |
+| Инструментальная диагностика | УЗИ, ЭКГ, рентген, КТ, МРТ, эндоскопия |
+| Патоморфология и операции | Патоморфологическое заключение, операционный протокол |
+| Консультации, назначения и направления | Консультация специалиста, рецепт/назначение, направление |
+| Профилактика и реабилитация | Вакцинальный документ, санаторно-курортная документация |
+| Справки и административные документы | Медицинская справка, справка о временной нетрудоспособности |
+| Беременность, рождение и смерть | Документы о беременности и родах, медицинские свидетельства о рождении и смерти |
 
-See DEPLOYMENT.md for rollout and security checks.
+Листовые названия сохранены для обратной совместимости; анализ дополнительно возвращает `primary_category` и `taxonomy_path`.
+
+Правила учитывают заголовки и номера форм, различают готовое заключение и упоминание исследования в направлении/плане, анализируют страницы отдельно и допускают отказ от классификации. Для автоматического сохранения бот принимает только классификацию с высокой уверенностью; средняя и низкая уверенность ведут к уточнению пользователем.
+
+## Метаданные и имя пациента
+
+- **Дата документа:** приоритет у явно обозначенной даты заключения/оформления/выдачи. Дата исследования, рождения и другие даты событий не подставляются вместо даты итогового документа. Несколько неоднозначных дат — повод спросить пользователя.
+- **Пациент:** ФИО, ФИ, фамилия с инициалами и имя сопоставляются с реестром семьи. Короткие имена вроде «Маша» распознаются только в подписи пациента или в заголовке документа, а не по случайному упоминанию в тексте.
+- **Варианты ФИО:** хранятся в зашифрованном поле SQLite. Система автоматически формирует распространённые варианты и инициалами на основе зарегистрированного полного имени, но не выбирает пациента, когда несколько совпадений равнозначны.
+- **Тип:** если правило не дало уверенного результата, сначала выбирается категория, затем конкретный тип. Можно указать пользовательское название.
+- **Дубликаты и коллизии:** хеш оригинала используется для защиты от повторной загрузки и перезаписи.
+
+Технические детали и ограничения описаны в [документации по классификации и загрузке](docs/CLASSIFICATION_AND_INGESTION.md).
+
+## Компоненты
+
+- `main.py` — Telegram-бот, состояния уточнений и очередь отложенных загрузок.
+- `AIAnalise.py` — объяснимая классификация, структура результата, извлечение лабораторных маркеров и фрагментов.
+- `document_metadata.py` — дата итогового документа, сопоставление пациента, компактное название файла.
+- `database.py` / `tenancy.py` — индекс SQLite, семейные пространства, роли и шифрование метаданных.
+- `ocr.py` — OCR с Tesseract (русский и английский).
+- `webapp.py` — веб-архив и загрузка файлов.
+- `cloud.py` — интеграция Яндекс Диска.
+- `tests/` — unit-тесты, негативные/пограничные случаи, открытые шаблоны документов и синтетический оценочный корпус.
+
+## Разработка и проверки
+
+В окружении с зависимостями из `requirements.txt`:
+
+```bash
+python -m compileall -q .
+python -m unittest discover -s tests -v
+python tests/evaluate_classification_corpus.py
+```
+
+Оценочный корпус — отобранные публичные бланки/формы и синтетические строки, не медицинские карты пациентов. Его результаты — проверка выбранных примеров и регрессий, **не оценка реальной точности** на произвольных заполненных сканах. Перед серьёзной настройкой нужны размеченный, деидентифицированный и представительный набор с метриками Precision/Recall/F1 по каждому классу и долей запросов на ручное уточнение.
+
+## Безопасность и ограничения
+
+- Не коммитьте `.env`, токены, базу данных, реальные документы или OCR-текст. Файл `.env` исключён из Git.
+- Индекс OCR-текста, ключевые слова, структурированный анализ, токены Яндекс Диска, алиасы пациента и файлы ожидающих уточнений шифруются Fernet. Короткие отображаемые имена пациентов, даты, типы и пути нужны для индексации и не являются целиком зашифрованной базой.
+- Оригиналы в постоянном хранилище Яндекс Диска защищаются правами этого аккаунта; шифрование на стороне приложения для всех постоянных файлов не включено. На VPS требуется ограничение доступа и шифрованные резервные копии.
+- Храните `FERNET_KEY` отдельно от резервных копий; без него шифротекст восстановить нельзя.
+- Веб-сервис оставляйте за HTTPS reverse proxy; порт приложения должен быть привязан к localhost. Перед использованием реальных документов проведите независимую проверку авторизации, CSRF, аудита, резервного копирования и восстановления.
+- Извлечённые лабораторные показатели и медицинские фрагменты — поисковые подсказки, а не медицинские выводы. Классификатор не ставит диагнозов и не назначает лечение.
+
+[executed on device: marss1k.fvds.ru (ecc850ae-e012-4a56-b726-1ade67f14bec)]
