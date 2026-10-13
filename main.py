@@ -655,6 +655,7 @@ async def _process_file(u, c, path, name):
     root = _pending_dir(u.effective_user.id)
     stage_name = item_id + ".enc"
     staged = root / stage_name
+    queued = False
     try:
         raw = path.read_bytes()
         staged.write_bytes(tenancy.cipher().encrypt(raw))
@@ -683,18 +684,23 @@ async def _process_file(u, c, path, name):
             item["title"] = infer_document_title(text, kind)
         _persist_pending(item)
         s.setdefault("pending_documents", []).append(item)
+        queued = True
         if len(s["pending_documents"]) > 1 and s.get("pending_field"):
             await say(u, "Документ распознан и поставлен в очередь. Сначала уточним сведения по предыдущему файлу; повторно отправлять ничего не нужно.")
             return
         await _advance_pending(u, c)
     except Exception as exc:
-        try:
-            staged.unlink(missing_ok=True)
-            (root / (item_id + ".pending")).unlink(missing_ok=True)
-        except OSError:
-            pass
+        if not queued:
+            try:
+                staged.unlink(missing_ok=True)
+                (root / (item_id + ".pending")).unlink(missing_ok=True)
+            except OSError:
+                pass
         logging.exception("Document processing failed")
-        await say(u, f"Не удалось распознать документ ({type(exc).__name__}). Попробуйте отправить фото/скан ещё раз.")
+        if queued:
+            await say(u, f"Документ уже помещён в зашифрованную очередь, но обработка прервалась ({type(exc).__name__}). Файл сохранён для повтора. Напишите /retry_save; повторно отправлять документ не нужно.")
+        else:
+            await say(u, f"Не удалось распознать документ ({type(exc).__name__}). Попробуйте отправить фото/скан ещё раз.")
 
 _PROCESS_SEMAPHORE = asyncio.Semaphore(2)
 
