@@ -62,7 +62,7 @@ def explicit_document_date(text):
     """Return a date only when OCR explicitly labels it as a document/exam date."""
     import re
     from datetime import datetime
-    match=re.search(r"(?:дата\\s+(?:документа|исследования|осмотра|выдачи|проведения|при[её]ма)|исследование\\s+от|осмотр\\s+от)\\s*[:№]?\\s*(\\d{1,2}[./-]\\d{1,2}[./-]\\d{4})",text or "",re.I)
+    match=re.search(r"(?:дата\s+(?:документа|исследования|осмотра|выдачи|проведения|при[её]ма)|исследование\s+от|осмотр\s+от)\s*[:№]?\s*(\d{1,2}[./-]\d{1,2}[./-]\d{4})",text or "",re.I)
     if not match: return ""
     for fmt in ("%d-%m-%Y","%d.%m.%Y","%d/%m/%Y"):
         try: return datetime.strptime(match.group(1),fmt).strftime("%d-%m-%Y")
