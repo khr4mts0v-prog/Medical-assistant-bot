@@ -209,7 +209,7 @@ FUZZY_HEADER_ANCHORS = {
 
 
 def _fuzzy_header_matches(text):
-    header = _normalize("\\n".join((text or "").splitlines()[:2]))
+    header = _normalize((text or "").splitlines()[0] if (text or "").splitlines() else "")
     if not header:
         return []
     # Compare contiguous 1-5 word spans, not arbitrary body text. A minimum
