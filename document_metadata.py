@@ -261,3 +261,18 @@ def format_archive_filename(date_str, title, extension, digest):
     clean = re.sub(r"\s+", " ", clean).strip(" -")[:90] or "Медицинский документ"
     date_part = (date_str or "Дата не определена").replace("/", "-")
     return f"{date_part} {clean} — {str(digest or '')[:8]}.{ext}"
+
+def extract_patient_birth_date(text):
+    """Extract only explicitly labelled patient DOB; never use a generic date as DOB."""
+    raw = text or ""
+    pattern = re.compile(
+        r"(?:дата\s+рождения|родил(?:ся|ась)|д\.\s*р\.)\s*[:№]?\s*"
+        r"(\d{1,2}[./-]\d{1,2}[./-]\d{4}|\d{4}-\d{1,2}-\d{1,2})",
+        re.IGNORECASE,
+    )
+    found = set()
+    for match in pattern.finditer(raw):
+        value = _normalise_date(match.group(1))
+        if value:
+            found.add(value)
+    return next(iter(found)) if len(found) == 1 else None
