@@ -9,3 +9,5 @@ data/
 *.sqlite3
 *.log
 .DS_Store
+
+public_eval/

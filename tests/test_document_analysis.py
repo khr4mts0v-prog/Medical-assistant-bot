@@ -100,5 +100,194 @@ class DocumentClassificationTests(unittest.TestCase):
         self.assertTrue(any(x["name"] == "ферритин" and x["value"] == "16" and x["page"] == 2 for x in result["lab_results"]))
 
 
+
+
+
+class ClassificationTaxonomyTests(unittest.TestCase):
+    def test_every_leaf_type_has_one_parent_category(self):
+        from AIAnalise import DOCUMENT_TYPE_RULES, DOCUMENT_TAXONOMY
+        self.assertEqual(set(DOCUMENT_TYPE_RULES), set(DOCUMENT_TAXONOMY))
+        self.assertEqual(len(DOCUMENT_TAXONOMY), len(DOCUMENT_TYPE_RULES))
+
+    def test_primary_taxonomy_is_exposed_without_changing_legacy_leaf_label(self):
+        result = analyze_document("Протокол УЗИ органов малого таза. Заключение: без особенностей.")
+        self.assertEqual(result["primary_type"], "заключение УЗИ")
+        self.assertEqual(result["primary_category"], "Инструментальная диагностика")
+        self.assertEqual(result["taxonomy_path"], ["Инструментальная диагностика", "заключение УЗИ"])
+        self.assertEqual(result["page_types"][0]["primary_category"], "Инструментальная диагностика")
+
+
+class DocumentMetadataTests(unittest.TestCase):
+    def test_conclusion_date_outranks_study_date(self):
+        from document_metadata import extract_document_date
+        text = "Дата исследования: 10.05.2026\nДата заключения: 12.05.2026"
+        self.assertEqual(extract_document_date(text), "12-05-2026")
+
+    def test_issue_date_outranks_study_date(self):
+        from document_metadata import extract_document_date
+        text = "Дата выдачи: 12.05.2026\nДата исследования: 10.05.2026"
+        self.assertEqual(extract_document_date(text), "12-05-2026")
+
+    def test_study_date_alone_is_not_document_date(self):
+        from document_metadata import extract_document_date
+        self.assertIsNone(extract_document_date("Дата исследования: 10.05.2026"))
+
+    def test_generic_date_after_study_date_is_not_suppressed(self):
+        from document_metadata import extract_document_date
+        text = "Дата исследования: 10.05.2026\\nДата: 12.05.2026"
+        self.assertEqual(extract_document_date(text), "12-05-2026")
+
+
+    def test_birth_date_alone_is_not_document_date(self):
+        from document_metadata import extract_document_date
+        self.assertIsNone(extract_document_date("Дата рождения: 05.04.2019"))
+
+    def test_multiple_unlabelled_dates_are_ambiguous(self):
+        from document_metadata import extract_document_date
+        self.assertIsNone(extract_document_date("12.05.2026; 13.05.2026"))
+
+    def test_single_unlabelled_date_is_accepted(self):
+        from document_metadata import extract_document_date
+        self.assertEqual(extract_document_date("Протокол. 12.05.2026"), "12-05-2026")
+
+    def test_invalid_date_is_rejected(self):
+        from document_metadata import extract_document_date
+        self.assertIsNone(extract_document_date("Дата заключения: 32.05.2026"))
+
+
+    def test_report_result_date_outranks_execution_date(self):
+        from document_metadata import extract_document_date
+        text = "Исследование проведено 10.05.2026\\nДата результата: 12.05.2026"
+        self.assertEqual(extract_document_date(text), "12-05-2026")
+
+    def test_unique_date_of_completed_study_is_not_assumed_to_be_report_date(self):
+        from document_metadata import extract_document_date
+        text = "УЗИ проведено 10.05.2026. Результат выдан отдельно."
+        self.assertIsNone(extract_document_date(text))
+
+    def test_ct_title_includes_anatomical_region(self):
+        from document_metadata import infer_document_title
+        self.assertEqual(infer_document_title("Протокол КТ поясничного отдела позвоночника", "заключение КТ"),
+                         "КТ — поясничного отдела")
+
+    def test_mri_title_includes_anatomical_region(self):
+        from document_metadata import infer_document_title
+        self.assertEqual(infer_document_title("Протокол МРТ головного мозга", "заключение МРТ"),
+                         "МРТ — головного мозга")
+
+    def test_endoscopy_title_is_specific(self):
+        from document_metadata import infer_document_title
+        self.assertEqual(infer_document_title("Протокол колоноскопии. Заключение", "эндоскопическое заключение"),
+                         "Колоноскопия")
+
+    def test_mycology_laboratory_report_and_report_creation_date(self):
+        from AIAnalise import analyze_document, classify_document
+        from document_metadata import extract_document_date, infer_document_title
+
+        text = """ПАЦИЕНТ ТЕСТОВЫЙ
+Заказ №: 12345
+Зарегистрирован: 04.10.2026 17:06:52
+Исследование кожи и ногтевых пластинок на поверхностные микозы (образец ткани)
+Ногти (пр. нога), валидация 06.10.2026 19:44:48
+Метод: Микроскопия
+Грибы: мицелий — не обнаружен
+Грибы: псевдомицелий — не обнаружен
+Грибы: споры — не обнаружены
+Грибы: дрожжеподобные клетки — не обнаружены
+Отчет создан: 06.10.2026 19:44:49
+Страница 1 из 1"""
+        result = analyze_document(text)
+        self.assertEqual(classify_document(text), "лабораторный отчёт")
+        self.assertEqual(result["confidence"], "high")
+        self.assertFalse(result["review_required"])
+        self.assertEqual(extract_document_date(text), "06-10-2026")
+        self.assertEqual(infer_document_title(text, result["primary_type"]), "Анализ на поверхностные микозы")
+
+    def test_kidney_and_bladder_ultrasound_title(self):
+        from AIAnalise import analyze_document, classify_document
+        from document_metadata import extract_document_date, infer_document_title
+
+        text = """УЛЬТРАЗВУКОВОЕ ИССЛЕДОВАНИЕ ПОЧЕК И МОЧЕВОГО ПУЗЫРЯ
+Дата осмотра: 17.03.2025 08:18
+ЗАКЛЮЧЕНИЕ: Ультразвуковые признаки гипотонии лоханки левой почки."""
+        result = analyze_document(text)
+        self.assertEqual(classify_document(text), "заключение УЗИ")
+        self.assertEqual(infer_document_title(text, result["primary_type"]), "УЗИ почек и мочевого пузыря")
+        self.assertEqual(extract_document_date(text), "17-03-2025")
+
+    def test_thyroid_ultrasound_title_and_exam_date(self):
+        from AIAnalise import analyze_document, classify_document
+        from document_metadata import extract_document_date, infer_document_title
+
+        text = """УЛЬТРАЗВУКОВОЕ ИССЛЕДОВАНИЕ ЩИТОВИДНОЙ ЖЕЛЕЗЫ
+Дата осмотра: 17.03.2025 12:45
+ЗАКЛЮЧЕНИЕ: Ультразвуковые признаки изменений щитовидной железы.
+РЕКОМЕНДАЦИИ: ультразвуковой контроль в динамике."""
+        result = analyze_document(text)
+        self.assertEqual(classify_document(text), "заключение УЗИ")
+        self.assertEqual(infer_document_title(text, result["primary_type"]), "УЗИ щитовидной железы")
+        self.assertEqual(extract_document_date(text), "17-03-2025")
+
+    def test_lab_pdf_with_blood_and_urine_panels_gets_combined_title(self):
+        from document_metadata import infer_document_title
+        text = """ОБЩЕКЛИНИЧЕСКИЕ ИССЛЕДОВАНИЯ КРОВИ
+Общий анализ крови с лейкоцитарной формулой
+ОБЩЕКЛИНИЧЕСКИЕ ИССЛЕДОВАНИЯ МОЧИ
+Общий анализ мочи"""
+        self.assertEqual(infer_document_title(text, "лабораторный отчёт"), "Общий анализ крови и мочи")
+
+    def test_lab_validation_date_is_used_as_document_date(self):
+        from document_metadata import extract_document_date
+        text = """Дата взятия образца: 22.04.2026
+Дата поступления образца: 22.04.2026 22:08
+Валидация врачом: 23.04.2026 02:41"""
+        self.assertEqual(extract_document_date(text), "23-04-2026")
+
+    def test_ultrasound_ocr_without_exam_date_must_not_use_birth_date(self):
+        from document_metadata import extract_document_date
+
+        text = """УЛЬТРАЗВУКОВОЕ ИССЛЕДОВАНИЕ ЩИТОВИДНОЙ ЖЕЛЕЗЫ
+ФИО: Пациент Тестовый
+Дата рождения: 10.03.2019
+Заключение: ультразвуковые признаки изменений щитовидной железы."""
+        self.assertIsNone(extract_document_date(text))
+
+    def test_ultrasound_report_heading_without_word_conclusion_is_classified(self):
+        from AIAnalise import analyze_document, classify_document
+
+        text = """УЛЬТРАЗВУКОВОЕ ИССЛЕДОВАНИЕ ПОЧЕК И МОЧЕВОГО ПУЗЫРЯ
+Дата осмотра: 17.03.2025 08:18
+ЗАКЛЮЧЕНИЕ: Ультразвуковые признаки гипотонии лоханки левой почки."""
+        result = analyze_document(text)
+        self.assertEqual(classify_document(text), "заключение УЗИ")
+        self.assertEqual(result["primary_type"], "заключение УЗИ")
+
+    def test_registered_patient_full_name(self):
+        from document_metadata import extract_registered_patient
+        roster = ["Иванов Иван Иванович", "Петров Пётр Петрович"]
+        self.assertEqual(extract_registered_patient("Пациент: Иванов Иван Иванович", roster), roster[0])
+
+    def test_multiple_patient_names_are_ambiguous(self):
+        from document_metadata import extract_registered_patient
+        roster = ["Иванов Иван Иванович", "Петров Пётр Петрович"]
+        self.assertIsNone(extract_registered_patient("Иванов Иван Иванович / Петров Пётр Петрович", roster))
+
+    def test_parent_name_is_not_matched_as_patient(self):
+        from document_metadata import extract_registered_patient
+        roster = ["Иванова Анна Сергеевна"]
+        self.assertIsNone(extract_registered_patient("ФИО матери: Иванова Анна Сергеевна", roster))
+
+    def test_ultrasound_title_contains_region(self):
+        from document_metadata import infer_document_title
+        self.assertEqual(infer_document_title("Протокол УЗИ органов малого таза", "заключение УЗИ"), "УЗИ малого таза")
+
+    def test_filename_is_date_first_and_collision_resistant(self):
+        from document_metadata import format_archive_filename
+        self.assertEqual(
+            format_archive_filename("12-05-2026", "УЗИ малого таза", "pdf", "abcdef1234"),
+            "12-05-2026 УЗИ малого таза — abcdef12.pdf",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

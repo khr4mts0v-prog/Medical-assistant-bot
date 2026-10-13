@@ -36,6 +36,19 @@ def page(title,body,status=200):
     return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
 body{max-width:850px;margin:auto;padding:18px;font:16px/1.5 system-ui,sans-serif}h1{font-size:1.5rem}h2{font-size:1.15rem}.card{border:1px solid #8888;border-radius:12px;padding:14px;margin:12px 0}input,select,button{font:inherit;max-width:100%;padding:9px;margin:4px 0}input[type=text],input[type=search]{width:min(100%,440px)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.muted{opacity:.7}.warn{border-left:4px solid #b8860b;padding:8px 12px}a{overflow-wrap:anywhere}</style></head><body><h1>Медицинский архив</h1>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></body></html>""",status_code=status)
 
+def display_document_title(document, analysis):
+    saved=(analysis or {}).get("display_title")
+    if saved: return str(saved)
+    text=str(document.get("text") or "")
+    import re
+    if re.search(r"ультразвуков\w*\s+исследован\w*.{0,100}почек\s+и\s+мочевого\s+пузыря",text,re.I|re.S):
+        return "УЗИ почек и мочевого пузыря"
+    if re.search(r"ультразвуков\w*\s+исследован\w*.{0,100}щитовидной\s+железы",text,re.I|re.S):
+        return "УЗИ щитовидной железы"
+    kind=str(document.get("kind") or "не определено")
+    if kind!="не определено": return kind[:1].upper()+kind[1:]
+    return "Документ — требуется классификация"
+
 def family(fid,uid):
     if not tenancy.role_for_user(fid,uid): raise HTTPException(403,"Нет доступа к этому семейному архиву")
     f=tenancy.get_family(fid)
@@ -103,7 +116,10 @@ def patient_page(fid:int,patient:str,q:str="",uid:int=Depends(current_user)):
         tag_text=", ".join(tags)
         status = " · требует проверки" if review else ""
         link = f'<p><a href="/families/{fid}/documents/{int(d["id"])}">Открыть оригинал</a></p>' if STORAGE_BACKEND == "local" and d.get("remote") else ""
-        b.append(f'<div class="card"><strong>{html.escape(str(d.get("name") or "Документ"))}</strong><br>Основной тип: {html.escape(str(d.get("kind") or "не определено"))}{status}<br>Типы документа: {html.escape(label_text)}<br>Темы: {html.escape(tag_text or "—")}<br>Уверенность: {html.escape(str(confidence))}<br>Дата: {html.escape(str(d.get("date") or "—"))}<p>{html.escape((d.get("text") or "")[:600])}</p>{link}<small>{html.escape(str(d.get("remote") or ""))}</small></div>')
+        title = display_document_title(d, a)
+        edit_url = f"/families/{fid}/documents/{int(d['id'])}/edit"
+        edit_label = "Редактировать карточку" if review or d.get("kind") == "не определено" else "Изменить данные"
+        b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Пациент: {html.escape(str(d.get("patient") or patient))}<br>Обследование: {html.escape(str(d.get("kind") or "не определено"))}{status}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}<br><span class="muted">Уверенность: {html.escape(str(confidence))}</span>{link}<p><a href="{edit_url}">{edit_label}</a></p><details><summary>Показать распознанный текст (OCR)</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape((d.get("text") or "")[:12000])}</pre></details></div>')
     b.append('</div>')
     return page("Пациент","".join(b))
 
@@ -122,6 +138,51 @@ def download_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
     if path.parent != expected_dir.resolve(): raise HTTPException(404,"Документ не найден")
     if not path.is_file(): raise HTTPException(404,"Файл отсутствует в локальном хранилище")
     return FileResponse(path,filename=str(d.get("name") or path.name),media_type="application/octet-stream")
+
+@app.get("/families/{fid}/documents/{doc_id}/edit", response_class=HTMLResponse)
+def edit_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
+    family(fid,uid)
+    d=db.get_doc(fid,doc_id)
+    if not d: raise HTTPException(404,"Документ не найден")
+    from AIAnalise import DOCUMENT_TYPE_RULES
+    kinds=["не определено"]+sorted(DOCUMENT_TYPE_RULES.keys())
+    options="".join("<option value=\"" + html.escape(k,quote=True) + "\"" + (" selected" if k==d.get("kind") else "") + ">" + html.escape(k) + "</option>" for k in kinds)
+    analysis=d.get("analysis") or {}
+    title=display_document_title(d, analysis)
+    patient=html.escape(str(d.get("patient") or ""),quote=True)
+    body="<p><a href=\"/families/"+str(fid)+"/patients/"+patient+"\">← Назад к документам</a></p>"
+    body+="<h2>Редактирование карточки документа</h2><div class=\"card\"><strong>Пациент:</strong> "+html.escape(str(d.get("patient") or ""))+"<br><strong>Исходный файл:</strong> "+html.escape(str(d.get("name") or ""))+"</div>"
+    body+="<form method=\"post\" action=\"/families/"+str(fid)+"/documents/"+str(doc_id)+"/edit\"><label>Тип обследования<br><select name=\"kind\" required>"+options+"</select></label><br>"
+    body+="<label>Название для архива<br><input type=\"text\" name=\"title\" maxlength=\"180\" value=\""+html.escape(str(title),quote=True)+"\" required></label><br>"
+    body+="<label>Дата документа (ДД-ММ-ГГГГ)<br><input type=\"text\" name=\"date\" maxlength=\"10\" placeholder=\"17-03-2025\" value=\""+html.escape(str(d.get("date") or ""),quote=True)+"\"></label>"
+    body+="<p class=\"muted\">Оригинал и первоначальный OCR-текст останутся без изменений.</p><button type=\"submit\">Сохранить изменения</button></form>"
+    return page("Редактирование документа",body)
+
+@app.post("/families/{fid}/documents/{doc_id}/edit", response_class=HTMLResponse)
+def save_document_edit(fid:int,doc_id:int,kind:str=Form(...),title:str=Form(...),date:str=Form(""),uid:int=Depends(current_user)):
+    family(fid,uid)
+    d=db.get_doc(fid,doc_id)
+    if not d: raise HTTPException(404,"Документ не найден")
+    from AIAnalise import DOCUMENT_TYPE_RULES, DOCUMENT_TAXONOMY
+    from datetime import datetime
+    if kind!="не определено" and kind not in DOCUMENT_TYPE_RULES: raise HTTPException(400,"Неизвестный тип документа")
+    title=" ".join((title or "").split()).strip()[:180]
+    if not title: raise HTTPException(400,"Название документа не может быть пустым")
+    date=(date or "").strip()
+    if date:
+        try: date=datetime.strptime(date,"%d-%m-%Y").strftime("%d-%m-%Y")
+        except ValueError: raise HTTPException(400,"Дата должна быть в формате ДД-ММ-ГГГГ")
+    analysis=d.get("analysis") or {}
+    analysis["primary_type"]=kind
+    analysis["primary_category"]=DOCUMENT_TAXONOMY.get(kind,{}).get("category","не определено")
+    analysis["taxonomy_path"]=[analysis["primary_category"],kind] if kind in DOCUMENT_TAXONOMY else []
+    analysis["document_types"]=[kind] if kind!="не определено" else []
+    analysis["types"]=[kind] if kind!="не определено" else []
+    analysis["confidence"]="manual" if kind!="не определено" else "low"
+    analysis["review_required"]=kind=="не определено"
+    analysis["display_title"]=title
+    if not db.update_doc_metadata(fid,doc_id,kind,date,analysis): raise HTTPException(404,"Документ не найден")
+    return RedirectResponse("/families/"+str(fid)+"/patients/"+str(d.get("patient") or ""),status_code=303)
 
 @app.post("/families/{fid}/patients/{patient}/upload",response_class=HTMLResponse)
 def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current_user)):
