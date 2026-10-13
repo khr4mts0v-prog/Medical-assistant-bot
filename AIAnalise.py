@@ -183,12 +183,12 @@ def _classify_segment(text):
     # A modality mentioned as a recommendation/referral is not itself a report.
     # Without report-form evidence, avoid classifying "get an MRI/US" as a result.
     mention_context = bool(re.search(
-        r"\\b(?:рекомендован\\w*|рекомендовал\\w*|направлен\\w*|направление|"
-        r"выполнить|пройти|записаться|при\\s+необходимости|планируется|"
-        r"назначено\\s+(?:провести|выполнить))\\b", normalized))
+        r"\b(?:рекомендован\w*|рекомендовал\w*|направлен\w*|направление|"
+        r"выполнить|пройти|записаться|при\s+необходимости|планируется|"
+        r"назначено\s+(?:провести|выполнить))\b", normalized))
     report_context = bool(re.search(
-        r"\\b(?:протокол\\w*|заключение\\w*|результат\\w*|описание\\w*|"
-        r"проведено|выполнено|данные\\s+исследования|ход\\s+исследования)\\b", normalized))
+        r"\b(?:протокол\w*|заключение\w*|результат\w*|описание\w*|"
+        r"проведено|выполнено|данные\s+исследования|ход\s+исследования)\b", normalized))
     if mention_context and not report_context:
         for label in (
             "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
