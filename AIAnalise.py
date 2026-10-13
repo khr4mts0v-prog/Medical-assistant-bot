@@ -258,19 +258,23 @@ def _classify_segment(text):
     scores, evidence = _score_types(text)
     normalized = _normalize(text)
 
-    # Fuzzy OCR matching is a fallback: it must not override a clear exact
-    # title that identifies the document form.
+    # Fuzzy OCR matching is a fallback. Do not add a competing imaging type
+    # when the opening lines already contain a clear exact imaging heading.
     exact_header_text = _normalize("\\n".join((text or "").splitlines()[:2]))
     exact_header_scores, _ = _score_types(exact_header_text)
-    has_strong_exact_header = any(score >= 9 for score in exact_header_scores.values())
-    if not has_strong_exact_header:
-        for label, similarity in _fuzzy_header_matches(text):
-            if similarity >= 0.88:
-                scores[label] = max(scores.get(label, 0), 10)
-                evidence.setdefault(label, []).append({
-                    "weight": 10,
-                    "reason": f"приближённое совпадение заголовка ({similarity:.2f})",
-                })
+    imaging_labels = (
+        "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
+        "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
+    )
+    exact_imaging_heading = any(exact_header_scores.get(label, 0) >= 9 for label in imaging_labels)
+    for label, similarity in _fuzzy_header_matches(text):
+        if similarity >= 0.88 and not (exact_imaging_heading and label in imaging_labels
+                                       and exact_header_scores.get(label, 0) < 9):
+            scores[label] = max(scores.get(label, 0), 10)
+            evidence.setdefault(label, []).append({
+                "weight": 10,
+                "reason": f"приближённое совпадение заголовка ({similarity:.2f})",
+            })
 
     # Classify the document's form, not every medical topic mentioned in its body.
     # In particular, a requested future investigation is not its resulting report.
@@ -312,9 +316,9 @@ def _classify_segment(text):
             if label != winner:
                 scores.pop(label, None)
                 evidence.pop(label, None)
-    elif not report_context:
+    elif not report_context and not any(score >= 9 for score in exact_header_scores.values()):
         # Bare lists of medical terms are not imaging reports; abstain unless
-        # there is a report heading or result-like context.
+        # there is a report heading, result-like context, or strong exact title.
         for label in imaging_labels:
             scores.pop(label, None)
             evidence.pop(label, None)
