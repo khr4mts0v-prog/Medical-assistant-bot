@@ -86,6 +86,12 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
             '<button type="submit">Загрузить и разобрать документы</button></form>'
             '<small>До ' + str(MAX_UPLOAD_MB) + ' МБ на файл. Если пациент не распознан однозначно, документ не будет ошибочно сохранён в чужую историю.</small></div>'
         )
+    if fs:
+        inbox_count = len(db.pending_documents(f["id"])) if f else 0
+        if inbox_count:
+            b.append(f'<div class="card"><h2>Нераспознанные документы</h2><p>Ожидают ручной проверки: <strong>{inbox_count}</strong></p><a href="/families/{f["id"]}/inbox">Открыть входящие документы</a></div>')
+        else:
+            b.append(f'<div class="card"><h2>Входящие документы</h2><p>Нет документов, ожидающих ручной проверки.</p><a href="/families/{f["id"]}/inbox">Открыть раздел</a></div>')
     if f:
         fid=f["id"]
         b.append(f'<div class="card"><h2>Архив: {html.escape(f["name"])}</h2><p>Хранение документов: {"локально на VPS" if STORAGE_BACKEND == "local" else "Яндекс Диск"}</p>')
@@ -241,15 +247,19 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), uid:
                     results.append('<li><strong>'+html.escape(name)+'</strong>: файл пустой или превышает '+str(MAX_UPLOAD_MB)+' МБ; пропущен.</li>')
                     continue
                 text=ocr_file(str(local))
-                patient=extract_registered_patient(text,roster)
-                if not patient:
-                    results.append('<li><strong>'+html.escape(name)+'</strong>: пациент не определён однозначно. Файл не сохранён. Проверьте варианты ФИО пациента в настройках архива и загрузите повторно.</li>')
-                    continue
                 analysis=analyze_document(text)
+                patient=extract_registered_patient(text,roster)
+                digest=hashlib.sha256(local.read_bytes()).hexdigest()
+                if not patient:
+                    pending_id=db.add_pending_doc(family_id,name,digest,local.read_bytes(),text,analysis)
+                    if pending_id is None:
+                        results.append('<li><strong>'+html.escape(name)+'</strong>: такой документ уже находится во входящих.</li>')
+                    else:
+                        results.append('<li><strong>'+html.escape(name)+'</strong>: добавлен во входящие документы для ручного назначения пациента и классификации.</li>')
+                    continue
                 kind=analysis["primary_type"]
                 keywords=extract_keywords(text,analysis)
                 date=parse_date_from_text(text)
-                digest=hashlib.sha256(local.read_bytes()).hexdigest()
                 if db.document_exists(family_id,patient,digest):
                     results.append('<li><strong>'+html.escape(name)+'</strong>: дубликат — уже есть у пациента '+html.escape(patient)+'.</li>')
                     continue
@@ -294,6 +304,81 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), uid:
     body='<p><a href="/?family_id='+str(family_id)+'">← В архив</a></p><h2>Результаты загрузки</h2><div class="card"><ul>'+''.join(results)+'</ul></div>'
     return page("Результаты загрузки",body)
 
+
+
+@app.get("/families/{fid}/inbox", response_class=HTMLResponse)
+def review_inbox(fid:int,uid:int=Depends(current_user)):
+    family(fid,uid)
+    rows=db.pending_documents(fid)
+    body=[f'<p><a href="/?family_id={fid}">← В архив</a></p><h2>Нераспознанные документы</h2><p>Документы здесь сохранены в зашифрованном виде до назначения пациента.</p>']
+    if not rows:
+        body.append('<div class="card">Входящих документов нет.</div>')
+    for row in rows:
+        body.append(f'<div class="card"><strong>{html.escape(row["name"])}</strong><p>Добавлен: {html.escape(row["created"])}</p><a href="/families/{fid}/inbox/{row["id"]}">Открыть и классифицировать</a></div>')
+    return page("Нераспознанные документы","".join(body))
+
+@app.get("/families/{fid}/inbox/{pending_id}", response_class=HTMLResponse)
+def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)):
+    family(fid,uid)
+    d=db.get_pending_doc(fid,pending_id)
+    if not d: raise HTTPException(404,"Документ не найден во входящих")
+    patients=db.patients(fid)
+    from AIAnalise import DOCUMENT_TYPE_RULES
+    kinds=["не определено"]+sorted(DOCUMENT_TYPE_RULES.keys())
+    patient_options="".join('<option value="'+html.escape(p,quote=True)+'">'+html.escape(p)+'</option>' for p in patients)
+    kind_options="".join('<option value="'+html.escape(k,quote=True)+'"'+(' selected' if k==d["analysis"].get("primary_type") else '')+'>'+html.escape(k)+'</option>' for k in kinds)
+    body=f'<p><a href="/families/{fid}/inbox">← К нераспознанным</a></p><h2>Ручная классификация</h2><div class="card"><strong>Файл:</strong> {html.escape(d["name"])}<details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape(d["text"][:12000])}</pre></details></div>'
+    body+=f'<form method="post" action="/families/{fid}/inbox/{pending_id}/assign"><label>Пациент<br><select name="patient" required>{patient_options}</select></label><br><label>Тип документа<br><select name="kind" required>{kind_options}</select></label><br><label>Название в архиве<br><input name="title" required maxlength="180" value="{html.escape(str(d["analysis"].get("display_title") or d["analysis"].get("primary_type") or d["name"]),quote=True)}"></label><br><label>Дата документа (ДД-ММ-ГГГГ)<br><input name="date" placeholder="17-03-2025" maxlength="10"></label><p><button type="submit">Сохранить в историю пациента</button></p></form>'
+    return page("Ручная классификация",body)
+
+@app.post("/families/{fid}/inbox/{pending_id}/assign", response_class=HTMLResponse)
+def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:str=Form(...),title:str=Form(...),date:str=Form(""),uid:int=Depends(current_user)):
+    family(fid,uid)
+    d=db.get_pending_doc(fid,pending_id)
+    if not d: raise HTTPException(404,"Документ не найден во входящих")
+    if patient not in db.patients(fid): raise HTTPException(400,"Выбранный пациент не найден")
+    from AIAnalise import DOCUMENT_TYPE_RULES, DOCUMENT_TAXONOMY
+    from datetime import datetime
+    if kind!="не определено" and kind not in DOCUMENT_TYPE_RULES: raise HTTPException(400,"Неизвестный тип документа")
+    title=" ".join((title or "").split()).strip()[:180]
+    if not title: raise HTTPException(400,"Введите название документа")
+    date=(date or "").strip()
+    if date:
+        try: date=datetime.strptime(date,"%d-%m-%Y").strftime("%d-%m-%Y")
+        except ValueError: raise HTTPException(400,"Дата должна быть в формате ДД-ММ-ГГГГ")
+    if db.document_exists(fid,patient,d["digest"]):
+        db.delete_pending_doc(fid,pending_id)
+        return RedirectResponse(f"/families/{fid}/inbox",status_code=303)
+    token=tenancy.get_yadisk_token(fid) if STORAGE_BACKEND=="yandex" else None
+    if STORAGE_BACKEND=="yandex" and not token: raise HTTPException(400,"Сначала подключите Яндекс Диск")
+    analysis=d["analysis"] or {}
+    analysis.update({"primary_type":kind,"primary_category":DOCUMENT_TAXONOMY.get(kind,{}).get("category","не определено"),
+      "taxonomy_path":[DOCUMENT_TAXONOMY.get(kind,{}).get("category","не определено"),kind] if kind in DOCUMENT_TAXONOMY else [],
+      "document_types":[kind] if kind!="не определено" else [],"types":[kind] if kind!="не определено" else [],
+      "confidence":"manual","review_required":kind=="не определено","display_title":title})
+    ext=Path(d["name"]).suffix.lower()
+    stored=f"{Path(format_filename(patient,kind,date,ext)).stem}_{d['digest'][:8]}.{normalize_extension(d['name'])}"
+    ocr_stored=Path(stored).stem+".txt"
+    with tempfile.TemporaryDirectory() as td:
+        local=Path(td)/Path(d["name"]).name
+        local.write_bytes(d["file_bytes"])
+        if STORAGE_BACKEND=="local":
+            remote_path=save_local_file(fid,patient,stored,local)
+            ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(d["text"],encoding="utf-8")
+            ocr_path=save_local_file(fid,patient,ocr_stored,ocr_tmp)
+            remote,oremote=str(remote_path),str(ocr_path)
+        else:
+            disk=YaDiskClient(token); folder=f"{ROOT}/family_{fid}/{safe_name(patient)}"
+            docs,ocr=folder+"/docs",folder+"/OCR"; disk.ensure_folder(docs); disk.ensure_folder(ocr)
+            remote,oremote=docs+"/"+stored,ocr+"/"+ocr_stored
+            disk.upload_file(str(local),remote)
+            ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(d["text"],encoding="utf-8"); disk.upload_file(str(ocr_tmp),oremote)
+        if not db.add_doc(fid,patient,stored,kind,date,remote,oremote,d["text"],extract_keywords(d["text"],analysis),d["digest"],analysis=analysis):
+            raise HTTPException(409,"Не удалось добавить документ в историю; запись во входящих сохранена")
+        db.delete_pending_doc(fid,pending_id)
+        if STORAGE_BACKEND=="yandex":
+            hp=Path(td)/"history.txt"; hp.write_text(db.history(fid,patient),encoding="utf-8"); disk.upload_file(str(hp),folder+"/history.txt")
+    return RedirectResponse(f"/families/{fid}/patients/{patient}",status_code=303)
 
 @app.post("/families/{fid}/patients/{patient}/upload",response_class=HTMLResponse)
 def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current_user)):
