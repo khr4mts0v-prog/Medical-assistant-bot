@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Diagnostic evaluation of synthetic and publicly published anonymized examples."""
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -52,13 +52,21 @@ def main():
 
     pairs = []
     page_pairs = []
+    group_pairs = defaultdict(list)
+    group_unknown = Counter()
+    group_total = Counter()
     mismatches = []
     for filename, item in records:
         result = analyze_document(item["text"])
         expected = item["expected_type"]
         if expected != "смешанный документ":
             predicted = result["primary_type"]
+            record_kind = item.get("record_kind") or item.get("source_type") or "synthetic_fixture"
             pairs.append((expected, predicted))
+            group_pairs[record_kind].append((expected, predicted))
+            group_total[record_kind] += 1
+            if predicted == "не определено":
+                group_unknown[record_kind] += 1
             if expected != predicted:
                 mismatches.append("document mismatch: " + item["id"])
                 print(f"DOCUMENT MISMATCH {item['id']} [{filename}]: expected={expected!r}, predicted={predicted!r}, scores={result.get('type_scores', {})}")
@@ -75,6 +83,14 @@ def main():
         print(f"  - {path.name}")
     print("\n=== Document-level evaluation ===")
     print_metrics(pairs)
+    print("\n=== Results by source/record kind ===")
+    print("Record kind | N | Exact accuracy | Unknown predicted | Unknown rate")
+    for kind in sorted(group_pairs):
+        group = group_pairs[kind]
+        n = len(group)
+        correct = sum(expected == predicted for expected, predicted in group)
+        unknown = group_unknown[kind]
+        print(f"{kind} | {n} | {correct / n:.1%} | {unknown} | {unknown / n:.1%}")
     if page_pairs:
         print("\n=== Page-level evaluation ===")
         print_metrics(page_pairs)
