@@ -1,5 +1,3 @@
-[Reading 567 lines from start (total: 567 lines, 0 remaining)]
-
 """Explainable rule-based classification for Russian family medical archives.
 Document form is separated from clinical content tags. Weak evidence yields "не определено".
 Extracted values/snippets are search aids only, never clinical conclusions.
@@ -567,5 +565,3 @@ def answer_question(query, patient, hf_token, context=""):
         return response.json()["choices"][0]["message"]["content"]
     except Exception as exc:
         return f"Не удалось получить ответ ИИ ({type(exc).__name__}). Проверьте настройки модели."
-
-[executed on device: marss1k.fvds.ru (ecc850ae-e012-4a56-b726-1ade67f14bec)]

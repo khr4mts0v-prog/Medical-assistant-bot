@@ -253,5 +253,3 @@ def format_archive_filename(date_str, title, extension, digest):
     clean = re.sub(r"\s+", " ", clean).strip(" -")[:90] or "Медицинский документ"
     date_part = (date_str or "Дата не определена").replace("/", "-")
     return f"{date_part} {clean} — {str(digest or '')[:8]}.{ext}"
-
-[executed on device: marss1k.fvds.ru (ecc850ae-e012-4a56-b726-1ade67f14bec)]
