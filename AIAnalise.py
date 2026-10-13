@@ -212,6 +212,17 @@ def _fuzzy_header_matches(text):
     header = _normalize((text or "").splitlines()[0] if (text or "").splitlines() else "")
     if not header:
         return []
+    # OCR/keyboarding can mix visually identical Latin and Cyrillic glyphs.
+    # Apply this only to heading comparison; never mutate source text or values.
+    confusables = str.maketrans({
+        "a": "а", "c": "с", "e": "е", "o": "о", "p": "р",
+        "x": "х", "y": "у", "k": "к", "m": "м", "t": "т",
+        "b": "в", "h": "н",
+    })
+    header = header.translate(confusables)
+    # OCR can split a word with an accidental space. Generate a second,
+    # conservative comparison form only for the heading matcher.
+    compact_header = re.sub(r"(?<=[а-я])\s+(?=[а-я])", "", header)
     # Compare contiguous 1-5 word spans, not arbitrary body text. A minimum
     # length and high threshold reduce accidental matches on short abbreviations.
     words = re.findall(r"[а-яa-z0-9-]+", header)
@@ -221,10 +232,17 @@ def _fuzzy_header_matches(text):
             span = " ".join(words[start:start + width])
             if len(span.replace(" ", "")) >= 9:
                 spans.append(span)
+    compact_words = re.findall(r"[а-яa-z0-9-]+", compact_header)
+    for start in range(len(compact_words)):
+        for width in range(1, min(5, len(compact_words) - start) + 1):
+            span = " ".join(compact_words[start:start + width])
+            if len(span.replace(" ", "")) >= 9:
+                spans.append(span)
     matches = []
     for label, anchors in FUZZY_HEADER_ANCHORS.items():
-        best = max((SequenceMatcher(None, span, _normalize(anchor)).ratio()
-                    for span in spans for anchor in anchors), default=0)
+        normalized_anchors = [_normalize(anchor).translate(confusables) for anchor in anchors]
+        best = max((SequenceMatcher(None, span, anchor).ratio()
+                    for span in spans for anchor in normalized_anchors), default=0)
         if best >= 0.88:
             matches.append((label, best))
     return matches
