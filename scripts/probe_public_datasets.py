@@ -120,16 +120,18 @@ def probe_ruclinner(limit_per_split):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", choices=("all", "rumedprime", "ruclinner"), default="all")
-    parser.add_argument("--limit-per-split", type=int, default=500,
-                        help="RuClinNER rows per split; 0 means all rows (default: 500)")
+    parser.add_argument("--limit-per-split", type=int, default=300,
+                        help="RuClinNER rows per split; 0 means all rows (default: 300)")
+    parser.add_argument("--limit-rumedprime", type=int, default=500,
+                        help="Maximum RuMedPrimeData records; 0 means all rows (default: 500)")
     args = parser.parse_args()
-    if args.limit_per_split < 0:
-        parser.error("--limit-per-split cannot be negative")
+    if args.limit_per_split < 0 or args.limit_rumedprime < 0:
+        parser.error("record limits cannot be negative")
     print("DIAGNOSTIC ONLY: these corpora do not contain gold document-type labels.", flush=True)
     print("Only aggregate predictions are printed; raw text is not saved as a fixture or artifact.", flush=True)
     if args.dataset in ("all", "rumedprime"):
         try:
-            probe_rumedprime()
+            probe_rumedprime(args.limit_rumedprime)
         except Exception as exc:
             print(f"\n[RuMedPrimeData] FAILED: {type(exc).__name__}: {str(exc)[:180]}", flush=True)
             if args.dataset == "rumedprime":
