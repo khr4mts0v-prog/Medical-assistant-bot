@@ -11,30 +11,44 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from AIAnalise import analyze_document, _score_types, _fuzzy_header_matches  # noqa: E402
+from AIAnalise import (  # noqa: E402
+    analyze_document,
+    _classify_segment,
+    _score_types,
+    _fuzzy_header_matches,
+)
 
 
 def compact_scores(scores):
-    return ", ".join(f"{label}={score}" for label, score in sorted(scores.items(), key=lambda x: (-x[1], x[0]))) or "(нет)"
+    return ", ".join(
+        f"{label}={score}"
+        for label, score in sorted(scores.items(), key=lambda x: (-x[1], x[0]))
+    ) or "(нет)"
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("file", nargs="?", help="UTF-8 text file; omit to read stdin")
     parser.add_argument("--show-lines", action="store_true", help="print input lines (may contain personal data)")
+    parser.add_argument("--max-lines", type=int, default=120,
+                        help="maximum number of line prefixes to probe (default: 120)")
     parser.add_argument("--json", action="store_true", help="emit structured diagnostic JSON")
     args = parser.parse_args()
+    if args.max_lines < 1:
+        parser.error("--max-lines must be positive")
 
     text = Path(args.file).read_text(encoding="utf-8") if args.file else sys.stdin.read()
     result = analyze_document(text)
     raw_scores, raw_evidence = _score_types(text)
+    segment_result = _classify_segment(text)
     fuzzy = _fuzzy_header_matches(text)
     final_scores = result.get("type_scores", {})
     lines = text.splitlines()
+    probe_count = min(len(lines), args.max_lines)
 
     changed_lines = []
     previous = None
-    for index in range(1, len(lines) + 1):
+    for index in range(1, probe_count + 1):
         prefix_result = analyze_document("\n".join(lines[:index]))
         signature = (prefix_result.get("primary_type"), tuple(sorted(prefix_result.get("type_scores", {}).items())))
         if signature != previous:
@@ -48,9 +62,14 @@ def main():
     if args.json:
         payload = {
             "input_lines": len(lines),
+            "prefix_lines_checked": probe_count,
+            "prefix_probe_truncated": probe_count < len(lines),
             "raw_rule_scores": raw_scores,
             "raw_rule_evidence": raw_evidence,
             "fuzzy_header_matches": fuzzy,
+            "segment_primary_type": segment_result.get("primary_type"),
+            "segment_confidence": segment_result.get("confidence"),
+            "segment_type_scores": segment_result.get("type_scores", {}),
             "final_type_scores": final_scores,
             "primary_type": result.get("primary_type"),
             "confidence": result.get("confidence"),
@@ -67,31 +86,35 @@ def main():
     print("=== Итог классификации ===")
     print(f"Основной тип: {result.get('primary_type')}")
     print(f"Уверенность: {result.get('confidence')}; margin={result.get('margin')}")
-    print(f"Финальные баллы: {compact_scores(final_scores)}")
+    print(f"Финальные баллы документа: {compact_scores(final_scores)}")
     print("\n=== Этап 1: совпадения базовых правил ===")
     print(compact_scores(raw_scores))
     for label, hits in raw_evidence.items():
         print(f"  {label}: " + "; ".join(f"{h['reason']} (+{h['weight']})" for h in hits))
-    print("\n=== Этап 2: нечёткое совпадение заголовка ===")
-    print(fuzzy or "(совпадений нет)")
-    print("\n=== Этап 3: сравнение базовых и финальных баллов ===")
-    removed = {label: score for label, score in raw_scores.items() if label not in final_scores}
-    reduced = {label: (score, final_scores[label]) for label, score in raw_scores.items()
-               if label in final_scores and final_scores[label] != score}
+    print("\n=== Этап 2: заголовок и сегментные фильтры ===")
+    print(f"Нечёткие совпадения заголовка: {fuzzy or '(нет)'}")
+    print(f"Тип после обработки одного сегмента: {segment_result.get('primary_type')}")
+    print(f"Баллы сегмента: {compact_scores(segment_result.get('type_scores', {}))}")
+    print(f"Уверенность сегмента: {segment_result.get('confidence')}")
+    print("\n=== Этап 3: агрегация документа/страниц ===")
+    print(f"Тип документа: {result.get('primary_type')}")
+    print(f"Баллы документа: {compact_scores(final_scores)}")
+    removed = {label: score for label, score in raw_scores.items() if label not in segment_result.get("type_scores", {})}
     if removed:
-        print("Кандидаты, исчезнувшие после фильтров/контекстных правил:", compact_scores(removed))
-    if reduced:
-        print("Изменённые баллы:", reduced)
-    if not removed and not reduced:
-        print("Явных отличий между базовыми и финальными баллами нет.")
+        print("Базовые кандидаты, отсутствующие после сегментных фильтров/порогов:",
+              compact_scores(removed))
+    if segment_result.get("primary_type") != result.get("primary_type"):
+        print("ВНИМАНИЕ: итог изменился между обработкой одного сегмента и агрегацией документа/страниц.")
     print("\n=== Этап 4: построчная локализация ===")
-    print("Строки, после добавления которых меняется итог/набор баллов:")
+    print(f"Проверено префиксов строк: {probe_count}/{len(lines)}")
     for item in changed_lines:
-        print(f"  строка {item['line']}: тип={item['primary_type']}; баллы={compact_scores(item['type_scores'])}")
+        print(f"  после строки {item['line']}: тип={item['primary_type']}; "
+              f"баллы={compact_scores(item['type_scores'])}")
         if args.show_lines:
             print(f"    текст: {lines[item['line'] - 1]}")
-    print("\nПримечание: исчезновение кандидата между этапами указывает на контекстный фильтр/подавление;")
-    print("этот отчёт не исполняет и не меняет правила классификатора.")
+    if probe_count < len(lines):
+        print("Остальные строки не проверялись; увеличьте --max-lines для более длинного документа.")
+    print("\nБез --show-lines исходный текст не выводится. Диагностика не меняет правила классификатора.")
 
 
 if __name__ == "__main__":
