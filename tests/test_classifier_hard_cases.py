@@ -303,5 +303,15 @@ class ClassificationHardCasesTests(unittest.TestCase):
         )
 
 
+    def test_referral_with_full_modality_name_and_future_description_is_not_report(self):
+        self.assert_primary(
+            "НАПРАВЛЕНИЕ НА МРТ ГОЛОВНОГО МОЗГА\n"
+            "Пациент направляется на магнитно-резонансную томографию по плановому показанию.\n"
+            "Просим провести исследование и направить протокол лечащему врачу.\n"
+            "Описание снимков и заключение будут сформированы после обследования.",
+            "направление",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

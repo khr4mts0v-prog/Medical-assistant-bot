@@ -341,13 +341,14 @@ def _classify_segment(text):
             (text or "").strip(), re.IGNORECASE
         ))
     )
-    report_context = report_heading or fuzzy_imaging_heading or standalone_imaging_title or bool(re.search(
+    report_content_signal = bool(re.search(
         r"\b(?:результат\w*\s+исследовани\w*|описание\s+(?:исследовани\w*|снимк\w*)|"
         r"исследовани\w*\s+(?:выполнено|проведено)|"
         r"(?:выполнено|проведено)\s+(?:узи|мрт|кт|рентген\w*|исследовани\w*)|"
         r"заключение\s*:\s*(?:признак\w*|данных\s+за|без\s+особенностей|"
         r"эхографическ\w*|кт-картин\w*|мр-картин\w*|синусов\w+\s+ритм))",
         normalized))
+    report_context = report_heading or fuzzy_imaging_heading or standalone_imaging_title or (report_content_signal and not referral_context)
     imaging_labels = (
         "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
         "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
