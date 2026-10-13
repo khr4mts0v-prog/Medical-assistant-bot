@@ -178,6 +178,25 @@ def _score_types(text):
 
 def _classify_segment(text):
     scores, evidence = _score_types(text)
+    normalized = _normalize(text)
+
+    # A modality mentioned as a recommendation/referral is not itself a report.
+    # Without report-form evidence, avoid classifying "get an MRI/US" as a result.
+    mention_context = bool(re.search(
+        r"\\b(?:рекомендован\\w*|рекомендовал\\w*|направлен\\w*|направление|"
+        r"выполнить|пройти|записаться|при\\s+необходимости|планируется|"
+        r"назначено\\s+(?:провести|выполнить))\\b", normalized))
+    report_context = bool(re.search(
+        r"\\b(?:протокол\\w*|заключение\\w*|результат\\w*|описание\\w*|"
+        r"проведено|выполнено|данные\\s+исследования|ход\\s+исследования)\\b", normalized))
+    if mention_context and not report_context:
+        for label in (
+            "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
+            "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
+        ):
+            scores.pop(label, None)
+            evidence.pop(label, None)
+
     ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
     if not ranked or ranked[0][1] < 6:
         primary, confidence, document_types, margin = "не определено", "low", [], 0
