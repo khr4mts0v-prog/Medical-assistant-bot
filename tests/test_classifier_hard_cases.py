@@ -189,5 +189,85 @@ class ClassificationHardCasesTests(unittest.TestCase):
         )
 
 
+
+    # Additional adversarial cases: document intent, not isolated medical keywords.
+
+    def test_mri_report_is_not_confused_with_ct_report(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ МРТ\n"
+            "Магнитно-резонансная томография поясничного отдела. "
+            "Протрузий не выявлено.",
+            "заключение МРТ",
+        )
+
+    def test_ct_report_is_not_confused_with_mri_report(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ КТ\n"
+            "Компьютерная томография органов грудной клетки. "
+            "Очаговых изменений не выявлено.",
+            "заключение КТ",
+        )
+
+    def test_xray_report_is_not_confused_with_ct_report(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ РЕНТГЕНОЛОГИЧЕСКОГО ИССЛЕДОВАНИЯ\n"
+            "Рентгенография органов грудной клетки. Очаговых изменений не выявлено.",
+            "рентгенологическое заключение",
+        )
+
+    def test_vaccination_history_mention_is_not_vaccination_record(self):
+        self.assert_primary(
+            "ПРОТОКОЛ ПРИЁМА ПЕДИАТРА\n"
+            "Со слов родителей, прививки выполнены по возрасту. "
+            "Представлена медицинская карта ребёнка.",
+            "протокол осмотра или приёма",
+        )
+
+    def test_medical_certificate_is_not_a_doctors_consultation(self):
+        self.assert_primary(
+            "МЕДИЦИНСКАЯ СПРАВКА\n"
+            "Выдана для предъявления по месту учёбы. "
+            "Подробности обращения в настоящей копии не приводятся.",
+            "медицинская справка",
+        )
+
+    def test_medication_list_is_not_a_discharge_summary_without_discharge_context(self):
+        self.assert_primary(
+            "ЛИСТ НАЗНАЧЕНИЙ\n"
+            "Препарат А — учебная запись; дозировка определяется врачом. "
+            "Документ не содержит сведений о выписке из стационара.",
+            "назначение или рецепт",
+        )
+
+    def test_biopsy_mentioned_in_consultation_is_not_pathology_result(self):
+        self.assert_primary(
+            "КОНСУЛЬТАЦИЯ ВРАЧА-ХИРУРГА\n"
+            "Обсуждена необходимость биопсии. Результат гистологического "
+            "исследования на дату приёма отсутствует.",
+            "консультация специалиста",
+        )
+
+    def test_pregnancy_topic_does_not_override_explicit_visit_protocol(self):
+        self.assert_primary(
+            "ПРОТОКОЛ ПРИЁМА ВРАЧА-АКУШЕРА-ГИНЕКОЛОГА\n"
+            "Беременность 12 недель. Жалобы и объективные данные внесены "
+            "в карту амбулаторного пациента.",
+            "протокол осмотра или приёма",
+        )
+
+    def test_bare_medical_values_without_report_heading_abstain(self):
+        self.assert_primary(
+            "Гемоглобин 121 г/л; ферритин 24 мкг/л; глюкоза 5,0 ммоль/л.",
+            "не определено",
+        )
+
+    def test_generic_diagnosis_and_treatment_words_do_not_create_document_type(self):
+        self.assert_primary(
+            "Краткая заметка семьи: диагноз обсудить с врачом, "
+            "назначения уточнить на следующем приёме.",
+            "не определено",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
