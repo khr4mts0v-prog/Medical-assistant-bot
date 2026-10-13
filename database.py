@@ -20,7 +20,7 @@ def init():
         c.executescript("""
         CREATE TABLE IF NOT EXISTS patients(
           id INTEGER PRIMARY KEY, family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
-          name TEXT NOT NULL COLLATE NOCASE, UNIQUE(family_id,name));
+          name TEXT NOT NULL COLLATE NOCASE, birth_date TEXT, UNIQUE(family_id,name));
         CREATE TABLE IF NOT EXISTS docs(
           id INTEGER PRIMARY KEY, family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
           patient TEXT NOT NULL COLLATE NOCASE, name TEXT, kind TEXT, date TEXT,
@@ -34,6 +34,8 @@ def init():
         CREATE INDEX IF NOT EXISTS pending_docs_family_created ON pending_docs(family_id,created);
         """)
         patient_cols={row["name"] for row in c.execute("PRAGMA table_info(patients)")}
+        if "birth_date" not in patient_cols:
+            c.execute("ALTER TABLE patients ADD COLUMN birth_date TEXT")
         if "aliases_enc" not in patient_cols:
             c.execute("ALTER TABLE patients ADD COLUMN aliases_enc BLOB")
         if "aliases_configured" not in patient_cols:
@@ -57,15 +59,15 @@ def _clean_aliases(name, aliases):
             seen.add(key); unique.append(value)
     return unique[:80]
 
-def add_patient(fid,name,aliases=None,aliases_configured=None):
+def add_patient(fid,name,aliases=None,aliases_configured=None,birth_date=None):
     name=" ".join((name or "").split())[:100]
     if not name: raise ValueError("Имя пациента не может быть пустым")
     configured = (aliases is not None) if aliases_configured is None else bool(aliases_configured)
     alias_values=_clean_aliases(name, aliases)
     encrypted=cipher().encrypt(json.dumps(alias_values,ensure_ascii=False).encode("utf-8"))
     with connect() as c:
-        c.execute("INSERT OR IGNORE INTO patients(family_id,name,aliases_enc,aliases_configured) VALUES(?,?,?,?)",
-                  (int(fid),name,encrypted,int(configured)))
+        c.execute("INSERT OR IGNORE INTO patients(family_id,name,birth_date,aliases_enc,aliases_configured) VALUES(?,?,?,?,?)",
+                  (int(fid),name,birth_date,encrypted,int(configured)))
         if aliases is not None:
             row=c.execute("SELECT id,aliases_enc FROM patients WHERE family_id=? AND name=? COLLATE NOCASE",
                           (int(fid),name)).fetchone()
@@ -96,7 +98,7 @@ def patient_aliases_configured(fid,name):
 def patient_records(fid):
     "Return short display labels and decrypt alias lists only for this family."
     with connect() as c:
-        rows=c.execute("SELECT id,name,aliases_enc,aliases_configured FROM patients WHERE family_id=? ORDER BY name",
+        rows=c.execute("SELECT id,name,birth_date,aliases_enc,aliases_configured FROM patients WHERE family_id=? ORDER BY name",
                        (int(fid),)).fetchall()
     result=[]
     for row in rows:
@@ -107,7 +109,7 @@ def patient_records(fid):
             except Exception:
                 logging.exception("Cannot decrypt patient aliases; falling back to display name")
         result.append({"id":row["id"],"name":row["name"],"aliases":_clean_aliases(row["name"],aliases),
-                       "aliases_configured":bool(row["aliases_configured"])})
+                       "aliases_configured":bool(row["aliases_configured"]),"birth_date":row["birth_date"]})
     return result
 
 def patients(fid):
