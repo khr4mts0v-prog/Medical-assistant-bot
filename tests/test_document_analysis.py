@@ -228,6 +228,21 @@ class DocumentMetadataTests(unittest.TestCase):
         self.assertEqual(infer_document_title(text, result["primary_type"]), "УЗИ щитовидной железы")
         self.assertEqual(extract_document_date(text), "17-03-2025")
 
+    def test_lab_pdf_with_blood_and_urine_panels_gets_combined_title(self):
+        from document_metadata import infer_document_title
+        text = """ОБЩЕКЛИНИЧЕСКИЕ ИССЛЕДОВАНИЯ КРОВИ
+Общий анализ крови с лейкоцитарной формулой
+ОБЩЕКЛИНИЧЕСКИЕ ИССЛЕДОВАНИЯ МОЧИ
+Общий анализ мочи"""
+        self.assertEqual(infer_document_title(text, "лабораторный отчёт"), "Общий анализ крови и мочи")
+
+    def test_lab_validation_date_is_used_as_document_date(self):
+        from document_metadata import extract_document_date
+        text = """Дата взятия образца: 22.04.2026
+Дата поступления образца: 22.04.2026 22:08
+Валидация врачом: 23.04.2026 02:41"""
+        self.assertEqual(extract_document_date(text), "23-04-2026")
+
     def test_registered_patient_full_name(self):
         from document_metadata import extract_registered_patient
         roster = ["Иванов Иван Иванович", "Петров Пётр Петрович"]
