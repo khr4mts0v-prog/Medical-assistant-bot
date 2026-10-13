@@ -64,6 +64,9 @@ def probe_rumedprime():
                 raise RuntimeError("Expected symptoms/anamnesis fields in the public TSV")
             for row in reader:
                 texts.append("\n".join(str(row.get(field, "") or "") for field in clinical_fields))
+                if limit_records and len(texts) >= limit_records:
+                    break
+    print(f"RuMedPrimeData: collected {len(texts)} records; limit={limit_records or 'all'}", flush=True)
     summarize("RuMedPrimeData / symptoms + anamnesis", texts)
 
 
@@ -97,6 +100,8 @@ def probe_ruclinner(limit_per_split):
                         labels[result.get("primary_type", "не определено")] += 1
                         confidence[result.get("confidence", "unknown")] += 1
                         count += 1
+                        if count % 100 == 0:
+                            print(f"[RuClinNER/{config}/{split}] progress: scored={count}", flush=True)
                         if limit_per_split and count >= limit_per_split:
                             stopped_at_limit = True
                             break
