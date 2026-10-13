@@ -61,7 +61,7 @@ def main():
             pairs.append((expected, predicted))
             if expected != predicted:
                 mismatches.append("document mismatch: " + item["id"])
-                print(f"DOCUMENT MISMATCH {item['id']} [{filename}]: expected={expected!r}, predicted={predicted!r}")
+                print(f"DOCUMENT MISMATCH {item['id']} [{filename}]: expected={expected!r}, predicted={predicted!r}, scores={result.get('type_scores', {})}")
         for page_number, page_type in item.get("expected_page_types", {}).items():
             actual = {str(page["page"]): page["primary_type"] for page in result["page_types"]}
             predicted = actual.get(str(page_number), "не определено")

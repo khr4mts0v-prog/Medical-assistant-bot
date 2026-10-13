@@ -269,5 +269,39 @@ class ClassificationHardCasesTests(unittest.TestCase):
         )
 
 
+    def test_future_mri_protocol_in_referral_is_not_a_report(self):
+        self.assert_primary(
+            "НАПРАВЛЕНИЕ НА МРТ ГОЛОВНОГО МОЗГА\n"
+            "Просим провести исследование и направить протокол лечащему врачу.\n"
+            "Описание снимков и заключение будут сформированы после обследования.\n"
+            "Результаты КТ и рентгена здесь не приводятся.",
+            "направление",
+        )
+
+    def test_mentioned_but_absent_lab_result_does_not_override_observation_diary(self):
+        self.assert_primary(
+            "ДНЕВНИК ДИНАМИЧЕСКОГО НАБЛЮДЕНИЯ\n"
+            "Запись от 09.10.2026. Состояние описано в динамике.\n"
+            "Это не отдельный результат лабораторного исследования.",
+            "медицинская карта или наблюдение",
+        )
+
+    def test_prescription_mentioned_as_not_issued_does_not_override_consultation(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ ВРАЧА-ОФТАЛЬМОЛОГА\n"
+            "Осмотр выполнен; рекомендации указаны в конце записи.\n"
+            "В тексте не оформлялись направление, рецепт или заключение диагностического аппарата.",
+            "консультация специалиста",
+        )
+
+    def test_advice_not_to_change_existing_medication_is_not_a_prescription(self):
+        self.assert_primary(
+            "ПАМЯТКА ПО БЕЗОПАСНОМУ ПРИЁМУ ЛЕКАРСТВ\n"
+            "Не изменяйте дозу ранее назначенного препарата без согласования с врачом.\n"
+            "Этот текст не является рецептом или листом назначений.",
+            "не определено",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
