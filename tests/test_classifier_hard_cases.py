@@ -149,6 +149,38 @@ class ClassificationHardCasesTests(unittest.TestCase):
             "не определено",
         )
 
+
+    def test_transposed_characters_in_heading_are_tolerated(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ МРТ\\nОчаговых изменений не выявлено.",
+            "заключение МРТ",
+        )
+
+    def test_split_word_in_heading_is_tolerated(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕ НИЕ МРТ\\nОчаговых изменений не выявлено.",
+            "заключение МРТ",
+        )
+
+    def test_latin_cyrillic_lookalikes_in_heading_are_tolerated(self):
+        self.assert_primary(
+            "ЗАКЛЮЧЕНИЕ МRТ\\nОчаговых изменений не выявлено.",
+            "заключение МРТ",
+        )
+
+    def test_typo_support_does_not_change_clinical_values(self):
+        result = self.assert_primary(
+            "РЕЗУЛТАТЫ ЛАБОРАТОРНЫХ ИССЛЕДОВАНИЙ\\n"
+            "Гемоглобин 115 г/л; ферритин 16 мкг/л.",
+            "лабораторный отчёт",
+        )
+        values = {(item["name"], item["value"]) for item in result["lab_results"]}
+        self.assertIn(("гемоглобин", "115"), values)
+        self.assertIn(("ферритин", "16"), values)
+
+    def test_fuzzy_heading_does_not_classify_short_ambiguous_text(self):
+        self.assert_primary("МРТ", "не определено")
+
     def test_clean_heading_still_classifies_after_typo_support_added(self):
         self.assert_primary(
             "ЗАКЛЮЧЕНИЕ МРТ\n"
