@@ -13,6 +13,7 @@ CORPORA = [
     FIXTURES / "public_anonymized_examples.json",
     FIXTURES / "adversarial_medical_documents.json",
     FIXTURES / "adversarial_medical_documents_round2.json",
+    FIXTURES / "realistic_medical_documents_round2.json",
 ]
 
 

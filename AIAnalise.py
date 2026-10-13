@@ -53,6 +53,11 @@ DOCUMENT_TYPE_RULES = {
         (r"\bмагнитно[- ]резонансн\w+\s+томографи\w*", 9, "магнитно-резонансная томография"),
         (r"\bмрт\b", 3, "слабый маркер МРТ"),
     ],
+    "заключение функциональной диагностики": [
+        (r"\b(?:заключение|протокол|результат\w*|результаты)\s+(?:ээг|электроэнцефалограмм\w*|эхокг|эхокардиографи\w*|холтеровск\w+\s+мониторировани\w*|суточн\w+\s+мониторировани\w*|спирометр\w*|спирографи\w*)", 10, "заголовок функционального исследования"),
+        (r"\b(?:электроэнцефалограмм\w*|эхокардиографи\w*|холтеровск\w+\s+мониторировани\w*|спирометр\w*|спирографи\w*)\b", 9, "метод функциональной диагностики"),
+        (r"\b(?:ээг|эхокг)\b", 8, "сокращение функционального исследования"),
+    ],
     "консультация специалиста": [
         (r"\bконсультаци\w+\s+(?:врач\w+|невролог\w*|кардиолог\w*|педиатр\w*|терапевт\w*|офтальмолог\w*|эндокринолог\w*|хирург\w*|ортопед\w*|гинеколог\w*|уролог\w*|логопед\w*)", 9, "заголовок консультации специалиста"),
         (r"\bзаключение\s+(?:врача|специалиста|невролога|кардиолога|педиатра|терапевта|офтальмолога|эндокринолога|хирурга|ортопеда|гинеколога|уролога)\b", 8, "заключение специалиста"),
@@ -191,6 +196,10 @@ FUZZY_HEADER_ANCHORS = {
                                       "рентгенологическое исследование"),
     "заключение КТ": ("заключение кт", "протокол кт", "компьютерная томография"),
     "заключение МРТ": ("заключение мрт", "протокол мрт", "магнитно-резонансная томография"),
+    "заключение функциональной диагностики": (
+        "заключение ээг", "протокол ээг", "заключение эхокг",
+        "протокол эхокг", "заключение спирометрии",
+    ),
     "консультация специалиста": ("консультация врача", "консультация невролога",
                                   "консультация педиатра", "заключение специалиста"),
     "назначение или рецепт": ("лист назначений", "рецептурный бланк", "схема лечения"),
@@ -220,6 +229,30 @@ def _fuzzy_header_matches(text):
         "b": "в", "h": "н",
     })
     header = header.translate(confusables)
+
+    # Strong, modality-anchored recovery: tolerate OCR damage in "заключение"
+    # or "протокол" only when a modality token occurs in the same short heading.
+    # This avoids confusing "направление на МРТ" with an MRI report.
+    modality_headers = (
+        ("заключение УЗИ", r"\bузи\b"),
+        ("заключение ЭКГ", r"\bэкг\b"),
+        ("рентгенологическое заключение", r"\bрентген\w*\b"),
+        ("заключение КТ", r"\bкт\b"),
+        ("заключение МРТ", r"\bмрт\b"),
+        ("эндоскопическое заключение", r"\b(?:фгдс|гастроскопи\w*|колоноскопи\w*|эндоскопи\w*)\b"),
+    )
+    for label, modality_pattern in modality_headers:
+        modality = re.search(modality_pattern, header)
+        if not modality:
+            continue
+        prefix = re.sub(r"[^а-я]", "", header[:modality.start()])
+        for marker in ("заключение", "протокол"):
+            # Prefix length is bounded so "заключение врача ... МРТ" cannot
+            # accidentally masquerade as a radiology-report heading.
+            if len(marker) - 2 <= len(prefix) <= len(marker) + 2:
+                similarity = SequenceMatcher(None, prefix, marker).ratio()
+                if similarity >= 0.80:
+                    return [(label, similarity)]
     # OCR can split a word with an accidental space. Generate a second,
     # conservative comparison form only for the heading matcher.
     compact_header = re.sub(r"(?<=[а-я])\s+(?=[а-я])", "", header)
@@ -260,7 +293,7 @@ def _classify_segment(text):
 
     # Fuzzy OCR matching is a fallback. Do not add a competing imaging type
     # when the opening lines already contain a clear exact imaging heading.
-    exact_header_text = _normalize("\\n".join((text or "").splitlines()[:2]))
+    exact_header_text = _normalize("\n".join((text or "").splitlines()[:2]))
     exact_header_scores, _ = _score_types(exact_header_text)
     imaging_labels = (
         "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
@@ -294,7 +327,21 @@ def _classify_segment(text):
         r"кт|компьютерн\w+\s+томографи\w*|рентген\w*|рентгенографи\w*|"
         r"гастроскопи\w*|колоноскопи\w*|эндоскопи\w*)\b",
         normalized))
-    report_context = report_heading or bool(re.search(
+    fuzzy_imaging_heading = any(
+        label in (
+            "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
+            "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
+        )
+        for label, _ in _fuzzy_header_matches(text)
+    )
+    standalone_imaging_title = (
+        len((text or "").splitlines()) == 1
+        and bool(re.fullmatch(
+            r"\s*(?:узи|мрт|кт|экг)\s+[\w-]+(?:\s+[\w-]+){0,5}\s*",
+            (text or "").strip(), re.IGNORECASE
+        ))
+    )
+    report_context = report_heading or fuzzy_imaging_heading or standalone_imaging_title or bool(re.search(
         r"\b(?:результат\w*\s+исследовани\w*|описание\s+(?:исследовани\w*|снимк\w*)|"
         r"исследовани\w*\s+(?:выполнено|проведено)|"
         r"(?:выполнено|проведено)\s+(?:узи|мрт|кт|рентген\w*|исследовани\w*)|"
@@ -340,7 +387,7 @@ def _classify_segment(text):
         r"протокол\s+осмотра|амбулаторн\w+\s+при[её]м", normalized))
     # Only the document's opening lines can establish its form. A test listed
     # later in a visit plan is not a laboratory result document.
-    header_text = _normalize("\\n".join((text or "").splitlines()[:2]))
+    header_text = _normalize("\n".join((text or "").splitlines()[:2]))
     lab_report_heading = bool(re.search(
         r"\b(?:общ\w+\s+анализ\w*\s+(?:крови|мочи)|"
         r"биохимическ\w+\s+анализ|результат\w*\s+лабораторн\w+\s+исследовани\w*)\b",
