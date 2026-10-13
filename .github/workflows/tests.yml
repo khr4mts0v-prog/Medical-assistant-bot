@@ -25,6 +25,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt datasets pyarrow
+      - run: pip install -r requirements.txt pyarrow
       - name: Probe public clinical text datasets (aggregate only)
         run: python scripts/probe_public_datasets.py --dataset all
