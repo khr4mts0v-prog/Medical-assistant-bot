@@ -10,7 +10,7 @@ import requests
 CLASSIFICATION_VERSION = "2.0"
 DOCUMENT_TYPE_RULES = {
     "выписной эпикриз": [
-        (r"\bвыписн\w*\s+эпикриз\b", 10, "заголовок: выписной эпикриз"),
+        (r"\bвыписн\w*\s+(?:\([^)]*\)\s*)?эпикриз\b", 10, "заголовок: выписной эпикриз"),
         (r"\bэпикриз\b", 8, "термин «эпикриз»"),
         (r"\bвыписк\w+\s+из\s+(?:стационар\w+|истори\w+\s+болезни)\b", 9, "выписка из стационара/истории болезни"),
         (r"\bвыписан\w*\s+(?:из|со)\s+стационар\w*", 5, "указание на выписку"),
@@ -348,7 +348,17 @@ def _classify_segment(text):
         r"заключение\s*:\s*(?:признак\w*|данных\s+за|без\s+особенностей|"
         r"эхографическ\w*|кт-картин\w*|мр-картин\w*|синусов\w+\s+ритм))",
         normalized))
-    report_context = report_heading or fuzzy_imaging_heading or standalone_imaging_title or (report_content_signal and not referral_context)
+    # A modality-specific opening title plus an explicit conclusion section is
+    # evidence of an existing report, even when OCR removed the word "protocol".
+    conclusion_section = bool(re.search(r"\bзаключение\s*:", normalized))
+    titled_imaging_report = conclusion_section and any(
+        exact_header_scores.get(label, 0) >= 8 for label in (
+            "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
+            "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
+        )
+    ) and not referral_context
+    report_context = (report_heading or fuzzy_imaging_heading or standalone_imaging_title
+                      or titled_imaging_report or (report_content_signal and not referral_context))
     imaging_labels = (
         "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
         "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
@@ -393,6 +403,20 @@ def _classify_segment(text):
         r"\b(?:общ\w+\s+анализ\w*\s+(?:крови|мочи)|"
         r"биохимическ\w+\s+анализ|результат\w*\s+лабораторн\w+\s+исследовани\w*)\b",
         header_text))
+    # Some laboratory systems use a generic first-line title. Require both a
+    # structured test field and an explicit result/reference field before using it.
+    generic_lab_heading = bool(re.search(
+        r"\bрезультаты\s+выполненных\s+исследований\b", header_text))
+    structured_lab_result = bool(
+        re.search(r"\bисследование\s*:", normalized)
+        and re.search(r"\b(?:результат\s*:|референсные\s+значения\s*:)", normalized)
+    )
+    if generic_lab_heading and structured_lab_result:
+        lab_report_heading = True
+        scores["лабораторный отчёт"] = max(scores.get("лабораторный отчёт", 0), 9)
+        evidence.setdefault("лабораторный отчёт", []).append({
+            "weight": 9, "reason": "заголовок лабораторной формы с результатом исследования"
+        })
     if visit_heading and not lab_report_heading:
         scores.pop("лабораторный отчёт", None)
         evidence.pop("лабораторный отчёт", None)

@@ -1,0 +1,36 @@
+name: Public dataset diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: Dataset probe to run
+        type: choice
+        required: true
+        default: all
+        options:
+          - all
+          - rumedprime
+          - ruclinner
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  public-data-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt pyarrow
+      - name: Probe public clinical text datasets
+        timeout-minutes: 8
+        env:
+          DATASET: ${{ github.event.inputs.dataset || 'all' }}
+        run: python scripts/probe_public_datasets.py --dataset "$DATASET" --limit-rumedprime 500 --limit-per-split 300

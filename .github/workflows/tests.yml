@@ -15,3 +15,16 @@ jobs:
       - run: python -m compileall -q .
       - run: python -m unittest discover -s tests -v
       - run: python scripts/evaluate_classifier_corpus.py
+
+  public-data-probe:
+    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'feature/realistic-classifier-corpus'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt pyarrow
+      - name: Probe public clinical text datasets (aggregate only)
+        run: python scripts/probe_public_datasets.py --dataset all --limit-rumedprime 500 --limit-per-split 300
