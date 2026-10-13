@@ -245,7 +245,13 @@ def _fuzzy_header_matches(text):
                     for span in spans for anchor in normalized_anchors), default=0)
         if best >= 0.88:
             matches.append((label, best))
-    return matches
+    # Similar long headings can make a shorter label look almost as close
+    # (e.g. "заключение МРТ" vs "заключение КТ"). Keep only a clear winner;
+    # ambiguous fuzzy matches must abstain rather than add both document types.
+    matches.sort(key=lambda item: item[1], reverse=True)
+    if len(matches) > 1 and matches[0][1] - matches[1][1] < 0.05:
+        return []
+    return matches[:1]
 
 
 def _classify_segment(text):
