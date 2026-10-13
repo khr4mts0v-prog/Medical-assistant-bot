@@ -74,7 +74,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
     fs=tenancy.families_for_user(uid)
     if family_id is not None and not tenancy.role_for_user(family_id,uid): raise HTTPException(403,"Нет доступа")
     f=tenancy.get_family(family_id) if family_id is not None else (tenancy.get_family(fs[0]["id"]) if fs else None)
-    b=['<div class="card" id="family-settings"><h2>Семейный архив и настройки</h2>']
+    b=['<div class="card" id="archive-selector"><h2>Выбор семейного архива</h2>']
     if fs:
         b.append('<form class="row" method="get"><select name="family_id">')
         for x in fs: b.append(f'<option value="{x["id"]}"{" selected" if f and x["id"]==f["id"] else ""}>{html.escape(x["name"])}</option>')
