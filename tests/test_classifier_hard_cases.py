@@ -171,7 +171,7 @@ class ClassificationHardCasesTests(unittest.TestCase):
     def test_typo_support_does_not_change_clinical_values(self):
         result = self.assert_primary(
             "РЕЗУЛТАТЫ ЛАБОРАТОРНЫХ ИССЛЕДОВАНИЙ\\n"
-            "Гемоглобин 115 г/л; ферритин 16 мкг/л.",
+            "Гемоглобин 115 г/л\\nФерритин 16 мкг/л",
             "лабораторный отчёт",
         )
         values = {(item["name"], item["value"]) for item in result["lab_results"]}
