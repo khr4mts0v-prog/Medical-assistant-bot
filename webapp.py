@@ -386,6 +386,16 @@ def assign_selected_pending(fid:int,patient:str=Form(...),pending_ids:list[int]=
     body='<p><a href="/families/'+str(fid)+'/inbox">← Ко входящим</a></p><h2>Результат массового назначения</h2><div class="card"><ul>'+''.join(results)+'</ul></div>'
     return page("Массовое назначение",body)
 
+@app.get("/families/{fid}/inbox/{pending_id}/preview")
+def preview_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)):
+    family(fid,uid)
+    d=db.get_pending_doc(fid,pending_id)
+    if not d: raise HTTPException(404,"Документ не найден")
+    ext=Path(d["name"]).suffix.lower()
+    media={".pdf":"application/pdf",".jpg":"image/jpeg",".jpeg":"image/jpeg",".png":"image/png",".webp":"image/webp",".bmp":"image/bmp",".tif":"image/tiff",".tiff":"image/tiff"}.get(ext)
+    if not media: raise HTTPException(415,"Предпросмотр формата недоступен")
+    return Response(content=d["file_bytes"],media_type=media,headers={"Content-Disposition":"inline; filename*=UTF-8''"+__import__("urllib.parse",fromlist=["quote"]).quote(d["name"])})
+
 @app.get("/families/{fid}/inbox/{pending_id}", response_class=HTMLResponse)
 def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)):
     family(fid,uid)
