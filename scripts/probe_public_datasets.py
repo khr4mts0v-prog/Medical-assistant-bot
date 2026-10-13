@@ -9,6 +9,7 @@ import argparse
 import csv
 import io
 import sys
+import time
 import zipfile
 from collections import Counter
 from pathlib import Path
@@ -23,6 +24,8 @@ from AIAnalise import analyze_document  # noqa: E402
 
 RUMEDPRIME_URL = "https://zenodo.org/records/5765873/files/RuMedPrimeData.zip?download=1"
 RUCLINNER_BASE = "https://huggingface.co/datasets/medlinx/RuClinNER/resolve/main/data"
+CONNECT_TIMEOUT_SECONDS = 10
+READ_TIMEOUT_SECONDS = 45
 
 
 def build_retry_session():
@@ -78,9 +81,14 @@ def summarize(name, texts):
 
 
 def probe_rumedprime(limit_records):
-    print("Downloading RuMedPrimeData from Zenodo (temporary in-memory processing)...", flush=True)
-    response = SESSION.get(RUMEDPRIME_URL, timeout=(15, 120))
+    started = time.monotonic()
+    print("START source=RuMedPrimeData; downloading archive (in-memory only)...", flush=True)
+    response = SESSION.get(
+        RUMEDPRIME_URL,
+        timeout=(CONNECT_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS),
+    )
     response.raise_for_status()
+    print(f"RuMedPrimeData download complete; bytes={len(response.content)}; parsing records...", flush=True)
     texts = []
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         candidates = [name for name in archive.namelist() if name.lower().endswith((".tsv", ".csv"))]
@@ -95,10 +103,13 @@ def probe_rumedprime(limit_records):
                 raise RuntimeError("Expected symptoms/anamnesis fields in the public TSV")
             for row in reader:
                 texts.append("\n".join(str(row.get(field, "") or "") for field in clinical_fields))
+                if len(texts) % 100 == 0:
+                    print(f"RuMedPrimeData progress: records_read={len(texts)}", flush=True)
                 if limit_records and len(texts) >= limit_records:
                     break
     print(f"RuMedPrimeData: collected {len(texts)} records; limit={limit_records or 'all'}", flush=True)
     summarize("RuMedPrimeData / symptoms + anamnesis", texts)
+    print(f"END source=RuMedPrimeData; elapsed_seconds={time.monotonic() - started:.1f}", flush=True)
 
 
 def probe_ruclinner(limit_per_split):
@@ -109,10 +120,14 @@ def probe_ruclinner(limit_per_split):
     splits = ("train", "test")
     for config in configs:
         for split in splits:
+            source_started = time.monotonic()
             url = f"{RUCLINNER_BASE}/{config}/{split}.parquet?download=true"
             try:
-                print(f"Downloading RuClinNER {config}/{split}...", flush=True)
-                response = SESSION.get(url, timeout=(15, 90))
+                print(f"START source=RuClinNER/{config}/{split}; downloading parquet...", flush=True)
+                response = SESSION.get(
+                    url,
+                    timeout=(CONNECT_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS),
+                )
                 response.raise_for_status()
                 parquet = pq.ParquetFile(io.BytesIO(response.content))
                 available = set(parquet.schema_arrow.names)
@@ -147,9 +162,10 @@ def probe_ruclinner(limit_per_split):
                 for label, n in labels.most_common():
                     print(f"  {label}: {n} ({n / count:.1%})" if count else f"  {label}: 0", flush=True)
                 print("Confidence distribution: " + str(dict(confidence)), flush=True)
+                print(f"END source=RuClinNER/{config}/{split}; elapsed_seconds={time.monotonic() - source_started:.1f}", flush=True)
             except Exception as exc:
                 # Do not print record contents, request URLs with tokens, or environment data.
-                print(f"\n[RuClinNER/{config}/{split}] FAILED: {describe_error(exc)}", flush=True)
+                print(f"\n[RuClinNER/{config}/{split}] FAILED: {describe_error(exc)}; elapsed_seconds={time.monotonic() - source_started:.1f}", flush=True)
                 had_failures = True
     return not had_failures
 
@@ -166,14 +182,17 @@ def main():
         parser.error("record limits cannot be negative")
     print("DIAGNOSTIC ONLY: these corpora do not contain gold document-type labels.", flush=True)
     print("Only aggregate predictions are printed; raw text is not saved as a fixture or artifact.", flush=True)
+    print(f"CONFIG dataset={args.dataset}; rumedprime_limit={args.limit_rumedprime}; ruclinner_limit_per_split={args.limit_per_split}; request_timeout_connect={CONNECT_TIMEOUT_SECONDS}s; request_timeout_read={READ_TIMEOUT_SECONDS}s", flush=True)
     failed_sources = []
     if args.dataset in ("all", "rumedprime"):
         try:
+            print("BEGIN source=RuMedPrimeData", flush=True)
             probe_rumedprime(args.limit_rumedprime)
         except Exception as exc:
             print(f"\n[RuMedPrimeData] FAILED: {describe_error(exc)}", flush=True)
             failed_sources.append("RuMedPrimeData")
     if args.dataset in ("all", "ruclinner"):
+        print("BEGIN source=RuClinNER", flush=True)
         if not probe_ruclinner(args.limit_per_split):
             failed_sources.append("RuClinNER")
 
