@@ -74,7 +74,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
     fs=tenancy.families_for_user(uid)
     if family_id is not None and not tenancy.role_for_user(family_id,uid): raise HTTPException(403,"Нет доступа")
     f=tenancy.get_family(family_id) if family_id is not None else (tenancy.get_family(fs[0]["id"]) if fs else None)
-    b=['<p>Веб-интерфейс тестового архива. Вход защищён паролем; использовать только через HTTPS.</p><div class="card"><h2>Семейные архивы</h2>']
+    b=['<div class="card" id="family-settings"><h2>Семейный архив и настройки</h2>']
     if fs:
         b.append('<form class="row" method="get"><select name="family_id">')
         for x in fs: b.append(f'<option value="{x["id"]}"{" selected" if f and x["id"]==f["id"] else ""}>{html.escape(x["name"])}</option>')
@@ -118,7 +118,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
         b.append(f'<div class="card" id="family-settings"><h2>Архив: {html.escape(f["name"])}</h2><p>Хранение документов: {"локально на VPS" if STORAGE_BACKEND == "local" else "Яндекс Диск"}</p>')
         if STORAGE_BACKEND == "yandex" and not tenancy.disk_connected(fid):
             b.append(f'<p><a href="/families/{fid}/connect-disk">Подключить Яндекс Диск</a></p>')
-        b.append(f'<form method="post" action="/families/{fid}/patients"><label>Имя пациента<br><input name="name" required maxlength="100"></label> <button>Добавить</button></form><h2 id="patients">Пациенты</h2>')
+        b.append(f'<h2 id="patients">Пациенты</h2><p><a href="/families/{fid}/patients/new">＋ Добавить пациента</a></p>')
         ps=db.patients(fid)
         if not ps: b.append('<p>Пациентов пока нет.</p>')
         for p in ps:
