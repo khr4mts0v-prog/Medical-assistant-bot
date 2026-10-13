@@ -9,7 +9,7 @@ _FINAL_DATE_RE = re.compile(
     rf"(?P<label>дата\s+(?:заключения|оформления|выдачи|составления|документа|подписания|"
     rf"формирования|готовности|печати|регистрации|подготовки|результата|отчёта|отчета|"
     rf"при[её]ма|осмотра|консультации|посещения|выписки)|"
-    rf"документ\s+от|заключение\s+от|протокол\s+от|результат(?:ы)?\s+от|отч[её]т\s+от|"
+    rf"документ\s+от|заключение\s+от|протокол\s+от|результат(?:ы)?\s+от|отч[её]т\s+от|валидация(?:\s+врачом)?\s*[:\-]?\s*|"
     rf"отч[её]т\s+(?:создан|сформирован|подготовлен|выдан)|выдано?\s*[:\-]?)"
     rf"[^\d]{{0,35}}(?P<date>{_DATE})", re.IGNORECASE)
 _GENERIC_DATE_RE = re.compile(rf"дата\s*[:\-]\s*(?P<date>{_DATE})", re.IGNORECASE)
@@ -46,7 +46,7 @@ def extract_document_date(text):
             score = 12
         elif any(word in label for word in ("оформлен", "составлен", "подписан")):
             score = 10
-        elif any(word in label for word in ("выдач", "выдан", "формирован", "создан", "готовност", "печати", "регистрац", "подготовк")):
+        elif any(word in label for word in ("валидац", "выдач", "выдан", "формирован", "создан", "готовност", "печати", "регистрац", "подготовк")):
             score = 9
         else:
             score = 7
@@ -211,6 +211,10 @@ def infer_document_title(text, kind):
                 return title
         return "УЗИ"
     if kind == "лабораторный отчёт":
+        has_cbc = bool(re.search(r"\bобщ[а-яё]*\s+анализ[а-яё]*\s+крови\b", head, re.IGNORECASE))
+        has_urine = bool(re.search(r"\bобщ[а-яё]*\s+анализ[а-яё]*\s+мочи\b", head, re.IGNORECASE))
+        if has_cbc and has_urine:
+            return "Общий анализ крови и мочи"
         if re.search(r"\bповерхностн[а-яё]*\s+микоз[а-яё]*\b|\bмицелий\b|\bпсевдомицелий\b", head, re.IGNORECASE):
             return "Анализ на поверхностные микозы"
         lab_titles = [
