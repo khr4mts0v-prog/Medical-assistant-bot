@@ -180,22 +180,53 @@ def _classify_segment(text):
     scores, evidence = _score_types(text)
     normalized = _normalize(text)
 
-    # A modality mentioned as a recommendation/referral is not itself a report.
-    # Without report-form evidence, avoid classifying "get an MRI/US" as a result.
-    mention_context = bool(re.search(
-        r"\b(?:рекомендован\w*|рекомендовал\w*|направлен\w*|направление|"
+    # Classify the document's form, not every medical topic mentioned in its body.
+    # In particular, a requested future investigation is not its resulting report.
+    referral_context = bool(re.search(
+        r"\b(?:направлени\w*\s+(?:на|к)\b|направляется\s+на\b|"
+        r"просим\s+(?:выполнить|провести)\b|цель\s+направлени\w*|"
+        r"для\s+прохождения\s+(?:узи|мрт|кт|рентген\w*))", normalized))
+    future_test_context = bool(re.search(
+        r"\b(?:рекомендован\w*|рекомендовал\w*|направлен\w*|"
         r"выполнить|пройти|записаться|при\s+необходимости|планируется|"
-        r"назначено\s+(?:провести|выполнить))\b", normalized))
+        r"просим\s+(?:выполнить|провести)|назначено\s+(?:провести|выполнить))\b",
+        normalized))
+    # "Просим выдать протокол" in a referral is not evidence that a protocol exists.
     report_context = bool(re.search(
-        r"\b(?:протокол\w*|заключение\w*|результат\w*|описание\w*|"
-        r"проведено|выполнено|данные\s+исследования|ход\s+исследования)\b", normalized))
-    if mention_context and not report_context:
+        r"\b(?:результат\w*\s+исследовани\w*|описание\s+(?:исследовани\w*|снимк\w*)|"
+        r"исследовани\w*\s+(?:выполнено|проведено)|"
+        r"(?:выполнено|проведено)\s+(?:узи|мрт|кт|рентген\w*|исследовани\w*)|"
+        r"заключение\s*:\s*(?:признак\w*|данных\s+за|без\s+особенностей|"
+        r"эхографическ\w*|кт-картин\w*|мр-картин\w*|синусов\w+\s+ритм))",
+        normalized))
+    if referral_context and not report_context:
+        scores["направление"] = max(scores.get("направление", 0), 12)
+        evidence.setdefault("направление", []).append(
+            {"weight": 12, "reason": "контекст направления на будущее исследование"})
+    if future_test_context and not report_context:
         for label in (
             "заключение УЗИ", "заключение ЭКГ", "рентгенологическое заключение",
             "заключение КТ", "заключение МРТ", "эндоскопическое заключение",
         ):
             scores.pop(label, None)
             evidence.pop(label, None)
+
+    # A planned lab test in the plan section must not turn a visit note into a lab report.
+    visit_heading = bool(re.search(
+        r"\b(?:протокол\s+)?(?:первичн\w*|повторн\w*)\s+при[её]м\w*|"
+        r"протокол\s+осмотра|амбулаторн\w+\s+при[её]м", normalized))
+    lab_report_heading = bool(re.search(
+        r"\b(?:общ\w+\s+анализ\w*\s+(?:крови|мочи)|"
+        r"биохимическ\w+\s+анализ|результат\w*\s+лабораторн\w+\s+исследовани\w*)\b",
+        normalized))
+    if visit_heading and not lab_report_heading:
+        scores.pop("лабораторный отчёт", None)
+        evidence.pop("лабораторный отчёт", None)
+
+    # Negative/disclaimer mentions are not positive evidence for the denied form.
+    if re.search(r"\bне\s+является\b.{0,100}\bмедицинск\w*\s+справк", normalized):
+        scores.pop("медицинская справка", None)
+        evidence.pop("медицинская справка", None)
 
     ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
     if not ranked or ranked[0][1] < 6:
