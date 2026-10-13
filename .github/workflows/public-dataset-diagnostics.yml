@@ -21,7 +21,7 @@ permissions:
 jobs:
   public-data-probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,4 +32,4 @@ jobs:
       - name: Probe public clinical text datasets
         env:
           DATASET: ${{ github.event.inputs.dataset || 'all' }}
-        run: python scripts/probe_public_datasets.py --dataset "$DATASET"
+        run: python scripts/probe_public_datasets.py --dataset "$DATASET" --limit-rumedprime 500 --limit-per-split 300
