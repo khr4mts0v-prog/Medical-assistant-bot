@@ -35,7 +35,7 @@ def current_user(credentials: HTTPBasicCredentials=Depends(security))->int:
 
 def page(title,body,status=200):
     return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
-:root{color-scheme:light dark;--bg:#fff;--fg:#171717;--card:#fff;--line:#d1d5db;--muted:#626262;--field:#fff;--accent:#166534;--warn:#b8860b} @media(prefers-color-scheme:dark){:root{--bg:#101114;--fg:#f2f2f2;--card:#191b20;--line:#3c4048;--muted:#b4b7bf;--field:#22252b;--accent:#4ade80;--warn:#eab308}}*{box-sizing:border-box}body{max-width:850px;margin:auto;padding:18px;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}h1{font-size:1.5rem}h2{font-size:1.15rem}.card{border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0;background:var(--card)}input,select,button{font:inherit;max-width:100%;padding:9px;margin:4px 0;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--fg)}button{cursor:pointer}input[type=text],input[type=search]{width:min(100%,440px)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.muted{color:var(--muted)}.warn{border-left:4px solid var(--warn);padding:8px 12px}a{overflow-wrap:anywhere;color:inherit}.upload-item{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.upload-top{display:flex;gap:10px;align-items:center}.upload-name{flex:1;min-width:0;overflow-wrap:anywhere}.upload-remove{font-size:22px;line-height:1;min-width:42px}.upload-track{height:7px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:9px}.upload-fill{height:100%;width:0;background:var(--accent);transition:width .12s}.upload-status{font-size:.9rem;color:var(--muted)}</style></head><body><h1>Медицинский архив</h1>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></body></html>""",status_code=status)
+:root{color-scheme:light dark;--bg:#fff;--fg:#171717;--card:#fff;--line:#d1d5db;--muted:#626262;--field:#fff;--accent:#166534;--warn:#b8860b} @media(prefers-color-scheme:dark){:root{--bg:#101114;--fg:#f2f2f2;--card:#191b20;--line:#3c4048;--muted:#b4b7bf;--field:#22252b;--accent:#4ade80;--warn:#eab308}}*{box-sizing:border-box}body{max-width:850px;margin:auto;padding:18px;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}h1{font-size:1.5rem}h2{font-size:1.15rem}.card{border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0;background:var(--card)}input,select,button{font:inherit;max-width:100%;padding:9px;margin:4px 0;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--fg)}button{cursor:pointer}input[type=text],input[type=search]{width:min(100%,440px)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.muted{color:var(--muted)}.warn{border-left:4px solid var(--warn);padding:8px 12px}a{overflow-wrap:anywhere;color:inherit}.home-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0}.home-action{display:flex;align-items:center;justify-content:center;min-height:86px;padding:16px;border-radius:14px;border:1px solid var(--line);background:var(--card);text-align:center;text-decoration:none;font-weight:700;font-size:1.05rem}.home-action.primary{background:var(--accent);color:#fff;border-color:var(--accent)}.upload-item{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}@media(max-width:520px){body{padding:12px}.home-actions{grid-template-columns:1fr}.home-action{min-height:68px}.card{padding:12px}}.upload-top{display:flex;gap:10px;align-items:center}.upload-name{flex:1;min-width:0;overflow-wrap:anywhere}.upload-remove{font-size:22px;line-height:1;min-width:42px}.upload-track{height:7px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:9px}.upload-fill{height:100%;width:0;background:var(--accent);transition:width .12s}.upload-status{font-size:.9rem;color:var(--muted)}</style></head><body><h1>Медицинский архив</h1>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></body></html>""",status_code=status)
 
 def display_document_title(document, analysis):
     saved=(analysis or {}).get("display_title")
@@ -70,6 +70,11 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
         b.append('</select><button>Открыть</button></form>')
     else: b.append('<p>Архивов пока нет.</p>')
     b.append('<form method="post" action="/families"><label>Название архива<br><input name="name" required maxlength="80"></label> <button>Создать архив</button></form></div>')
+    if fs:
+        selected_for_actions = f["id"] if f else fs[0]["id"]
+        pending_for_actions = len(db.pending_documents(selected_for_actions))
+        patient_count = len(db.patients(selected_for_actions))
+        b.append('<nav class="home-actions" aria-label="Основные действия"><a class="home-action primary" href="#quick-upload">＋ Загрузить документы</a><a class="home-action" href="/families/' + str(selected_for_actions) + '/inbox">Входящие · на проверку (' + str(pending_for_actions) + ')</a><a class="home-action" href="#patients">История пациентов (' + str(patient_count) + ')</a><a class="home-action" href="#family-settings">Настройки архива</a></nav>')
     # Inbox-first workflow: files can be uploaded before opening a patient record.
     if fs:
         selected_fid = f["id"] if f else fs[0]["id"]
@@ -78,8 +83,8 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
             for x in fs
         )
         b.append(
-            '<div class="card"><h2>Быстрая загрузка документов</h2>'
-            '<p>Выберите файлы — загрузка начнётся автоматически. Прогресс показывается отдельно для каждого файла; ненужный можно убрать крестиком.</p>'
+            '<div class="card" id="quick-upload"><h2>Быстрая загрузка документов</h2>'
+            '<p>Выберите файлы — загрузка начнётся автоматически. Прогресс показывается отдельно для каждого файла. Крестик убирает файл из списка на странице, но не гарантирует остановку уже начавшейся серверной обработки.</p>'
             '<label>Семейный архив<br><select id="upload-family" required>' + upload_options + '</select></label><br>'
             '<label>Добавить файлы<br><input id="upload-files" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" multiple></label>'
             '<div id="upload-queue" aria-live="polite"></div>'
@@ -99,10 +104,10 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
             b.append(f'<div class="card"><h2>Входящие документы</h2><p>Нет документов, ожидающих ручной проверки.</p><a href="/families/{f["id"]}/inbox">Открыть раздел</a></div>')
     if f:
         fid=f["id"]
-        b.append(f'<div class="card"><h2>Архив: {html.escape(f["name"])}</h2><p>Хранение документов: {"локально на VPS" if STORAGE_BACKEND == "local" else "Яндекс Диск"}</p>')
+        b.append(f'<div class="card" id="family-settings"><h2>Архив: {html.escape(f["name"])}</h2><p>Хранение документов: {"локально на VPS" if STORAGE_BACKEND == "local" else "Яндекс Диск"}</p>')
         if STORAGE_BACKEND == "yandex" and not tenancy.disk_connected(fid):
             b.append(f'<p><a href="/families/{fid}/connect-disk">Подключить Яндекс Диск</a></p>')
-        b.append(f'<form method="post" action="/families/{fid}/patients"><label>Имя пациента<br><input name="name" required maxlength="100"></label> <button>Добавить</button></form><h2>Пациенты</h2>')
+        b.append(f'<form method="post" action="/families/{fid}/patients"><label>Имя пациента<br><input name="name" required maxlength="100"></label> <button>Добавить</button></form><h2 id="patients">Пациенты</h2>')
         ps=db.patients(fid)
         if not ps: b.append('<p>Пациентов пока нет.</p>')
         for p in ps:
@@ -318,9 +323,43 @@ def review_inbox(fid:int,uid:int=Depends(current_user)):
     body=[f'<p><a href="/?family_id={fid}">← В архив</a></p><h2>Нераспознанные документы</h2><p>Документы здесь сохранены в зашифрованном виде до назначения пациента.</p>']
     if not rows:
         body.append('<div class="card">Входящих документов нет.</div>')
-    for row in rows:
-        body.append(f'<div class="card"><strong>{html.escape(row["name"])}</strong><p>Добавлен: {html.escape(row["created"])}</p><a href="/families/{fid}/inbox/{row["id"]}">Открыть и классифицировать</a></div>')
+    if rows:
+        patient_options = "".join('<option value="' + html.escape(p,quote=True) + '">' + html.escape(p) + '</option>' for p in db.patients(fid))
+        body.append('<form class="card" method="post" action="/families/' + str(fid) + '/inbox/assign-selected"><h3>Массовое назначение пациента</h3><p>Отметьте документы одного человека. Тип и дата каждого документа сохраняются отдельно, если их удалось определить.</p><label>Назначить пациенту<br><select name="patient" required>' + patient_options + '</select></label>')
+        for row in rows:
+            body.append(f'<div class="card"><label><input type="checkbox" name="pending_ids" value="{int(row["id"])}"> <strong>{html.escape(row["name"])}</strong></label><p>Добавлен: {html.escape(row["created"])}</p><a href="/families/{fid}/inbox/{row["id"]}">Открыть и классифицировать отдельно</a></div>')
+        body.append('<button type="submit">Назначить выбранные документы</button></form>')
     return page("Нераспознанные документы","".join(body))
+
+@app.post("/families/{fid}/inbox/assign-selected", response_class=HTMLResponse)
+def assign_selected_pending(fid:int,patient:str=Form(...),pending_ids:list[int]=Form(...),uid:int=Depends(current_user)):
+    family(fid,uid)
+    if patient not in db.patients(fid): raise HTTPException(400,"Выбранный пациент не найден")
+    ids=list(dict.fromkeys(int(x) for x in pending_ids))
+    if not ids or len(ids)>50: raise HTTPException(400,"Выберите от 1 до 50 документов")
+    results=[]
+    from AIAnalise import DOCUMENT_TYPE_RULES
+    for pending_id in ids:
+        d=db.get_pending_doc(fid,pending_id)
+        if not d:
+            results.append("<li>Документ #"+str(pending_id)+": не найден, пропущен.</li>")
+            continue
+        analysis=d.get("analysis") or {}
+        kind=str(analysis.get("primary_type") or "не определено")
+        if kind not in DOCUMENT_TYPE_RULES: kind="не определено"
+        title=str(analysis.get("display_title") or (kind if kind!="не определено" else Path(d["name"]).stem))[:180].strip()
+        found_date=parse_date_from_text(d.get("text") or "")
+        date="" if found_date=="не определена" else found_date
+        try:
+            response=assign_pending_document(fid,pending_id,patient,kind,title,date,uid)
+            results.append("<li><strong>"+html.escape(d["name"])+"</strong>: назначен пациенту "+html.escape(patient)+"; индивидуальные тип и дата сохранены.</li>")
+        except HTTPException as exc:
+            results.append("<li><strong>"+html.escape(d["name"])+"</strong>: ошибка "+html.escape(str(exc.detail))+"; требуется проверить документ.</li>")
+        except Exception as exc:
+            logging.exception("Bulk pending assignment failed (%s)",type(exc).__name__)
+            results.append("<li><strong>"+html.escape(d["name"])+"</strong>: ошибка обработки; требуется повторная проверка.</li>")
+    body='<p><a href="/families/'+str(fid)+'/inbox">← Ко входящим</a></p><h2>Результат массового назначения</h2><div class="card"><ul>'+''.join(results)+'</ul></div>'
+    return page("Массовое назначение",body)
 
 @app.get("/families/{fid}/inbox/{pending_id}", response_class=HTMLResponse)
 def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)):
