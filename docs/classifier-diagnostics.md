@@ -38,7 +38,7 @@ python scripts/probe_public_datasets.py --dataset all
 
 The GitHub Actions workflow **Public dataset diagnostics** can also be started manually from the Actions tab, or runs weekly. By default, the RuClinNER probe checks up to 300 rows per split; the RuMedPrimeData probe checks up to 500 records. Pass `--limit-per-split 0` or `--limit-rumedprime 0` to process every row. It downloads the public data at runtime and prints only aggregate predicted-label counts. It does not commit the source data, create an artifact, or print individual record text/IDs.
 
-Downloads retry transient HTTP errors (including 429 and 5xx responses) with backoff. If a selected source still cannot be processed, the script exits non-zero so CI cannot silently report a green probe. The diagnostic prints aggregate counts only and does not include record text, row IDs, or response bodies.
+Downloads retry transient HTTP errors (including 429 and 5xx responses) with backoff. Each HTTP request has a 10-second connect timeout and a 45-second read timeout. The script prints source start/end markers, elapsed time, and aggregate progress counts (never record text or IDs). The GitHub Actions probe step has an 8-minute timeout and the job has a 10-minute timeout, so a stalled source cannot keep the workflow running indefinitely. If a selected source still cannot be processed, the script exits non-zero so CI cannot silently report a green probe. The diagnostic prints aggregate counts only and does not include record text, row IDs, or response bodies.
 
 Important limitations:
 - RuMedPrimeData contains de-identified visit-level symptoms and anamnesis, not document-form labels. Treat it as a false-positive/abstention probe, not an accuracy benchmark.
