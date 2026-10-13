@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 import requests
 from fastapi import FastAPI, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import database as db, tenancy
 from cloud import YaDiskClient
@@ -35,7 +35,7 @@ def current_user(credentials: HTTPBasicCredentials=Depends(security))->int:
 
 def page(title,body,status=200):
     return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
-:root{color-scheme:light dark;--bg:#fff;--fg:#171717;--card:#fff;--line:#d1d5db;--muted:#626262;--field:#fff;--accent:#166534;--warn:#b8860b} @media(prefers-color-scheme:dark){:root{--bg:#101114;--fg:#f2f2f2;--card:#191b20;--line:#3c4048;--muted:#b4b7bf;--field:#22252b;--accent:#4ade80;--warn:#eab308}}*{box-sizing:border-box}body{max-width:850px;margin:auto;padding:18px;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}h1{font-size:1.5rem}h2{font-size:1.15rem}.card{border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0;background:var(--card)}input,select,button{font:inherit;max-width:100%;padding:9px;margin:4px 0;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--fg)}button{cursor:pointer}input[type=text],input[type=search]{width:min(100%,440px)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.muted{color:var(--muted)}.warn{border-left:4px solid var(--warn);padding:8px 12px}a{overflow-wrap:anywhere;color:inherit}.home-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0}.home-action{display:flex;aspect-ratio:1/0.82;align-items:center;justify-content:center;min-height:125px;padding:12px;border-radius:16px;border:1px solid var(--line);background:var(--card);text-align:center;text-decoration:none;font-weight:700;font-size:1.02rem}.home-action.primary{background:var(--accent);color:#fff;border-color:var(--accent)}.preview-image{display:block;width:100%;max-height:60vh;object-fit:contain;border:1px solid var(--line);border-radius:10px;margin:12px 0}.upload-item{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}@media(max-width:520px){body{padding:12px}.home-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.home-action{min-height:125px;font-size:.95rem;padding:8px}.card{padding:12px}}.upload-top{display:flex;gap:10px;align-items:center}.upload-name{flex:1;min-width:0;overflow-wrap:anywhere}.upload-remove{font-size:22px;line-height:1;min-width:42px}.upload-track{height:7px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:9px}.upload-fill{height:100%;width:0;background:var(--accent);transition:width .12s}.upload-status{font-size:.9rem;color:var(--muted)}</style></head><body><h1>Медицинский архив</h1>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></body></html>""",status_code=status)
+:root{color-scheme:light dark;--bg:#fff;--fg:#171717;--card:#fff;--line:#d1d5db;--muted:#626262;--field:#fff;--accent:#166534;--warn:#b8860b} @media(prefers-color-scheme:dark){:root{--bg:#101114;--fg:#f2f2f2;--card:#191b20;--line:#3c4048;--muted:#b4b7bf;--field:#22252b;--accent:#4ade80;--warn:#eab308}}*{box-sizing:border-box}body{max-width:850px;margin:auto;padding:18px;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}h1{font-size:1.5rem}h2{font-size:1.15rem}.card{border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0;background:var(--card)}input,select,button{font:inherit;max-width:100%;padding:9px;margin:4px 0;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--fg)}button{cursor:pointer}input[type=text],input[type=search]{width:min(100%,440px)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.muted{color:var(--muted)}.warn{border-left:4px solid var(--warn);padding:8px 12px}a{overflow-wrap:anywhere;color:inherit}.home-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0}.home-action{display:flex;aspect-ratio:1/0.82;align-items:center;justify-content:center;min-height:125px;padding:12px;border-radius:16px;border:1px solid var(--line);background:var(--card);text-align:center;text-decoration:none;font-weight:700;font-size:1.02rem}.home-action.primary{background:var(--accent);color:#fff;border-color:var(--accent)}.pending-thumbs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}.pending-thumb{display:block;min-width:0;text-decoration:none}.pending-thumb img,.file-thumb{display:flex;width:100%;height:90px;object-fit:cover;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;background:var(--field)}.pending-thumb span:last-child{display:block;font-size:.78rem;overflow-wrap:anywhere;max-height:2.6em;overflow:hidden}.pending-more{align-self:center}.preview-image{display:block;width:100%;max-height:60vh;object-fit:contain;border:1px solid var(--line);border-radius:10px;margin:12px 0}.upload-item{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}@media(max-width:520px){body{padding:12px}.home-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.home-action{min-height:125px;font-size:.95rem;padding:8px}.card{padding:12px}}.upload-top{display:flex;gap:10px;align-items:center}.upload-name{flex:1;min-width:0;overflow-wrap:anywhere}.upload-remove{font-size:22px;line-height:1;min-width:42px}.upload-track{height:7px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:9px}.upload-fill{height:100%;width:0;background:var(--accent);transition:width .12s}.upload-status{font-size:.9rem;color:var(--muted)}</style></head><body><h1>Медицинский архив</h1>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></body></html>""",status_code=status)
 
 def display_document_title(document, analysis):
     saved=(analysis or {}).get("display_title")
@@ -74,13 +74,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
     fs=tenancy.families_for_user(uid)
     if family_id is not None and not tenancy.role_for_user(family_id,uid): raise HTTPException(403,"Нет доступа")
     f=tenancy.get_family(family_id) if family_id is not None else (tenancy.get_family(fs[0]["id"]) if fs else None)
-    b=['<div class="card" id="archive-selector"><h2>Выбор семейного архива</h2>']
-    if fs:
-        b.append('<form class="row" method="get"><select name="family_id">')
-        for x in fs: b.append(f'<option value="{x["id"]}"{" selected" if f and x["id"]==f["id"] else ""}>{html.escape(x["name"])}</option>')
-        b.append('</select><button>Открыть</button></form>')
-    else: b.append('<p>Архивов пока нет.</p>')
-    b.append('</div>')
+    b=[]
     if fs:
         selected_for_actions = f["id"] if f else fs[0]["id"]
         pending_for_actions = len(db.pending_documents(selected_for_actions))
@@ -97,22 +91,35 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
             '<div class="card" id="quick-upload"><h2>Быстрая загрузка документов</h2>'
             '<p>Выберите файлы — загрузка начнётся автоматически. Прогресс показывается отдельно для каждого файла. Крестик убирает файл из списка на странице, но не гарантирует остановку уже начавшейся серверной обработки.</p>'
             '<label>Семейный архив<br><select id="upload-family" required>' + upload_options + '</select></label><br>'
-            '<label>Добавить файлы<br><input id="upload-files" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" multiple></label>'
+            '<input id="upload-files" type="file" accept="image/*,application/pdf,.tif,.tiff,.bmp" multiple hidden>' '<button type="button" id="choose-files">＋ Выбрать документы</button>'
             '<div id="upload-queue" aria-live="polite"></div>'
             '<small>До ' + str(MAX_UPLOAD_MB) + ' МБ на файл. OCR и классификация выполняются на сервере после передачи.</small></div>'
             '<script>(function(){const input=document.getElementById("upload-files"),queue=document.getElementById("upload-queue"),family=document.getElementById("upload-family");let items=[],seq=0;'
             'function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c]})}'
             'function render(){queue.innerHTML=items.map(function(x){return \'<div class="upload-item"><div class="upload-top"><div class="upload-name"><strong>\'+esc(x.file.name)+\'</strong><div class="upload-status">\'+(x.file.size/1048576).toFixed(2)+\' МБ · \'+esc(x.status)+\'</div></div><button class="upload-remove" type="button" data-remove="\'+x.id+\'" aria-label="Убрать файл из списка">×</button></div><div class="upload-track"><div class="upload-fill" style="width:\'+x.progress+\'%"></div></div><small>\'+x.progress+\'%</small></div>\'}).join("");queue.querySelectorAll("[data-remove]").forEach(function(b){b.addEventListener("click",function(){const id=Number(b.dataset.remove),item=items.find(function(x){return x.id===id});if(item&&item.xhr){item.cancelled=true;item.status="Отменено в браузере; результат сервера неизвестен";item.xhr.abort()}items=items.filter(function(x){return x.id!==id});render()})})}window.addEventListener("beforeunload",function(e){if(items.some(function(x){return x.xhr&&!x.cancelled})){e.preventDefault();e.returnValue=""}});'
             'function upload(item){item.status="Загрузка";const xhr=new XMLHttpRequest(),form=new FormData();item.xhr=xhr;form.append("family_id",family.value);form.append("files",item.file,item.file.name);xhr.open("POST","/upload");xhr.upload.onprogress=function(e){if(e.lengthComputable){item.progress=Math.round(e.loaded/e.total*100);item.status=item.progress>=100?"Передан · обработка на сервере":"Загрузка";render()}};xhr.onload=function(){item.xhr=null;if(item.cancelled)return;item.progress=100;const body=(xhr.responseText||"").toLowerCase();if(xhr.status>=200&&xhr.status<300){if(body.includes("добавлен во входящие"))item.status="Загружен · ручная проверка";else if(body.includes("сохранён пациенту"))item.status="Загружен · сохранён";else if(body.includes("дубликат"))item.status="Дубликат";else item.status="Обработка завершена"}else item.status="Ошибка HTTP "+xhr.status;render()};xhr.onerror=function(){item.xhr=null;if(!item.cancelled){item.status="Ошибка сети";render()}};xhr.onabort=function(){item.xhr=null};xhr.send(form)}'
-            'input.addEventListener("change",function(){const selected=Array.from(input.files||[]);input.value="";selected.forEach(function(file){const item={id:++seq,file:file,status:"В очереди",progress:0,xhr:null,cancelled:false};if(!/\\.(pdf|png|jpe?g|webp|tiff?|bmp)$/i.test(file.name)){item.status="Формат не поддерживается";item.progress=0;items.push(item);render();return}if(file.size>'+str(MAX_UPLOAD_MB*1024*1024)+'){item.status="Превышен лимит размера";items.push(item);render();return}items.push(item);render();upload(item)})});'
+            'document.getElementById("choose-files").addEventListener("click",function(){input.click()});input.addEventListener("change",function(){const selected=Array.from(input.files||[]);input.value="";selected.forEach(function(file){const item={id:++seq,file:file,status:"В очереди",progress:0,xhr:null,cancelled:false};if(!/\\.(pdf|png|jpe?g|webp|tiff?|bmp)$/i.test(file.name)){item.status="Формат не поддерживается";item.progress=0;items.push(item);render();return}if(file.size>'+str(MAX_UPLOAD_MB*1024*1024)+'){item.status="Превышен лимит размера";items.push(item);render();return}items.push(item);render();upload(item)})});'
             '})();</script>'
         )
     if fs:
         inbox_count = len(db.pending_documents(f["id"])) if f else 0
-        if inbox_count:
-            b.append(f'<div class="card"><h2>Нераспознанные документы</h2><p>Ожидают ручной проверки: <strong>{inbox_count}</strong></p><a href="/families/{f["id"]}/inbox">Открыть входящие документы</a></div>')
+        pending_rows = db.pending_documents(f["id"])
+        b.append(f'<div class="card"><h2>Нераспознанные документы</h2><p>Ожидают ручной проверки: <strong>{inbox_count}</strong></p>')
+        if pending_rows:
+            b.append('<div class="pending-thumbs">')
+            for row in pending_rows[:4]:
+                pid=int(row["id"]); name=str(row["name"]); ext=Path(name).suffix.lower()
+                url=f'/families/{f["id"]}/inbox/{pid}/preview'
+                if ext in {".jpg",".jpeg",".png",".webp",".bmp"}:
+                    thumb=f'<img src="{url}" alt="" loading="lazy">'
+                else:
+                    thumb='<span class="file-thumb">'+('PDF' if ext==".pdf" else html.escape(ext.upper().lstrip(".")))+'</span>'
+                b.append(f'<a class="pending-thumb" href="/families/{f["id"]}/inbox/{pid}">{thumb}<span>{html.escape(name)}</span></a>')
+            if inbox_count>4: b.append(f'<a class="pending-more" href="/families/{f["id"]}/inbox">Ещё {inbox_count-4} →</a>')
+            b.append('</div>')
         else:
-            b.append(f'<div class="card"><h2>Входящие документы</h2><p>Нет документов, ожидающих ручной проверки.</p><a href="/families/{f["id"]}/inbox">Открыть раздел</a></div>')
+            b.append('<p>Нет документов, ожидающих ручной проверки.</p>')
+        b.append(f'<a href="/families/{f["id"]}/inbox">Открыть входящие документы</a></div>')
     if f:
         fid=f["id"]
         b.append(f'<div class="card" id="patients-section"><h2>Архив: {html.escape(f["name"])}</h2><p>Хранение документов: {"локально на VPS" if STORAGE_BACKEND == "local" else "Яндекс Диск"}</p>')
@@ -123,7 +130,9 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
         if not ps: b.append('<p>Пациентов пока нет.</p>')
         for p in ps:
             ep=html.escape(p,quote=True)
-            b.append(f'<div class="card"><strong>{html.escape(p)}</strong> · документов: {db.document_count(fid,p)}<form class="row" method="get" action="/families/{fid}/patients/{ep}"><input type="search" name="q" placeholder="Поиск по документам"><button>Искать</button></form><a href="/families/{fid}/patients/{ep}">История документов</a></div>')
+            parts=p.split()
+            short_patient=(" ".join(parts[1:2] + parts[:1])) if len(parts)>=2 else p
+            b.append(f'<div class="card"><strong>{html.escape(short_patient)}</strong> · документов: {db.document_count(fid,p)}<form class="row" method="get" action="/families/{fid}/patients/{ep}"><input type="search" name="q" placeholder="Поиск по документам"><button>Искать</button></form><a href="/families/{fid}/patients/{ep}">История документов</a></div>')
         b.append('</div>')
     b.append('<div class="card" id="family-settings"><h2>Настройки архива</h2><form method="post" action="/families"><label>Название нового семейного архива<br><input name="name" required maxlength="80"></label> <button>Создать архив</button></form></div>')
     b.append('<div class="warn"><strong>Важно:</strong> не загружайте реальные медицинские документы до настройки резервного копирования и полной проверки прав доступа.</div>')
@@ -197,7 +206,6 @@ def download_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
     if path.parent != expected_dir.resolve(): raise HTTPException(404,"Документ не найден")
     if not path.is_file(): raise HTTPException(404,"Файл отсутствует в локальном хранилище")
     return FileResponse(path,filename=str(d.get("name") or path.name),media_type="application/octet-stream")
-
 @app.get("/families/{fid}/documents/{doc_id}/edit", response_class=HTMLResponse)
 def edit_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
     family(fid,uid)
@@ -397,8 +405,7 @@ def assign_selected_pending(fid:int,patient:str=Form(...),pending_ids:list[int]=
         except Exception as exc:
             logging.exception("Bulk pending assignment failed (%s)",type(exc).__name__)
             results.append("<li><strong>"+html.escape(d["name"])+"</strong>: ошибка обработки; требуется повторная проверка.</li>")
-    body='<p><a href="/families/'+str(fid)+'/inbox">← Ко входящим</a></p><h2>Результат массового назначения</h2><div class="card"><ul>'+''.join(results)+'</ul></div>'
-    return page("Массовое назначение",body)
+    body='<p><a href="/families/'+str(fid)+'/inbox">← Ко входящим</a></p><h2>Результат массового назначения</h2><div class="card"><ul>'+''.join(results)+'</ul></div>'    return page("Массовое назначение",body)
 
 @app.get("/families/{fid}/inbox/{pending_id}/preview")
 def preview_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)):
