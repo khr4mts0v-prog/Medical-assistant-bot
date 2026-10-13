@@ -24,10 +24,13 @@ def init():
         CREATE TABLE IF NOT EXISTS docs(
           id INTEGER PRIMARY KEY, family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
           patient TEXT NOT NULL COLLATE NOCASE, name TEXT, kind TEXT, date TEXT,
-          remote TEXT, ocr_remote TEXT, text TEXT, keywords TEXT, digest TEXT, added TEXT,
+          remote TEXT, ocr_remote TEXT, text TEXT, keywords TEXT, analysis TEXT, digest TEXT, added TEXT,
           UNIQUE(family_id,patient,digest));
         CREATE INDEX IF NOT EXISTS docs_family_patient ON docs(family_id,patient,date);
         """)
+        cols={row["name"] for row in c.execute("PRAGMA table_info(docs)")}
+        if "analysis" not in cols:
+            c.execute("ALTER TABLE docs ADD COLUMN analysis TEXT")
 init()
 
 def add_patient(fid,name):
@@ -50,19 +53,47 @@ def patient_id(fid, name):
         r=c.execute("SELECT id FROM patients WHERE family_id=? AND name=? COLLATE NOCASE",(int(fid),name)).fetchone()
         return r["id"] if r else None
 
-def add_doc(fid,p,name,kind,date,remote,ocr_remote,text,keywords,digest):
+def document_exists(fid, patient, digest):
+    with connect() as c:
+        row=c.execute("SELECT 1 FROM docs WHERE family_id=? AND patient=? COLLATE NOCASE AND digest=?",
+                      (int(fid),patient,digest)).fetchone()
+        return row is not None
+
+def add_doc(fid,p,name,kind,date,remote,ocr_remote,text,keywords,digest,analysis=None):
     with connect() as c:
         cur=c.execute("""INSERT OR IGNORE INTO docs
-        (family_id,patient,name,kind,date,remote,ocr_remote,text,keywords,digest,added)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        (family_id,patient,name,kind,date,remote,ocr_remote,text,keywords,analysis,digest,added)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
         (int(fid),p,name,kind,date,remote,ocr_remote,cipher().encrypt((text or "").encode("utf-8")),
-         cipher().encrypt(json.dumps(keywords,ensure_ascii=False).encode("utf-8")),digest,datetime.now().isoformat()))
+         cipher().encrypt(json.dumps(keywords,ensure_ascii=False).encode("utf-8")),
+         cipher().encrypt(json.dumps(analysis,ensure_ascii=False).encode("utf-8")) if analysis else None,
+         digest,datetime.now().isoformat()))
         return cur.rowcount==1
 
-def search(fid,p,query="",limit=10):
+def get_doc(fid, doc_id):
+    """Return one document only when it belongs to the requested family."""
     with connect() as c:
-        rows=c.execute("SELECT * FROM docs WHERE family_id=? AND patient=? COLLATE NOCASE ORDER BY added DESC",(int(fid),p)).fetchall()
-    terms=(query or "").lower().split()
+        row=c.execute("SELECT * FROM docs WHERE family_id=? AND id=?",(int(fid),int(doc_id))).fetchone()
+    if not row:
+        return None
+    d=dict(row)
+    try:
+        d["text"]=cipher().decrypt(d["text"]).decode("utf-8") if d.get("text") else ""
+        raw_keywords=cipher().decrypt(d["keywords"]).decode("utf-8") if d.get("keywords") else "[]"
+        d["keywords"]=json.loads(raw_keywords)
+        raw_analysis=cipher().decrypt(d["analysis"]).decode("utf-8") if d.get("analysis") else "{}"
+        d["analysis"]=json.loads(raw_analysis)
+    except Exception:
+        logging.exception("Cannot decrypt family document index entry")
+        return None
+    return d
+
+def search(fid,p,query="",limit=10):
+    """Search OCR plus structured metadata. Multi-term matches rank above partial matches."""
+    with connect() as c:
+        rows=c.execute("SELECT * FROM docs WHERE family_id=? AND patient=? COLLATE NOCASE ORDER BY added DESC",
+                       (int(fid),p)).fetchall()
+    terms=list(dict.fromkeys(term for term in (query or "").lower().split() if term.strip()))
     out=[]
     for row in rows:
         d=dict(row)
@@ -70,18 +101,49 @@ def search(fid,p,query="",limit=10):
             d["text"]=cipher().decrypt(d["text"]).decode("utf-8") if d.get("text") else ""
             raw_keywords=cipher().decrypt(d["keywords"]).decode("utf-8") if d.get("keywords") else "[]"
             d["keywords"]=json.loads(raw_keywords)
+            raw_analysis=cipher().decrypt(d["analysis"]).decode("utf-8") if d.get("analysis") else "{}"
+            d["analysis"]=json.loads(raw_analysis)
         except Exception:
-            # Fail closed: never return undecipherable medical text as if it were valid.
             logging.exception("Cannot decrypt family document index entry")
             continue
-        blob=" ".join(str(d.get(k) or "") for k in ("name","kind","date","text","keywords")).lower()
-        if not terms or any(t in blob for t in terms): out.append(d)
+        a=d.get("analysis") or {}
+        indexed=list(a.get("types",[]))+list(a.get("dates",[]))
+        for item in a.get("lab_results",[]):
+            indexed.extend([item.get("name",""),item.get("value") or "",item.get("unit") or "",item.get("source","")])
+        for group in ("diagnoses","medications"):
+            indexed.extend(item.get("text","") for item in a.get(group,[]))
+        blob=(" ".join(str(d.get(k) or "") for k in ("name","kind","date","text","keywords"))+
+              " "+" ".join(map(str,indexed))).lower()
+        matched=[term for term in terms if term in blob]
+        if not terms or matched:
+            score=sum(blob.count(term) for term in matched)+100*len(matched)
+            if terms and len(matched)==len(terms):
+                score+=1000
+            d["_search_score"]=score
+            out.append(d)
+    if terms:
+        out.sort(key=lambda d:(d["_search_score"],d.get("added") or ""),reverse=True)
     return out[:max(1,min(int(limit),1000))]
 
 def context(fid,p,query,limit=8):
     rows=search(fid,p,query,limit)
-    return "\n\n---\n\n".join(
-      f"Источник: {r['name']} | {r['kind']} | дата: {r['date']}\n{r['text'][:2500]}" for r in rows)
+    chunks=[]
+    for row in rows:
+        a=row.get("analysis") or {}
+        facts=[]
+        for item in a.get("lab_results",[])[:25]:
+            facts.append("Показатель: {} = {} {} (стр. {}; исходная строка: {})".format(
+                item.get("name"), item.get("value") or "не извлечено", item.get("unit") or "",
+                item.get("page"), item.get("source","")))
+        for item in a.get("diagnoses",[])[:10]:
+            facts.append("Строка с диагнозом, стр. {}: {}".format(item.get("page"), item.get("text")))
+        for item in a.get("medications",[])[:10]:
+            facts.append("Строка о назначении/препарате, стр. {}: {}".format(item.get("page"), item.get("text")))
+        chunks.append("Источник: {} | основной тип: {} | дата: {}\nТипы содержимого: {}\nТипы по страницам: {}\nИзвлечённые фрагменты (проверить по оригиналу):\n{}\nOCR-текст:\n{}".format(
+            row.get("name"), row.get("kind"), row.get("date"), ", ".join(a.get("types", [])) or row.get("kind","не определено"),
+            json.dumps(a.get("page_types", []), ensure_ascii=False),
+            "\n".join(facts) or "Структурированных фрагментов не найдено", row.get("text", "")[:3200]))
+    return "\n\n---\n\n".join(chunks)
 
 def history(fid,p):
     rows=search(fid,p,"",1000)

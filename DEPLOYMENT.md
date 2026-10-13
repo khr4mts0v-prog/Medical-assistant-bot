@@ -1,50 +1,26 @@
-# VPS deployment and multi-family architecture
+# Deployment guide
 
-## Target deployment
+Target: Ubuntu 24.04, Docker Compose, Nginx + HTTPS. The current low-cost test VPS has about 1 GB RAM and one vCPU; use small synthetic documents and avoid concurrent OCR.
 
-- Ubuntu 24.04 LTS
-- 2 vCPU, 4 GB RAM, 50–60 GB SSD/NVMe
-- Docker Compose; Python bot + Tesseract OCR (Russian and English) + SQLite
-- Original documents on each family's own Yandex Disk
-- Hosted LLM through Hugging Face Inference Providers; no local model/GPU
-- Nginx + HTTPS for Yandex OAuth callback
+## Configure
 
-## Important cost and privacy notes
+1. Keep .env mode 600. Set FERNET_KEY, WEB_USERNAME and a long unique WEB_PASSWORD. Never commit .env.
+2. Set `DOCUMENT_STORAGE_BACKEND=local` to store web uploads on the VPS. This is the default.
+3. The web service and Telegram bot share `./data:/app/data`. Local originals and OCR sidecars are stored at `./data/documents/family_<id>/<patient>/`; SQLite remains `./data/archive.sqlite3`.
+4. Run `docker compose config --quiet` and `docker compose up -d --build`.
+5. Check `docker compose ps -a`, `docker compose logs --tail=100 medical-archive-web`, and `curl -I http://127.0.0.1:8000/` (should return 401 with HTTP Basic enabled).
+6. Open the HTTPS endpoint, sign in, create/select a family, add a patient, and test a small synthetic PDF/image. Check that the original can be opened from the document list.
+7. Optional Yandex Disk: configure OAuth secrets and set `DOCUMENT_STORAGE_BACKEND=yandex`. Its callback must match the registered HTTPS URI exactly.
 
-The VPS budget covers only the application server. Hugging Face inference is billed separately after included credits are exhausted. Free accounts receive $0.10/month in credits according to current HF documentation; verify payment availability for your country/account before relying on paid inference.
+## Data and security
 
-Before each family first uses AI analysis, the bot asks for explicit consent because relevant OCR excerpts are sent to Hugging Face and the selected inference provider. Do not use AI analysis if the family does not agree to that external processing.
+- Keep port 8000 bound to 127.0.0.1; do not expose it directly to the internet. Use HTTPS via Nginx.
+- Back up `data/` and FERNET_KEY securely; test restoration. Keep the encryption key separate from database backups.
+- Local documents are not encrypted individually at rest. Files are stored with restrictive permissions on the host; restrict VPS and administrator access and use encrypted backups.
+- Never upload real medical records to this test MVP. It lacks per-person web accounts, rate limiting, a full security review, and comprehensive integration tests.
+- The web login currently represents one configured web owner account. Family memberships are stored in the existing family_members table using a negative numeric principal ID, separate from positive Telegram IDs.
+- AI analysis sends selected OCR text to Hugging Face after consent. Verify provider billing and privacy terms before enabling.
 
-OCR text and keywords, plus per-family Yandex OAuth tokens, are encrypted at rest in SQLite using FERNET_KEY. The key must be backed up securely and must not be committed to Git. If the key is lost, encrypted text/tokens cannot be recovered from the database. The VPS still processes plaintext in memory and the chosen AI provider receives selected excerpts.
+## Tests
 
-## Multi-family isolation
-
-- Each family is a tenant with its own family ID.
-- Patient lists, document search, history and AI context are scoped by family ID.
-- Telegram IDs are members of explicit families with roles (owner/admin/member).
-- Each family authorizes its own Yandex Disk through OAuth; never ask for account passwords.
-- Tokens are encrypted in SQLite; logs should never contain tokens or OCR text.
-- Previous single-family tables are preserved as legacy tables if detected. They are not automatically assigned to a family, because ownership cannot safely be inferred.
-
-## Deployment outline
-
-1. Point a domain/subdomain at the VPS.
-2. Install Docker Engine, Docker Compose plugin, Nginx and Certbot.
-3. Copy `.env.example` to `.env` and fill in BOT_TOKEN, FERNET_KEY, Yandex OAuth credentials, HTTPS redirect URL and (if available) HF_API_TOKEN.
-4. Register an application in Yandex OAuth. Enable Disk read/write access and set the callback URL to exactly `https://YOUR-DOMAIN.example/oauth/yandex/callback`.
-5. First configure an HTTP-only Nginx site for the domain and obtain a TLS certificate with Certbot. Then enable `nginx/medical-archive.conf.example`, replacing the example domain and certificate paths.
-6. Ensure `YANDEX_REDIRECT_URI` exactly matches the registered callback URL. The app inside Docker listens on port 8080; Compose only exposes it on localhost.
-7. Create the bind-mounted data directory with the correct container UID: `mkdir -p data && sudo chown -R 10001:10001 data`. Run `docker compose up -d --build`; inspect `docker compose logs -f` for startup errors.
-8. Open the Telegram bot, run `/newfamily My Family`, then `/connect_disk`. Authorize the correct Yandex account in the browser.
-9. Invite relatives with `/invite TELEGRAM_ID member`. They can get their ID with `/id`. Use `/families` to switch archives.
-10. Test uploads, OCR, search, history, and AI using synthetic documents first.
-
-## Validation checklist before real records
-
-- Run `python -m unittest discover -s tests -v` (or inspect the GitHub Actions result).
-- Confirm one family's member cannot select/search the other family's patients or see its history/AI context.
-- Confirm Yandex tokens and OCR text are encrypted in SQLite.
-- Test OAuth success, cancellation, expired state, and wrong redirect URI.
-- Test large PDFs and multiple users; this initial version processes one file per message and does not combine Telegram albums into a single document.
-- Configure encrypted off-server backups and test restoration. Back up the FERNET_KEY separately and securely.
-- Review legal/privacy obligations for medical data and the countries where family members and providers are located.
+Run `python -m compileall -q .` and `python -m unittest discover -s tests -v`. Test family isolation, login failures, local upload/download, backups and restoration before considering production use.

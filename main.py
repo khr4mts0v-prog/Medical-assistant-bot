@@ -9,7 +9,7 @@ import tenancy
 from cloud import YaDiskClient
 from oauth_server import authorization_url, configured, start_server, stop_server
 from ocr import ocr_file
-from AIAnalise import classify_document, extract_keywords, answer_question
+from AIAnalise import analyze_document, extract_keywords, answer_question
 from utils import format_filename, parse_date_from_text, normalize_extension, safe_name
 
 TOKEN=os.getenv("BOT_TOKEN","").strip()
@@ -194,7 +194,7 @@ async def _process_file(u,c,path,name):
     await say(u,"Обрабатываю документ…")
     try:
         text=await asyncio.to_thread(ocr_file,str(path))
-        kind=classify_document(text); keywords=extract_keywords(text); date=parse_date_from_text(text)
+        analysis=analyze_document(text); kind=analysis["primary_type"]; keywords=extract_keywords(text,analysis); date=parse_date_from_text(text)
         digest=hashlib.sha256(path.read_bytes()).hexdigest()
         ext=normalize_extension(name)
         filename=format_filename(patient,kind,date,ext)
@@ -207,7 +207,7 @@ async def _process_file(u,c,path,name):
         with tempfile.TemporaryDirectory() as td:
             op=Path(td)/"ocr.txt"; op.write_text(text,encoding="utf-8")
             await asyncio.to_thread(disk.upload_file,str(op),oremote)
-        added=db.add_doc(f["id"],patient,filename,kind,date,remote,oremote,text,keywords,digest)
+        added=db.add_doc(f["id"],patient,filename,kind,date,remote,oremote,text,keywords,digest,analysis=analysis)
         if not added: return await say(u,"Этот файл уже есть в индексе семьи; повторно не добавлен.")
         history=db.history(f["id"],patient)
         with tempfile.TemporaryDirectory() as td:
