@@ -252,6 +252,16 @@ class DocumentMetadataTests(unittest.TestCase):
 Заключение: ультразвуковые признаки изменений щитовидной железы."""
         self.assertIsNone(extract_document_date(text))
 
+    def test_ultrasound_report_heading_without_word_conclusion_is_classified(self):
+        from AIAnalise import analyze_document, classify_document
+
+        text = """УЛЬТРАЗВУКОВОЕ ИССЛЕДОВАНИЕ ПОЧЕК И МОЧЕВОГО ПУЗЫРЯ
+Дата осмотра: 17.03.2025 08:18
+ЗАКЛЮЧЕНИЕ: Ультразвуковые признаки гипотонии лоханки левой почки."""
+        result = analyze_document(text)
+        self.assertEqual(classify_document(text), "заключение УЗИ")
+        self.assertEqual(result["primary_type"], "заключение УЗИ")
+
     def test_registered_patient_full_name(self):
         from document_metadata import extract_registered_patient
         roster = ["Иванов Иван Иванович", "Петров Пётр Петрович"]
