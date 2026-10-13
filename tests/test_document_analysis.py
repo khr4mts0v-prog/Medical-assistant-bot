@@ -180,6 +180,29 @@ class DocumentMetadataTests(unittest.TestCase):
         self.assertEqual(infer_document_title("Протокол колоноскопии. Заключение", "эндоскопическое заключение"),
                          "Колоноскопия")
 
+    def test_mycology_laboratory_report_and_report_creation_date(self):
+        from AIAnalise import analyze_document, classify_document
+        from document_metadata import extract_document_date, infer_document_title
+
+        text = """ПАЦИЕНТ ТЕСТОВЫЙ
+Заказ №: 12345
+Зарегистрирован: 04.10.2026 17:06:52
+Исследование кожи и ногтевых пластинок на поверхностные микозы (образец ткани)
+Ногти (пр. нога), валидация 06.10.2026 19:44:48
+Метод: Микроскопия
+Грибы: мицелий — не обнаружен
+Грибы: псевдомицелий — не обнаружен
+Грибы: споры — не обнаружены
+Грибы: дрожжеподобные клетки — не обнаружены
+Отчет создан: 06.10.2026 19:44:49
+Страница 1 из 1"""
+        result = analyze_document(text)
+        self.assertEqual(classify_document(text), "лабораторный отчёт")
+        self.assertEqual(result["confidence"], "high")
+        self.assertFalse(result["review_required"])
+        self.assertEqual(extract_document_date(text), "06-10-2026")
+        self.assertEqual(infer_document_title(text, result["primary_type"]), "Анализ на поверхностные микозы")
+
     def test_registered_patient_full_name(self):
         from document_metadata import extract_registered_patient
         roster = ["Иванов Иван Иванович", "Петров Пётр Петрович"]
