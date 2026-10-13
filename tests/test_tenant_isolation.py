@@ -8,6 +8,8 @@ os.environ["DB_PATH"] = os.path.join(TMP.name, "test.sqlite3")
 os.environ["FERNET_KEY"] = Fernet.generate_key().decode()
 
 import tenancy
+# Other test modules may import tenancy before this module sets its isolated key.
+tenancy.FERNET_KEY = os.environ["FERNET_KEY"]
 import database
 
 class TenantIsolationTests(unittest.TestCase):
