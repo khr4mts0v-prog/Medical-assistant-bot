@@ -348,8 +348,17 @@ def assign_selected_pending(fid:int,patient:str=Form(...),pending_ids:list[int]=
         kind=str(analysis.get("primary_type") or "не определено")
         if kind not in DOCUMENT_TYPE_RULES: kind="не определено"
         title=str(analysis.get("display_title") or (kind if kind!="не определено" else Path(d["name"]).stem))[:180].strip()
-        found_date=parse_date_from_text(d.get("text") or "")
-        date="" if found_date=="не определена" else found_date
+        # Do not mistake a patient's date of birth for the document date.
+        # Bulk mode fills a date only when OCR explicitly labels it as a document/exam date.
+        import re
+        date_match=re.search(r"(?:дата\\s+(?:документа|исследования|осмотра|выдачи|проведения|при[её]ма)|исследование\\s+от|осмотр\\s+от)\\s*[:№]?\\s*(\\d{1,2}[./-]\\d{1,2}[./-]\\d{4})",d.get("text") or "",re.I)
+        date=""
+        if date_match:
+            try:
+                from datetime import datetime
+                date=datetime.strptime(date_match.group(1).replace(".","-").replace("/","-"),"%d-%m-%Y").strftime("%d-%m-%Y")
+            except ValueError:
+                date=""
         try:
             response=assign_pending_document(fid,pending_id,patient,kind,title,date,uid)
             results.append("<li><strong>"+html.escape(d["name"])+"</strong>: назначен пациенту "+html.escape(patient)+"; индивидуальные тип и дата сохранены.</li>")
