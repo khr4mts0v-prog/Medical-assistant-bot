@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Diagnostic evaluation of synthetic and publicly published anonymized examples."""
 import json
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, defaultdict
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
