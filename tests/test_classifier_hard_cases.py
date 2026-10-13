@@ -70,5 +70,55 @@ class ClassificationHardCasesTests(unittest.TestCase):
         self.assertNotIn("заключение УЗИ", page_map[2]["document_types"])
 
 
+    def test_referral_requests_ultrasound_protocol_but_has_no_result(self):
+        self.assert_primary(
+            "НАПРАВЛЕНИЕ НА МЕДИЦИНСКОЕ ОБСЛЕДОВАНИЕ\n"
+            "Вид обследования: ультразвуковое исследование органов брюшной полости.\n"
+            "Просим выполнить исследование и выдать протокол с описанием и заключением.\n"
+            "Результаты обследования в настоящем документе отсутствуют.",
+            "направление",
+        )
+
+    def test_visit_note_with_planned_cbc_is_not_lab_report(self):
+        self.assert_primary(
+            "ПРОТОКОЛ ПЕРВИЧНОГО ПРИЁМА ВРАЧА-ТЕРАПЕВТА\n"
+            "Жалобы: утомляемость. Объективно: температура 36,6.\n"
+            "План: общий анализ крови; повторная консультация после получения результатов.",
+            "протокол осмотра или приёма",
+        )
+
+    def test_disclaimer_negation_does_not_make_certificate(self):
+        self.assert_primary(
+            "ПАМЯТКА ДЛЯ ПАЦИЕНТА\n"
+            "При необходимости можно записаться на УЗИ или обсудить МРТ.\n"
+            "Данная памятка не является направлением, протоколом исследования, "
+            "заключением врача или медицинской справкой.",
+            "не определено",
+        )
+
+    def test_actual_ultrasound_report_still_classifies_as_report(self):
+        self.assert_primary(
+            "ПРОТОКОЛ УЛЬТРАЗВУКОВОГО ИССЛЕДОВАНИЯ\n"
+            "Исследование выполнено. Печень без особенностей.\n"
+            "Заключение: эхографических признаков патологии не выявлено.",
+            "заключение УЗИ",
+        )
+
+    def test_referral_to_mri_not_report_despite_requested_protocol(self):
+        result = self.assert_primary(
+            "МЕДИЦИНСКОЕ НАПРАВЛЕНИЕ на МРТ головного мозга. "
+            "Просим провести исследование и направить протокол лечащему врачу.",
+            "направление",
+        )
+        self.assertNotIn("заключение МРТ", result["document_types"])
+
+    def test_negative_mentions_of_document_types_do_not_win(self):
+        self.assert_primary(
+            "ПАМЯТКА. Это не выписной эпикриз и не медицинская справка. "
+            "Документ не содержит результатов обследования.",
+            "не определено",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
