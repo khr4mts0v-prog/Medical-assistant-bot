@@ -12,6 +12,7 @@ from local_storage import save_file as save_local_file
 from ocr import ocr_file
 from AIAnalise import analyze_document, extract_keywords
 from utils import format_filename, normalize_extension, parse_date_from_text, safe_name
+from document_metadata import extract_registered_patient
 
 app=FastAPI(title="Medical Archive", docs_url=None, redoc_url=None)
 security=HTTPBasic()
@@ -69,6 +70,22 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
         b.append('</select><button>Открыть</button></form>')
     else: b.append('<p>Архивов пока нет.</p>')
     b.append('<form method="post" action="/families"><label>Название архива<br><input name="name" required maxlength="80"></label> <button>Создать архив</button></form></div>')
+    # Inbox-first workflow: files can be uploaded before opening a patient record.
+    if fs:
+        selected_fid = f["id"] if f else fs[0]["id"]
+        upload_options = "".join(
+            '<option value="' + str(x["id"]) + '"' + (' selected' if x["id"] == selected_fid else '') + '>' + html.escape(x["name"]) + '</option>'
+            for x in fs
+        )
+        b.append(
+            '<div class="card"><h2>Быстрая загрузка документов</h2>'
+            '<p>Загрузите сразу несколько PDF или изображений. Пациента попробуем определить по тексту документа — выбирать его заранее не нужно.</p>'
+            '<form method="post" enctype="multipart/form-data" action="/upload">'
+            '<label>Семейный архив<br><select name="family_id" required>' + upload_options + '</select></label><br>'
+            '<label>Файлы<br><input type="file" name="files" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" multiple required></label><br>'
+            '<button type="submit">Загрузить и разобрать документы</button></form>'
+            '<small>До ' + str(MAX_UPLOAD_MB) + ' МБ на файл. Если пациент не распознан однозначно, документ не будет ошибочно сохранён в чужую историю.</small></div>'
+        )
     if f:
         fid=f["id"]
         b.append(f'<div class="card"><h2>Архив: {html.escape(f["name"])}</h2><p>Хранение документов: {"локально на VPS" if STORAGE_BACKEND == "local" else "Яндекс Диск"}</p>')
@@ -183,6 +200,100 @@ def save_document_edit(fid:int,doc_id:int,kind:str=Form(...),title:str=Form(...)
     analysis["display_title"]=title
     if not db.update_doc_metadata(fid,doc_id,kind,date,analysis): raise HTTPException(404,"Документ не найден")
     return RedirectResponse("/families/"+str(fid)+"/patients/"+str(d.get("patient") or ""),status_code=303)
+
+@app.post("/upload", response_class=HTMLResponse)
+def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), uid:int=Depends(current_user)):
+    """Batch inbox upload: infer patient from OCR, never guess when matching is ambiguous."""
+    f=family(family_id,uid)
+    if not files:
+        raise HTTPException(400,"Выберите хотя бы один файл")
+    if STORAGE_BACKEND not in {"local","yandex"}:
+        raise HTTPException(503,"Неизвестный backend хранения")
+    token=tenancy.get_yadisk_token(family_id) if STORAGE_BACKEND=="yandex" else None
+    if STORAGE_BACKEND=="yandex" and not token:
+        raise HTTPException(400,"Сначала подключите Яндекс Диск для выбранного архива")
+    roster=db.patient_records(family_id)
+    if not roster:
+        return page("Нужны пациенты",
+            '<p>В выбранном архиве пока нет пациентов. Добавьте короткие имена и варианты ФИО, чтобы система могла безопасно распределять документы.</p>'
+            '<p><a href="/?family_id='+str(family_id)+'">Вернуться в архив</a></p>',400)
+    results=[]
+    for upload_file in files[:50]:
+        name=Path(upload_file.filename or "document.bin").name
+        ext=Path(name).suffix.lower()
+        if ext not in ALLOWED:
+            results.append('<li><strong>'+html.escape(name)+'</strong>: формат не поддерживается; пропущен.</li>')
+            continue
+        saved_paths=[]
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                local=Path(td)/name
+                size=0
+                with local.open("wb") as out:
+                    while True:
+                        chunk=upload_file.file.read(1024*1024)
+                        if not chunk: break
+                        size+=len(chunk)
+                        if size>MAX_UPLOAD_MB*1024*1024:
+                            break
+                        out.write(chunk)
+                if size==0 or size>MAX_UPLOAD_MB*1024*1024:
+                    results.append('<li><strong>'+html.escape(name)+'</strong>: файл пустой или превышает '+str(MAX_UPLOAD_MB)+' МБ; пропущен.</li>')
+                    continue
+                text=ocr_file(str(local))
+                patient=extract_registered_patient(text,roster)
+                if not patient:
+                    results.append('<li><strong>'+html.escape(name)+'</strong>: пациент не определён однозначно. Файл не сохранён. Проверьте варианты ФИО пациента в настройках архива и загрузите повторно.</li>')
+                    continue
+                analysis=analyze_document(text)
+                kind=analysis["primary_type"]
+                keywords=extract_keywords(text,analysis)
+                date=parse_date_from_text(text)
+                digest=hashlib.sha256(local.read_bytes()).hexdigest()
+                if db.document_exists(family_id,patient,digest):
+                    results.append('<li><strong>'+html.escape(name)+'</strong>: дубликат — уже есть у пациента '+html.escape(patient)+'.</li>')
+                    continue
+                ex=normalize_extension(name)
+                stored=f"{Path(format_filename(patient,kind,date,ex)).stem}_{digest[:8]}.{ex}"
+                ocr_stored=Path(stored).stem+".txt"
+                if STORAGE_BACKEND=="local":
+                    saved_path=save_local_file(family_id,patient,stored,local); saved_paths.append(saved_path)
+                    ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(text,encoding="utf-8")
+                    saved_paths.append(save_local_file(family_id,patient,ocr_stored,ocr_tmp))
+                    remote=str(saved_path); oremote=str(saved_path.parent/ocr_stored)
+                else:
+                    disk=YaDiskClient(token); folder=f"{ROOT}/family_{family_id}/{safe_name(patient)}"
+                    docs,ocr=folder+"/docs",folder+"/OCR"
+                    disk.ensure_folder(docs); disk.ensure_folder(ocr)
+                    remote,oremote=docs+"/"+stored,ocr+"/"+ocr_stored
+                    disk.upload_file(str(local),remote)
+                    with tempfile.TemporaryDirectory() as od:
+                        op=Path(od)/"ocr.txt"; op.write_text(text,encoding="utf-8"); disk.upload_file(str(op),oremote)
+                if not db.add_doc(family_id,patient,stored,kind,date,remote,oremote,text,keywords,digest,analysis=analysis):
+                    if STORAGE_BACKEND=="local":
+                        for candidate in saved_paths:
+                            try: candidate.unlink()
+                            except FileNotFoundError: pass
+                    results.append('<li><strong>'+html.escape(name)+'</strong>: дубликат, запись не добавлена.</li>')
+                    continue
+                if STORAGE_BACKEND=="yandex":
+                    with tempfile.TemporaryDirectory() as hd:
+                        hp=Path(hd)/"history.txt"; hp.write_text(db.history(family_id,patient),encoding="utf-8")
+                        disk.upload_file(str(hp),folder+"/history.txt")
+                review="; требуется проверить тип" if analysis.get("review_required") else ""
+                results.append('<li><strong>'+html.escape(name)+'</strong>: сохранён пациенту <strong>'+html.escape(patient)+'</strong>; тип: '+html.escape(kind)+'; дата: '+html.escape(str(date or "не указана"))+review+'.</li>')
+        except Exception as e:
+            for candidate in saved_paths:
+                try: candidate.unlink()
+                except FileNotFoundError: pass
+            logging.exception("Inbox upload failed (%s)",type(e).__name__)
+            results.append('<li><strong>'+html.escape(name)+'</strong>: ошибка обработки ('+html.escape(type(e).__name__)+').</li>')
+        finally:
+            try: upload_file.file.close()
+            except Exception: pass
+    body='<p><a href="/?family_id='+str(family_id)+'">← В архив</a></p><h2>Результаты загрузки</h2><div class="card"><ul>'+''.join(results)+'</ul></div>'
+    return page("Результаты загрузки",body)
+
 
 @app.post("/families/{fid}/patients/{patient}/upload",response_class=HTMLResponse)
 def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current_user)):
