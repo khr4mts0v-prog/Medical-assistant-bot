@@ -752,15 +752,30 @@ def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)
     ext=Path(d["name"]).suffix.lower()
     preview_url=f"/families/{fid}/inbox/{pending_id}/preview"
     if ext in {".jpg",".jpeg",".png",".webp",".bmp",".tif",".tiff"}:
-        preview=f'<img class="preview-image" src="{preview_url}" alt="Превью документа">'
+        preview=f'<a class="document-preview-link" href="{preview_url}" target="_blank" rel="noopener" aria-label="Открыть изображение в полном размере"><img class="preview-image" src="{preview_url}" alt="Предпросмотр документа"><span>Нажмите, чтобы открыть полностью ↗</span></a>'
     elif ext==".pdf":
-        preview=f'<p><a href="{preview_url}" target="_blank" rel="noopener">Открыть PDF в новой вкладке ↗</a></p>'
+        preview=f'<div class="pdf-preview"><div class="pdf-preview-toolbar">Предпросмотр PDF · прокрутите документ ниже</div><iframe src="{preview_url}#view=FitH" title="Предпросмотр PDF" loading="lazy"></iframe><p><a href="{preview_url}" target="_blank" rel="noopener">Открыть PDF отдельно ↗</a></p></div>'
     else:
         preview=""
-    body=f'<p><a href="/families/{fid}/inbox">← К входящим</a></p><h2>Классификация документа</h2><div class="card"><strong>Файл:</strong> {html.escape(d["name"])}{preview}<details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape(d["text"][:12000])}</pre></details></div>'
+    body=f'<p><a href="/families/{fid}/inbox">← К входящим</a></p><h2>Классификация документа</h2><div class="card pending-review-card"><strong>Файл:</strong> {html.escape(d["name"])}{preview}<details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape(d["text"][:12000])}</pre></details></div>'
     body+=f'<p><a href="/families/{fid}/patients/new">＋ Добавить пациента</a></p>'
-    body+=f'<form method="post" action="/families/{fid}/inbox/{pending_id}/assign"><label>Пациент<br><select name="patient" required>{patient_options}</select></label><br><label>Тип документа<br><select name="kind" required>{kind_options}</select></label><br><label>Название в архиве<br><input name="title" required maxlength="180" value="{html.escape(str(d["analysis"].get("display_title") or d["analysis"].get("primary_type") or d["name"]),quote=True)}"></label><br><label>Дата документа (ДД-ММ-ГГГГ)<br><input name="date" placeholder="17-03-2025" maxlength="10"></label><p><button type="submit">Сохранить в историю пациента</button></p></form>'
+    body+=f'<form class="pending-classification-form" method="post" action="/families/{fid}/inbox/{pending_id}/assign"><label>Пациент<br><select name="patient" required>{patient_options}</select></label><label>Тип документа<br><select name="kind" required>{kind_options}</select></label><label>Название в архиве<br><input name="title" required maxlength="180" value="{html.escape(str(d["analysis"].get("display_title") or d["analysis"].get("primary_type") or d["name"]),quote=True)}"></label><label>Дата документа (ДД-ММ-ГГГГ)<br><input name="date" placeholder="17-03-2025" maxlength="10"></label><p><button type="submit">Сохранить в историю пациента</button></p></form>'
+    body+=f'<form class="pending-delete-form" method="post" action="/families/{fid}/inbox/{pending_id}/delete" onsubmit="return confirm(\'Удалить этот документ из входящих без возможности восстановления?\')"><input type="hidden" name="confirm" value="yes"><button type="submit">Удалить документ</button></form>'
     return page("Ручная классификация",body)
+
+
+@app.post("/families/{fid}/inbox/{pending_id}/delete", response_class=HTMLResponse)
+def delete_pending_document(fid:int,pending_id:int,confirm:str=Form(...),uid:int=Depends(current_user)):
+    family(fid,uid)
+    if confirm != "yes":
+        raise HTTPException(400,"Удаление не подтверждено")
+    d=db.get_pending_doc(fid,pending_id)
+    if not d:
+        raise HTTPException(404,"Документ не найден во входящих")
+    # Only remove a record that is still in the pending inbox; do not touch
+    # patient archive files or shared storage paths here.
+    db.delete_pending_doc(fid,pending_id)
+    return RedirectResponse(f"/families/{fid}/inbox?deleted=1",status_code=303)
 
 @app.post("/families/{fid}/inbox/{pending_id}/assign", response_class=HTMLResponse)
 def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:str=Form(...),title:str=Form(...),date:str=Form(""),uid:int=Depends(current_user)):
