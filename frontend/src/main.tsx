@@ -15,10 +15,25 @@ function extractContent(documentText: string): string {
   main.querySelector('.app-topbar')?.remove();
   main.querySelector('#app-sidebar')?.remove();
   main.querySelector('#sidebar-backdrop')?.remove();
-  main.querySelectorAll('script, .muted small').forEach((node) => {
-    if (node.tagName === 'SCRIPT') node.remove();
-  });
-  main.querySelectorAll('a').forEach((a) => {
+  main.querySelectorAll('script').forEach(node => node.remove());
+  main.querySelector('#family-settings')?.remove();
+  const welcome = main.querySelector('.home-welcome');
+  const search = main.querySelector('form.home-search');
+  const upload = main.querySelector('#quick-upload');
+  const actions = main.querySelector('.home-actions');
+  if (welcome) main.insertBefore(welcome, main.firstChild);
+  if (search && welcome) welcome.after(search);
+  if (upload && search) search.after(upload);
+  if (actions && upload) upload.after(actions);
+  const archiveHeading = main.querySelector('#patients-section > h2');
+  if (archiveHeading) archiveHeading.textContent = 'Семья';
+  const patientHeading = main.querySelector('#patients');
+  if (patientHeading) patientHeading.textContent = 'Члены семьи';
+  const addPatient = Array.from(main.querySelectorAll('a')).find(a => a.textContent?.includes('Добавить пациента'));
+  if (addPatient) addPatient.textContent = '＋ Добавить члена семьи';
+  main.querySelector('#patients-section > p')?.remove();
+  main.querySelector('.home-action[href="#patients"]')?.remove();
+  main.querySelectorAll('a').forEach(a => {
     const href = a.getAttribute('href');
     if (href && href.startsWith('/') && !href.startsWith('//')) a.dataset.spa = 'true';
   });
@@ -73,6 +88,37 @@ function App() {
   useEffect(() => {
     const root = contentRef.current;
     if (!root || !screen) return;
+    const zone = root.querySelector<HTMLElement>('#quick-upload');
+    const input = root.querySelector<HTMLInputElement>('#upload-files');
+    const familySelect = root.querySelector<HTMLSelectElement>('#upload-family');
+    const queue = root.querySelector<HTMLElement>('#upload-queue');
+    const choose = root.querySelector<HTMLButtonElement>('#choose-files');
+    const openPicker = (event: MouseEvent) => {
+      if ((event.target as HTMLElement).closest('button,input,a,select')) return;
+      input?.click();
+    };
+    const chooseFiles = () => input?.click();
+    const changeFiles = () => {
+      const files = Array.from(input?.files || []);
+      if (input) input.value = '';
+      files.forEach(file => {
+        const item = document.createElement('div');
+        item.className = 'upload-item';
+        item.textContent = file.name + ' · Загрузка…';
+        queue?.appendChild(item);
+        const data = new FormData();
+        data.append('family_id', familySelect?.value || '');
+        data.append('files', file, file.name);
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/upload');
+        xhr.onload = () => { item.textContent = file.name + (xhr.status >= 200 && xhr.status < 300 ? ' · Передан серверу' : ' · Ошибка HTTP ' + xhr.status); };
+        xhr.onerror = () => { item.textContent = file.name + ' · Ошибка сети'; };
+        xhr.send(data);
+      });
+    };
+    zone?.addEventListener('click', openPicker);
+    choose?.addEventListener('click', chooseFiles);
+    input?.addEventListener('change', changeFiles);
     const onClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
       const anchor = target.closest('a') as HTMLAnchorElement | null;
@@ -111,7 +157,7 @@ function App() {
     };
     root.addEventListener('click', onClick);
     root.addEventListener('submit', onSubmit);
-    return () => { root.removeEventListener('click', onClick); root.removeEventListener('submit', onSubmit); };
+    return () => { zone?.removeEventListener('click', openPicker); choose?.removeEventListener('click', chooseFiles); input?.removeEventListener('change', changeFiles); root.removeEventListener('click', onClick); root.removeEventListener('submit', onSubmit); };
   }, [screen, navigate]);
 
   const isHome = path === '/' || path === '/app' || path.startsWith('/?');
