@@ -107,22 +107,47 @@ def _retrieve(fid, patient, plan):
     if not terms:
         for row in db.search(fid, patient, "", limit=1000):
             found[int(row["id"])] = row
+
+    # Apply the date range before the optional type filter. Dates are parsed
+    # from the archive's supported formats by _doc_date().
     start = _parse_date(plan.get("period_start"))
     end = _parse_date(plan.get("period_end"))
-    types = [x.casefold() for x in plan.get("document_types", [])]
-    rows = []
+    date_rows = []
     for row in found.values():
         ddate = _doc_date(row)
         if start and (not ddate or ddate < start):
             continue
         if end and (not ddate or ddate > end):
             continue
-        if types:
-            blob = (str(row.get("kind") or "") + " " + str(row.get("name") or "")).casefold()
-            if not any(t in blob or blob in t for t in types):
-                continue
+        date_rows.append(row)
+
+    # LLM-planned type labels often differ from the archive's canonical labels
+    # (e.g. "анализ крови общий" vs "лабораторный отчёт"). Prefer matching types,
+    # but don't turn a useful search into zero results solely due to that mismatch.
+    types = [
+        str(value).strip().casefold()
+        for value in (plan.get("document_types") or [])
+        if str(value).strip()
+    ]
+    rows = date_rows
+    if types:
+        typed_rows = []
+        for row in date_rows:
+            blob = (
+                str(row.get("kind") or "") + " " + str(row.get("name") or "")
+            ).casefold()
+            if any(t in blob or blob in t for t in types):
+                typed_rows.append(row)
+        if typed_rows:
+            rows = typed_rows
+        elif date_rows:
+            logging.warning(
+                "Assistant document-type filter matched no candidates; "
+                "using search/date-filtered candidates instead"
+            )
+
+    for row in rows:
         row["_assistant_score"] = int(row.get("_search_score", 0))
-        rows.append(row)
     rows.sort(key=lambda r: (r["_assistant_score"], _doc_date(r) or date.min), reverse=True)
     return rows[:15]
 
