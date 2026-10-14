@@ -19,7 +19,7 @@ function extractContent(documentText: string): string {
   main.querySelector('#family-settings')?.remove();
   if (!main.querySelector('.home-welcome')) {
     main.querySelectorAll('a').forEach(a => {
-      if (/^(?:←\\s*)?(?:к архиву|назад)$/i.test((a.textContent || '').trim()) || /^(?:←\\s*)?к архиву$/i.test((a.textContent || '').trim())) a.remove();
+      if (/^(?:←\s*)?(?:в архив|к архиву|назад|ко входящим|к входящим)$/i.test((a.textContent || '').trim())) a.remove();
     });
     const patientHeading = main.querySelector('.patient-heading');
     if (patientHeading) patientHeading.classList.add('screen-heading');
