@@ -525,6 +525,43 @@ def delete_document(fid:int,doc_id:int,confirm:str=Form(...),uid:int=Depends(cur
         status="deleted=1&cleanup_warning=1"
     return RedirectResponse("/families/"+str(fid)+"/patients/"+__import__("urllib.parse",fromlist=["quote"]).quote(patient,safe="")+"?"+status,status_code=303)
 
+@app.get("/families/{fid}/documents/{doc_id}/original")
+def view_document_original(fid: int, doc_id: int, uid: int = Depends(current_user)):
+    """Serve a private PDF inline after validating family access and its storage path."""
+    family(fid, uid)
+    if STORAGE_BACKEND != "local":
+        raise HTTPException(503, "Встроенный просмотр пока поддерживает локальное хранилище")
+    d = db.get_doc(fid, doc_id)
+    if not d:
+        raise HTTPException(404, "Документ не найден")
+    if Path(str(d.get("name") or "")).suffix.lower() != ".pdf":
+        raise HTTPException(415, "Встроенный просмотр доступен только для PDF")
+    from local_storage import DATA_ROOT, _component
+    root = DATA_ROOT.resolve()
+    patient = str(d.get("patient") or "")
+    try:
+        expected = (root / f"family_{int(fid)}" / _component(patient)).resolve()
+        if root not in expected.parents:
+            raise HTTPException(400, "Каталог документа вне хранилища")
+        raw = Path(str(d.get("remote") or ""))
+        if not str(d.get("remote") or "") or raw.is_symlink():
+            raise HTTPException(404, "Оригинал PDF не найден")
+        resolved = raw.resolve(strict=True)
+        if resolved.parent != expected or root not in resolved.parents or not resolved.is_file():
+            raise HTTPException(404, "Оригинал PDF не найден")
+    except (OSError, ValueError):
+        raise HTTPException(404, "Оригинал PDF не найден")
+    return FileResponse(
+        resolved,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": "inline",
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @app.get("/families/{fid}/documents/{doc_id}/edit", response_class=HTMLResponse)
 def edit_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
     family(fid,uid)
@@ -538,6 +575,15 @@ def edit_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
     patient=html.escape(str(d.get("patient") or ""),quote=True)
     body="<p><a href=\"/families/"+str(fid)+"/patients/"+patient+"\">← Назад к документам</a></p>"
     body+="<h2>Редактирование карточки документа</h2><div class=\"card\"><strong>Пациент:</strong> "+html.escape(str(d.get("patient") or ""))+"<br><strong>Исходный файл:</strong> "+html.escape(str(d.get("name") or ""))+"</div>"
+    if STORAGE_BACKEND == "local" and Path(str(d.get("name") or "")).suffix.lower() == ".pdf":
+        viewer_url = f"/families/{fid}/documents/{doc_id}/original"
+        body += (
+            '<section class="card"><h3>Просмотр PDF</h3>'
+            '<iframe src="' + viewer_url + '#toolbar=1&navpanes=0&scrollbar=1" '
+            'title="Просмотр PDF" loading="lazy" '
+            'style="display:block;width:100%;height:75vh;min-height:420px;border:1px solid #d8e2f0;border-radius:12px;background:#fff"></iframe>'
+            '<p><a target="_blank" rel="noopener" href="' + viewer_url + '">Открыть PDF отдельно</a></p></section>'
+        )
     body+="<form method=\"post\" action=\"/families/"+str(fid)+"/documents/"+str(doc_id)+"/edit\"><label>Тип обследования<br><select name=\"kind\" required>"+options+"</select></label><br>"
     body+="<label>Название для архива<br><input type=\"text\" name=\"title\" maxlength=\"180\" value=\""+html.escape(str(title),quote=True)+"\" required></label><br>"
     body+="<label>Дата документа (ДД-ММ-ГГГГ)<br><input type=\"text\" name=\"date\" maxlength=\"10\" placeholder=\"17-03-2025\" value=\""+html.escape(str(d.get("date") or ""),quote=True)+"\"></label>"
