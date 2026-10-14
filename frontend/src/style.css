@@ -293,3 +293,23 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
  .legacy-content .patient-search .row{gap:7px}
  .legacy-content .patient-search button{min-width:66px;padding:9px 12px}
 }
+
+/* Review inbox: compact image previews and an in-page scrollable PDF viewer */
+.legacy-content .pending-review-card{display:flex;flex-direction:column;gap:12px;min-width:0}
+.legacy-content .document-preview-link{display:flex;flex-direction:column;align-items:flex-start;gap:7px;width:fit-content;max-width:100%;text-decoration:none;color:#6a7890;font-size:13px}
+.legacy-content .preview-image{display:block;width:auto;height:auto;max-width:min(100%,460px);max-height:58vh;object-fit:contain;object-position:left top;border:1px solid #e2e8f1;border-radius:12px;background:#f5f7fb;cursor:zoom-in}
+.legacy-content .document-preview-link span{font-size:12px;color:#687a93}
+.legacy-content .pdf-preview{width:100%;min-width:0;overflow:hidden;border:1px solid #e0e7f1;border-radius:13px;background:#f4f7fb}
+.legacy-content .pdf-preview-toolbar{padding:9px 12px;border-bottom:1px solid #e0e7f1;background:#fff;color:#66768c;font-size:12px;font-weight:650}
+.legacy-content .pdf-preview iframe{display:block;width:100%;height:min(68vh,720px);min-height:360px;border:0;background:#fff}
+.legacy-content .pdf-preview p{margin:0;padding:10px 12px;background:#fff;border-top:1px solid #e0e7f1;font-size:13px}
+.legacy-content .pending-classification-form{display:grid;gap:11px;margin-top:14px;padding:16px;border:1px solid #e3eaf4;border-radius:16px;background:#fff}
+.legacy-content .pending-classification-form label{display:grid;gap:5px;margin:0}
+.legacy-content .pending-classification-form button{width:100%;min-height:48px}
+.legacy-content .pending-delete-form{display:flex;justify-content:flex-end;margin-top:10px;padding-top:12px;border-top:1px solid #e7ecf3}
+.legacy-content .pending-delete-form button{min-height:40px;padding:8px 13px;border:1px solid #f0c9c7;border-radius:11px;background:#fff6f5;color:#a73530;font-size:14px;font-weight:650;box-shadow:none}
+@media(max-width:480px){
+ .legacy-content .preview-image{max-width:100%;max-height:48vh}
+ .legacy-content .pdf-preview iframe{height:60vh;min-height:320px}
+ .legacy-content .pending-classification-form{padding:13px}
+}
