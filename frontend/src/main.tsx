@@ -40,7 +40,16 @@ function extractContent(documentText: string): string {
   if (archiveHeading) archiveHeading.textContent = 'Семья';
   main.querySelector('#patients')?.remove();
   const addPatient = Array.from(main.querySelectorAll('a')).find(a => a.textContent?.includes('Добавить пациента'));
-  if (addPatient) addPatient.textContent = '＋ Добавить члена семьи';
+  if (addPatient) {
+    addPatient.textContent = '＋ Добавить члена семьи';
+    const patientGrid = main.querySelector('#patients-section .patient-grid');
+    if (patientGrid) {
+      patientGrid.after(addPatient);
+      addPatient.classList.add('add-family-bottom');
+      const oldHeading = main.querySelector('#patients-section > .patient-heading');
+      if (oldHeading && !oldHeading.textContent?.trim()) oldHeading.remove();
+    }
+  }
   main.querySelector('#patients-section > p')?.remove();
   main.querySelector('.home-action[href="#patients"]')?.remove();
   main.querySelectorAll('a').forEach(a => {
