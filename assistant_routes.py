@@ -26,6 +26,7 @@ STOP_WORDS = {
     "документы", "медицинский", "медицинские", "моя", "мой", "мне", "для",
     "про", "это", "его", "ее", "него", "неё", "был", "была", "были",
     "есть", "самый", "самая", "самое", "динамику", "динамика", "изменения",
+    "всех", "членов", "семьи", "семей", "каждого", "каждой", "каждый", "каждую",
 }
 
 def _page(title, body, status=200):
@@ -243,7 +244,7 @@ def install_assistant_routes(app, current_user, family_guard):
                 for r in rows
             )
             plan_html = '<p class="muted">' + html.escape(planner_status) + '; найдено источников: ' + str(len(rows)) + '.</p>'
-            answer_html = '<div class="card"><h2>Ответ</h2><pre>' + html.escape(answer) + '</pre></div>'
+            answer_html = '<div class="card assistant-answer"><h2>Ответ</h2><pre>' + html.escape(answer) + '</pre></div>'
             return _page("Ответ ассистента", plan_html + answer_html + '<div class="card"><h2>Источники</h2>' + sources + '</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Задать следующий вопрос</a></p>')
         except HTTPException:
             raise
