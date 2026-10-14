@@ -159,14 +159,12 @@ body{font-size:16px;background:linear-gradient(180deg,#f2f6ff 0%,#f5f8ff 100%)}
 .legacy-content #patients-section>.patient-heading h2{display:none!important}
 .legacy-content #patients-section>.patient-heading a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 14px;border-radius:15px;background:#edf4ff;color:#205fc5;text-decoration:none;font-weight:750;white-space:nowrap}
 .legacy-content #patients-section>.patient-grid{margin-top:0}
-.legacy-content .home-action[href*="/inbox"]{font-size:0}
+.legacy-content .home-action[href*="/inbox"]{font-size:16px}
 .legacy-content .home-action[href*="/inbox"]:before{content:"▤";display:grid;place-items:center;color:#c17b15;font-size:25px;font-weight:600}
 .legacy-content .home-action[href*="/inbox"]:after{content:"›"}
 .legacy-content .home-action[href*="/inbox"]{position:relative}
 .legacy-content .home-action[href*="/inbox"]{--inbox-label:"Входящие · на проверку"}
 .legacy-content .home-action[href*="/inbox"]:after{font-size:28px}
-.legacy-content .home-action[href*="/inbox"]{font-size:16px}
-.legacy-content .home-action[href*="/inbox"]::first-line{font-size:16px}
 .legacy-content #patients-section{padding:22px 18px;margin-bottom:20px}
 .legacy-content .patient-card{min-height:86px}
 @media(max-width:480px){
