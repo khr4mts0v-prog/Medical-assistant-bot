@@ -71,7 +71,7 @@ a:hover{color:var(--accent)}
 #quick-upload{padding:14px 16px}
 #quick-upload>h2{font-size:1rem;margin:0}
 #quick-upload>p,#quick-upload>small{display:none}
-#choose-files{margin-top:8px}
+#choose-files{display:none}
 #upload-queue:empty{display:none}
 .pending-thumbs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0}
 .pending-thumb{display:block;min-width:0;text-decoration:none}
@@ -160,7 +160,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
             for x in fs
         )
         b.append(
-            '<div class="card" id="quick-upload"><h2>Быстрая загрузка документов</h2>'
+            '<div class="card" id="quick-upload"><h2>Загрузка файлов</h2>'
             '<p class="muted">Статус обновляется после передачи файла и завершения распознавания и классификации.</p>'
             '<select id="upload-family" hidden aria-hidden="true">' + upload_options + '</select>'
             '<input id="upload-files" type="file" accept="image/*,application/pdf,.tif,.tiff,.bmp" multiple hidden>' '<button type="button" id="choose-files">＋ Выбрать документы</button>'
@@ -173,25 +173,6 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
             'document.getElementById("choose-files").addEventListener("click",function(){input.click()});input.addEventListener("change",function(){const selected=Array.from(input.files||[]);input.value="";selected.forEach(function(file){const item={id:++seq,file:file,status:"В очереди",progress:0,xhr:null,cancelled:false};if(!/\\.(pdf|png|jpe?g|webp|tiff?|bmp)$/i.test(file.name)){item.status="Формат не поддерживается";item.progress=0;items.push(item);render();return}if(file.size>'+str(MAX_UPLOAD_MB*1024*1024)+'){item.status="Превышен лимит размера";items.push(item);render();return}items.push(item);render();upload(item)})});'
             '})();</script>'
         )
-    if fs:
-        inbox_count = len(db.pending_documents(f["id"])) if f else 0
-        pending_rows = db.pending_documents(f["id"])
-        b.append(f'<div class="card"><h2>Нераспознанные документы</h2><p>Ожидают ручной проверки: <strong>{inbox_count}</strong></p>')
-        if pending_rows:
-            b.append('<div class="pending-thumbs">')
-            for row in pending_rows[:4]:
-                pid=int(row["id"]); name=str(row["name"]); ext=Path(name).suffix.lower()
-                url=f'/families/{f["id"]}/inbox/{pid}/preview'
-                if ext in {".jpg",".jpeg",".png",".webp",".bmp"}:
-                    thumb=f'<img src="{url}" alt="" loading="lazy">'
-                else:
-                    thumb='<span class="file-thumb">'+('PDF' if ext==".pdf" else html.escape(ext.upper().lstrip(".")))+'</span>'
-                b.append(f'<a class="pending-thumb" href="/families/{f["id"]}/inbox/{pid}">{thumb}<span>{html.escape(name)}</span></a>')
-            if inbox_count>4: b.append(f'<a class="pending-more" href="/families/{f["id"]}/inbox">Ещё {inbox_count-4} →</a>')
-            b.append('</div>')
-        else:
-            b.append('<p>Нет документов, ожидающих ручной проверки.</p>')
-        b.append(f'<a href="/families/{f["id"]}/inbox">Открыть входящие документы</a></div>')
     if f:
         fid=f["id"]
         b.append(f'<div class="card" id="patients-section"><h2>Архив: {html.escape(f["name"])}</h2><p>Хранение документов: {"локально на VPS" if STORAGE_BACKEND == "local" else "Яндекс Диск"}</p>')
