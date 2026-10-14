@@ -21,6 +21,8 @@ function extractContent(documentText: string): string {
   const search = main.querySelector('form.home-search');
   const upload = main.querySelector('#quick-upload');
   const actions = main.querySelector('.home-actions');
+  const inboxAction = main.querySelector<HTMLAnchorElement>('.home-action[href*="/inbox"]');
+  if (inboxAction) inboxAction.textContent = (inboxAction.textContent || '').replace(/^▤\\s*/, '').trim();
   if (welcome) main.insertBefore(welcome, main.firstChild);
   if (search && welcome) welcome.after(search);
   if (upload && search) search.after(upload);
