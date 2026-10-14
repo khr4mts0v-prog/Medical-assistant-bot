@@ -298,49 +298,84 @@ def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,
 @app.post("/families/{fid}/documents/{doc_id}/delete",response_class=HTMLResponse)
 def delete_document(fid:int,doc_id:int,confirm:str=Form(...),uid:int=Depends(current_user)):
     family(fid,uid)
-    if confirm != "yes": raise HTTPException(400,"Удаление не подтверждено")
-    d=db.get_doc(fid,doc_id)
-    if not d: raise HTTPException(404,"Документ не найден")
-    patient=str(d.get("patient") or "")
-    try:
-        if STORAGE_BACKEND=="local":
-            from local_storage import document_dir
-            expected=document_dir(fid,patient).resolve()
-            for raw in (d.get("remote"),d.get("ocr_remote")):
-                if not raw: continue
-                path=Path(str(raw)).resolve()
-                if path.parent != expected: raise HTTPException(400,"Путь файла не совпадает с каталогом пациента; удаление остановлено")
-                if path.exists():
-                    if not path.is_file(): raise HTTPException(400,"Ожидался файл; удаление остановлено")
-                    path.unlink()
-        else:
-            token=tenancy.get_yadisk_token(fid)
-            if not token: raise HTTPException(400,"Сначала подключите Яндекс Диск")
-            disk=YaDiskClient(token)
-            for raw in (d.get("remote"),d.get("ocr_remote")):
-                if raw: disk.delete_file(raw,permanently=True)
-    except HTTPException: raise
-    except Exception:
-        logging.exception("Document file deletion failed for doc_id=%s",doc_id)
-        raise HTTPException(502,"Не удалось удалить оригинал или OCR-файл. Запись архива сохранена; проверьте хранилище.")
-    if not db.delete_doc(fid,doc_id): raise HTTPException(500,"Файлы удалены, но запись архива не удалось удалить. Требуется проверка индекса.")
-    return RedirectResponse("/families/"+str(fid)+"/patients/"+__import__("urllib.parse",fromlist=["quote"]).quote(patient,safe="")+"?deleted=1",status_code=303)
-
-@app.get("/families/{fid}/documents/{doc_id}")
-def download_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
-    family(fid,uid)
+    if confirm != "yes":
+        raise HTTPException(400,"Удаление не подтверждено")
     if STORAGE_BACKEND != "local":
-        raise HTTPException(404,"Локальные документы не используются")
+        raise HTTPException(503,"На текущем этапе поддерживается только локальное хранилище")
     d=db.get_doc(fid,doc_id)
     if not d:
         raise HTTPException(404,"Документ не найден")
-    path=Path(str(d.get("remote") or "")).resolve()
-    from local_storage import document_dir
-    try: expected_dir=document_dir(fid,str(d.get("patient") or ""))
-    except (ValueError, OSError): raise HTTPException(404,"Документ не найден")
-    if path.parent != expected_dir.resolve(): raise HTTPException(404,"Документ не найден")
-    if not path.is_file(): raise HTTPException(404,"Файл отсутствует в локальном хранилище")
-    return FileResponse(path,filename=str(d.get("name") or path.name),media_type="application/octet-stream")
+    patient=str(d.get("patient") or "")
+    from local_storage import DATA_ROOT, _component
+    import uuid
+    root=DATA_ROOT.resolve()
+    expected=(root / f"family_{int(fid)}" / _component(patient)).resolve()
+    if root not in expected.parents:
+        raise HTTPException(400,"Каталог пациента вне хранилища; удаление остановлено")
+    staged=[]
+    try:
+        # Validate every path before moving any file. Never follow a symlink
+        # or touch files outside this family's patient directory.
+        candidates=[]
+        seen=set()
+        for raw in (d.get("remote"),d.get("ocr_remote")):
+            if not raw:
+                continue
+            original=Path(str(raw))
+            if original.is_symlink():
+                raise HTTPException(400,"Обнаружена символическая ссылка; удаление остановлено")
+            resolved=original.resolve(strict=False)
+            if resolved.parent != expected or root not in resolved.parents:
+                raise HTTPException(400,"Путь файла не совпадает с каталогом пациента; удаление остановлено")
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if resolved.exists():
+                if not resolved.is_file():
+                    raise HTTPException(400,"Ожидался обычный файл; удаление остановлено")
+                candidates.append(resolved)
+        # Stage all files with atomic renames first. If any rename or DB
+        # operation fails, restore staged files before returning an error.
+        for path in candidates:
+            trash=path.with_name(f".{path.name}.deleting-{uuid.uuid4().hex}")
+            os.replace(path,trash)
+            staged.append((path,trash))
+        if not db.delete_doc(fid,doc_id):
+            raise RuntimeError("database row was not deleted")
+    except HTTPException:
+        for original,trash in reversed(staged):
+            try:
+                if trash.exists() and not original.exists():
+                    os.replace(trash,original)
+            except OSError:
+                logging.exception("Failed to restore staged document file %s", original)
+        raise
+    except Exception:
+        logging.exception("Document deletion staging failed for doc_id=%s",doc_id)
+        restore_failed=False
+        for original,trash in reversed(staged):
+            try:
+                if trash.exists() and not original.exists():
+                    os.replace(trash,original)
+            except OSError:
+                restore_failed=True
+                logging.exception("Failed to restore staged document file %s",original)
+        detail="Не удалось удалить документ; запись архива сохранена."
+        if restore_failed:
+            detail+=" Часть файлов требует ручной проверки."
+        raise HTTPException(500,detail)
+    cleanup_failed=[]
+    for original,trash in staged:
+        try:
+            trash.unlink(missing_ok=True)
+        except OSError:
+            cleanup_failed.append(trash.name)
+            logging.exception("Staged document file cleanup failed: %s",trash)
+    status="deleted=1"
+    if cleanup_failed:
+        status="deleted=1&cleanup_warning=1"
+    return RedirectResponse("/families/"+str(fid)+"/patients/"+__import__("urllib.parse",fromlist=["quote"]).quote(patient,safe="")+"?"+status,status_code=303)
+
 @app.get("/families/{fid}/documents/{doc_id}/edit", response_class=HTMLResponse)
 def edit_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
     family(fid,uid)
