@@ -309,6 +309,36 @@ def unified_search(q:str="",family_id:int|None=None,patient:str="",uid:int=Depen
         b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Тип: {html.escape(str(d.get("kind") or "не определено"))}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}{link}<p><a href="/families/{fid}/patients/{__import__("urllib.parse",fromlist=["quote"]).quote(chosen["name"],safe="")}">История пациента</a></p><details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape((d.get("text") or "")[:4000])+'</pre></details></div>')
     return page("Поиск по архиву","".join(b))
 
+@app.get("/settings",response_class=HTMLResponse)
+def archive_settings(family_id:int|None=None,updated:int=0,uid:int=Depends(current_user)):
+    fs=tenancy.families_for_user(uid)
+    f=tenancy.get_family(family_id) if family_id is not None else (tenancy.get_family(fs[0]["id"]) if fs else None)
+    if not f: return page("Настройки архива",'<h1>Настройки архива</h1><p>Сначала создайте семейный архив.</p><a class="button-link" href="/">На главную</a>')
+    family(int(f["id"]),uid)
+    role=tenancy.role_for_user(int(f["id"]),uid)
+    body=['<h1>Настройки архива</h1><p class="muted">Настройки семейного медицинского архива.</p>']
+    if updated: body.append('<div class="notice-success" role="status">Название архива сохранено.</div>')
+    body.append('<form class="card" method="post" action="/settings"><input type="hidden" name="family_id" value="'+str(int(f["id"]))+'"><h2>Название архива</h2><label>Название<input name="name" maxlength="80" required value="'+html.escape(str(f["name"]),quote=True)+'" '+('' if role=="owner" else 'disabled')+'></label>')
+    if role=="owner": body.append('<button type="submit">Сохранить название</button>')
+    else: body.append('<p class="muted">Переименовывать архив может только владелец.</p>')
+    body.append('</form>')
+    body.append('<section class="card"><h2>Хранение документов</h2><p>Текущий режим: '+('Яндекс Диск' if STORAGE_BACKEND=="yandex" else 'локально на VPS')+'</p>')
+    if STORAGE_BACKEND=="yandex":
+        body.append('<p>'+('Яндекс Диск подключён.' if tenancy.disk_connected(int(f["id"])) else 'Яндекс Диск ещё не подключён.')+'</p>')
+        if not tenancy.disk_connected(int(f["id"])): body.append('<p><a class="button-link" href="/families/'+str(int(f["id"]))+'/connect-disk">Подключить Яндекс Диск</a></p>')
+    else:
+        body.append('<p class="muted">Подключение Яндекс Диска добавим отдельным этапом, сохранив локальное хранилище как текущий рабочий вариант.</p>')
+    body.append('</section><section class="card"><h2>Резервное копирование</h2><p>Перед загрузкой реальных медицинских документов проверьте наличие внешней резервной копии и возможность восстановления.</p></section>')
+    return page("Настройки архива","".join(body))
+
+@app.post("/settings",response_class=HTMLResponse)
+def save_archive_settings(family_id:int=Form(...),name:str=Form(...),uid:int=Depends(current_user)):
+    family(family_id,uid)
+    try: tenancy.rename_family(family_id,name,uid)
+    except PermissionError as e: raise HTTPException(403,str(e))
+    except ValueError as e: raise HTTPException(400,str(e))
+    return RedirectResponse("/settings?family_id="+str(family_id)+"&updated=1",status_code=303)
+
 @app.post("/families")
 def create_family(name:str=Form(...),uid:int=Depends(current_user)):
     try: fid=tenancy.create_family(name,uid)
