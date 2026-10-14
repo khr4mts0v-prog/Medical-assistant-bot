@@ -25,3 +25,12 @@ class YaDiskClient:
 
     def download_file(self,remote,local):
         self.yd.download(remote,local)
+
+    def delete_file(self, remote, permanently=True):
+        """Delete a file from Yandex Disk; propagate errors to caller."""
+        if not remote:
+            return False
+        if self.yd.exists(remote):
+            self.yd.remove(remote, permanently=permanently)
+            return True
+        return False
