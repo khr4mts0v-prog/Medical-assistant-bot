@@ -324,7 +324,7 @@ def delete_document(fid:int,doc_id:int,confirm:str=Form(...),uid:int=Depends(cur
         logging.exception("Document file deletion failed for doc_id=%s",doc_id)
         raise HTTPException(502,"Не удалось удалить оригинал или OCR-файл. Запись архива сохранена; проверьте хранилище.")
     if not db.delete_doc(fid,doc_id): raise HTTPException(500,"Файлы удалены, но запись архива не удалось удалить. Требуется проверка индекса.")
-    return RedirectResponse("/families/"+str(fid)+"/patients/"+quote(patient,safe="")+"?deleted=1",status_code=303)
+    return RedirectResponse("/families/"+str(fid)+"/patients/"+__import__("urllib.parse",fromlist=["quote"]).quote(patient,safe="")+"?deleted=1",status_code=303)
 
 @app.get("/families/{fid}/documents/{doc_id}")
 def download_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
