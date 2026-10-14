@@ -12,8 +12,8 @@ from datetime import date, datetime
 from urllib.parse import quote
 
 import requests
-from fastapi import Form, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 
 import database as db
 import tenancy
@@ -26,6 +26,7 @@ STOP_WORDS = {
     "документы", "медицинский", "медицинские", "моя", "мой", "мне", "для",
     "про", "это", "его", "ее", "него", "неё", "был", "была", "были",
     "есть", "самый", "самая", "самое", "динамику", "динамика", "изменения",
+    "всех", "членов", "семьи", "семей", "каждого", "каждой", "каждый", "каждую",
 }
 
 def _page(title, body, status=200):
@@ -107,22 +108,47 @@ def _retrieve(fid, patient, plan):
     if not terms:
         for row in db.search(fid, patient, "", limit=1000):
             found[int(row["id"])] = row
+
+    # Apply the date range before the optional type filter. Dates are parsed
+    # from the archive's supported formats by _doc_date().
     start = _parse_date(plan.get("period_start"))
     end = _parse_date(plan.get("period_end"))
-    types = [x.casefold() for x in plan.get("document_types", [])]
-    rows = []
+    date_rows = []
     for row in found.values():
         ddate = _doc_date(row)
         if start and (not ddate or ddate < start):
             continue
         if end and (not ddate or ddate > end):
             continue
-        if types:
-            blob = (str(row.get("kind") or "") + " " + str(row.get("name") or "")).casefold()
-            if not any(t in blob or blob in t for t in types):
-                continue
+        date_rows.append(row)
+
+    # LLM-planned type labels often differ from the archive's canonical labels
+    # (e.g. "анализ крови общий" vs "лабораторный отчёт"). Prefer matching types,
+    # but don't turn a useful search into zero results solely due to that mismatch.
+    types = [
+        str(value).strip().casefold()
+        for value in (plan.get("document_types") or [])
+        if str(value).strip()
+    ]
+    rows = date_rows
+    if types:
+        typed_rows = []
+        for row in date_rows:
+            blob = (
+                str(row.get("kind") or "") + " " + str(row.get("name") or "")
+            ).casefold()
+            if any(t in blob or blob in t for t in types):
+                typed_rows.append(row)
+        if typed_rows:
+            rows = typed_rows
+        elif date_rows:
+            logging.warning(
+                "Assistant document-type filter matched no candidates; "
+                "using search/date-filtered candidates instead"
+            )
+
+    for row in rows:
         row["_assistant_score"] = int(row.get("_search_score", 0))
-        rows.append(row)
     rows.sort(key=lambda r: (r["_assistant_score"], _doc_date(r) or date.min), reverse=True)
     return rows[:15]
 
@@ -225,3 +251,116 @@ def install_assistant_routes(app, current_user, family_guard):
         except Exception as exc:
             logging.exception("Medical assistant request failed (%s)", type(exc).__name__)
             return _page("Не удалось выполнить запрос", '<div class="card">Произошла техническая ошибка. Подробности записаны в журнал без текста медицинского запроса.</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Попробовать ещё раз</a></p>', 502)
+
+
+    @app.post("/api/intelligent-search")
+    async def intelligent_search(request: Request, uid: int = __import__("fastapi").Depends(current_user)):
+        """Family-scoped smart search. Document discovery is local; AI analysis requires explicit consent."""
+        families = tenancy.families_for_user(uid)
+        if not families:
+            raise HTTPException(400, "Сначала создайте семейный архив")
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(400, "Некорректный запрос")
+        if not isinstance(payload, dict):
+            raise HTTPException(400, "Некорректный запрос")
+        query = " ".join(str(payload.get("query") or "").split())[:1200]
+        try:
+            fid = int(payload.get("family_id") or families[0]["id"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Некорректный семейный архив")
+        allowed = {int(f["id"]) for f in families}
+        if fid not in allowed:
+            raise HTTPException(403, "Нет доступа к этому семейному архиву")
+        family_guard(fid, uid)
+        if not query:
+            raise HTTPException(400, "Введите запрос")
+
+        people = db.patients(fid)
+        qfold = query.casefold().replace("ё", "е")
+        mentioned = [p for p in people if p.casefold().replace("ё", "е") in qfold]
+        scoped_people = mentioned or people
+        analysis_markers = (
+            "сравни", "сравнить", "динамик", "объясни", "объяснить", "что означает",
+            "что значит", "почему", "оцени", "проанализируй", "рекомендац", "что делать",
+            "норма ли", "насколько опас", "какие выводы", "интерпрет"
+        )
+        needs_analysis = any(marker in qfold for marker in analysis_markers)
+        consent = bool(payload.get("consent"))
+        if needs_analysis and not consent:
+            return JSONResponse({"mode": "analysis", "needs_consent": True,
+                "message": "Для медицинского анализа вопрос и найденные фрагменты документов будут отправлены внешнему ИИ-провайдеру. Подтвердите согласие, чтобы продолжить."})
+
+        rows_by_id = {}
+        if needs_analysis:
+            try:
+                _, token, _, model, provider = provider_config()
+                if not token:
+                    return JSONResponse({"error": "ИИ не настроен: не задан ключ провайдера."}, status_code=503)
+                try:
+                    plan = _planner(query, token)
+                except Exception as exc:
+                    logging.warning("Smart search planner unavailable (%s); using local keyword fallback", type(exc).__name__)
+                    plan = _fallback_plan(query)
+                for person in scoped_people:
+                    for row in _retrieve(fid, person, plan):
+                        rows_by_id[int(row["id"])] = row
+                rows = list(rows_by_id.values())
+                rows.sort(key=lambda r: (_doc_date(r) or date.min, int(r.get("_assistant_score", 0))), reverse=True)
+                rows = rows[:15]
+                if not rows:
+                    return JSONResponse({"mode": "analysis", "answer": "По запросу документы не найдены. Попробуйте уточнить название исследования или период.", "documents": []})
+                answer = answer_archive_question(query, ", ".join(scoped_people), context=_context(rows))
+                return JSONResponse({"mode": "analysis", "answer": answer, "documents": [
+                    {"id": int(r["id"]), "patient": str(r.get("patient") or ""), "name": str(r.get("name") or "Без названия"),
+                     "kind": str(r.get("kind") or "не определён"), "date": str(r.get("date") or ""),
+                     "url": f"/families/{fid}/documents/{int(r['id'])}/edit"}
+                    for r in rows
+                ]})
+            except HTTPException:
+                raise
+            except Exception as exc:
+                logging.exception("Smart medical analysis failed (%s)", type(exc).__name__)
+                return JSONResponse({"error": "Не удалось выполнить анализ. Попробуйте ещё раз."}, status_code=502)
+
+        # Local document search: no OCR text or medical question is sent to an external provider.
+        words = [w for w in re.findall(r"[0-9a-zа-яё-]{2,}", qfold) if w not in STOP_WORDS]
+        for person in people:
+            if person.casefold().replace("ё", "е") in qfold:
+                words = [w for w in words if w not in person.casefold().replace("ё", "е").split()]
+        synonyms = {
+            "флг": ["флюорография", "флюорограф"],
+            "флюорография": ["флг", "флюорограф"],
+            "узи": ["ультразвуковое", "ультразвук"],
+            "оак": ["общий анализ крови"],
+            "экг": ["электрокардиограмма", "электрокардиография"],
+            "мрт": ["магнитно-резонансная"],
+            "кт": ["компьютерная томография"],
+        }
+        search_terms = list(dict.fromkeys(words))
+        for word in list(search_terms):
+            search_terms.extend(synonyms.get(word, []))
+        search_terms = list(dict.fromkeys(search_terms))[:16]
+        for person in scoped_people:
+            candidates = db.search(fid, person, "", limit=1000) if not search_terms else [
+                row for term in search_terms for row in db.search(fid, person, term, limit=100)
+            ]
+            for row in candidates:
+                rows_by_id[int(row["id"])] = row
+        rows = list(rows_by_id.values())
+        rows.sort(key=lambda r: (_doc_date(r) or date.min, int(r.get("_search_score", 0))), reverse=True)
+        latest_each = ("последн" in qfold and any(x in qfold for x in ("всех", "семь", "кажд")))
+        if latest_each:
+            latest = {}
+            for row in rows:
+                latest.setdefault(str(row.get("patient") or ""), row)
+            rows = list(latest.values())
+            rows.sort(key=lambda r: (_doc_date(r) or date.min), reverse=True)
+        rows = rows[:100]
+        return JSONResponse({"mode": "documents", "latest_each": latest_each, "documents": [
+            {"id": int(r["id"]), "patient": str(r.get("patient") or ""), "name": str(r.get("name") or "Без названия"),
+             "kind": str(r.get("kind") or "не определён"), "date": str(r.get("date") or ""),
+             "url": f"/families/{fid}/documents/{int(r['id'])}/edit"}
+            for r in rows
+        ]})
