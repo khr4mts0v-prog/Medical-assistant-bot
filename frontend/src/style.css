@@ -178,3 +178,62 @@ body{font-size:16px;background:linear-gradient(180deg,#f2f6ff 0%,#f5f8ff 100%)}
  .legacy-content #patients-section>h2{font-size:25px}
  .legacy-content #patients-section>.patient-heading a{font-size:14px;padding:9px 11px}
 }
+
+/* Native-feeling app chrome and restrained mobile controls */
+:root{--bg:#f5f7fb;--card:#fff;--line:#e6eaf1;--muted:#78869a;--blue:#2868d7;--blue-dark:#2056b4;--blue-soft:#edf3ff}
+html,body,#root{min-height:100%;background:var(--bg)}
+body{color:#1c2c45;overscroll-behavior-y:contain}
+.app-frame{min-height:100dvh}
+.main-area{max-width:920px;padding:0 20px calc(30px + env(safe-area-inset-bottom))}
+.topbar{position:sticky;top:0;z-index:30;min-height:calc(62px + env(safe-area-inset-top));margin:0 -20px 24px;padding:env(safe-area-inset-top) 20px 10px;background:rgba(245,247,251,.92);border-bottom:1px solid rgba(224,231,241,.8);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.menu-button{width:44px;height:44px;flex-basis:44px;border:1px solid #e1e7f0;border-radius:14px;box-shadow:none;background:#fff;color:#304d78}
+.topbar-title{font-size:clamp(15px,2.4vw,21px);letter-spacing:-.035em;font-weight:750}
+.sidebar{width:min(310px,86vw);padding:calc(14px + env(safe-area-inset-top)) 14px calc(16px + env(safe-area-inset-bottom));border:0;border-radius:0 22px 22px 0;box-shadow:14px 0 42px rgba(25,45,78,.15);touch-action:pan-y}
+.scrim{background:rgba(16,31,54,.32);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+.nav-item{min-height:48px;border-radius:13px}
+.icon-button,.nav-item,.back-button,.legacy-content button,.legacy-content .button-link,.legacy-content .home-action,.legacy-content .patient-card{-webkit-tap-highlight-color:transparent}
+.icon-button:active,.nav-item:active,.back-button:active,.legacy-content button:active,.legacy-content .button-link:active,.legacy-content .home-action:active{transform:scale(.98);filter:brightness(.97)}
+.legacy-content .home-welcome{margin-bottom:22px}
+.legacy-content .home-welcome h1{font-size:clamp(31px,6.5vw,46px);letter-spacing:-.06em}
+.legacy-content .home-welcome p{font-size:clamp(16px,3.3vw,20px)}
+.legacy-content .home-search{display:block!important;padding:10px!important;border:1px solid #e4eaf3;border-radius:18px;box-shadow:0 2px 8px rgba(31,56,90,.035);margin-bottom:12px}
+.legacy-content .home-search .search-row{display:flex;flex-direction:row!important;align-items:center;gap:8px}
+.legacy-content .home-search input[type=search],.legacy-content .home-search input[type=text]{height:48px;min-height:48px;padding:0 13px;border-radius:12px;background:#f8faff;border:1px solid #e8edf5;font-size:15px}
+.legacy-content .home-search button{height:48px;min-height:48px;padding:0 16px;border:0;border-radius:12px;background:var(--blue);box-shadow:none;font-size:15px;font-weight:700}
+.legacy-content #quick-upload{display:grid;grid-template-columns:46px minmax(0,1fr);align-items:center;column-gap:13px;row-gap:0;min-height:84px;padding:15px!important;margin:0 0 12px;border:1px solid #e1e9f6!important;border-radius:18px;background:#fff!important;box-shadow:0 2px 8px rgba(31,56,90,.035)!important;cursor:pointer}
+.legacy-content #quick-upload>div:first-child{grid-column:1;grid-row:1/3;width:46px;height:46px;border-radius:13px;background:#edf3ff;color:var(--blue)!important;font-size:0!important}
+.legacy-content #quick-upload>div:first-child:before{content:"＋";font-size:27px;font-weight:400}
+.legacy-content #quick-upload>h2{display:block!important;grid-column:2;grid-row:1;margin:0!important;color:#233752;font-size:16px;letter-spacing:-.02em;font-weight:700}
+.legacy-content #quick-upload>h2:after{content:"›";float:right;color:#8290a4;font-size:25px;font-weight:400;line-height:1}
+.legacy-content #quick-upload>p,.legacy-content #quick-upload>small{display:none!important}
+.legacy-content #quick-upload #upload-queue{grid-column:1/-1;width:100%;cursor:default}
+.legacy-content .home-actions{display:flex;flex-direction:column;gap:8px;margin:0 0 18px}
+.legacy-content .home-action,.legacy-content .home-action[href*="/inbox"]{display:flex;position:relative;align-items:center;flex-direction:row;gap:12px;min-height:64px;padding:12px 15px;border:1px solid #e6eaf1;border-radius:16px;background:#fff;color:#253853;box-shadow:none;text-align:left;font-size:15px;font-weight:650;line-height:1.35}
+.legacy-content .home-action:before{content:"";display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:11px;background:#f0f4fb}
+.legacy-content .home-action:after{content:"›";position:static;margin-left:auto;color:#8592a5;font-size:24px;font-weight:400}
+.legacy-content .home-action[href*="/inbox"]{order:0;background:#fff;border-color:#e6eaf1;color:#253853}
+.legacy-content .home-action[href*="/inbox"]:before{content:"▤";font-size:19px;color:#536f9a;background:#eef3fb}
+.legacy-content .home-action[href*="/inbox"]:after{color:#8592a5}
+.legacy-content #patients-section{padding:19px 16px;margin:14px 0 20px;border:1px solid #e6eaf1;border-radius:20px;background:#fff;box-shadow:none}
+.legacy-content #patients-section>h2{font-size:24px;margin:0 0 14px;letter-spacing:-.045em}
+.legacy-content #patients-section>.patient-heading{margin-bottom:12px}
+.legacy-content #patients-section>.patient-heading a{min-height:40px;padding:9px 12px;border:1px solid #e3eaf7;border-radius:12px;background:#f3f6fc;color:#285eb2;font-size:14px;font-weight:650}
+.legacy-content .patient-grid{gap:8px}
+.legacy-content .patient-card{min-height:76px;padding:12px;border:1px solid #e8edf4;border-radius:15px;box-shadow:none}
+.legacy-content .patient-avatar{width:44px;height:44px;flex-basis:44px;font-size:17px}
+.legacy-content .patient-card strong{font-size:16px}
+.legacy-content .patient-card small{font-size:13px}
+.legacy-content .card{box-shadow:none}
+@media(max-width:480px){
+ .main-area{padding:0 16px calc(28px + env(safe-area-inset-bottom))}
+ .topbar{margin:0 -16px 22px;padding-left:16px;padding-right:16px}
+ .legacy-content .home-search{padding:8px!important}
+ .legacy-content .home-search .search-row{gap:7px}
+ .legacy-content .home-search input[type=search],.legacy-content .home-search input[type=text]{min-width:0;font-size:14px;padding:0 10px}
+ .legacy-content .home-search button{padding:0 13px;font-size:14px}
+ .legacy-content #quick-upload{min-height:76px;padding:12px!important;grid-template-columns:42px minmax(0,1fr);column-gap:11px}
+ .legacy-content #quick-upload>div:first-child{width:42px;height:42px}
+ .legacy-content #patients-section{padding:17px 13px}
+ .legacy-content #patients-section>h2{font-size:23px}
+}
+@media(prefers-reduced-motion:reduce){.sidebar,.scrim{transition:none!important}}
