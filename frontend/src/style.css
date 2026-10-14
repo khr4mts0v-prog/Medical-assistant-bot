@@ -313,3 +313,20 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
  .legacy-content .pdf-preview iframe{height:60vh;min-height:320px}
  .legacy-content .pending-classification-form{padding:13px}
 }
+
+/* Larger, legible search affordance on all archive search forms */
+.legacy-content form.home-search{display:flex;align-items:center;gap:10px}
+.legacy-content .home-search label{display:grid;place-items:center;flex:0 0 42px;width:42px;height:46px;margin:0;padding:0;font-size:0;line-height:1;color:#315d98}
+.legacy-content .home-search label::before{content:"⌕";display:block;font-size:31px;font-weight:700;line-height:1;transform:rotate(-12deg)}
+.legacy-content .home-search input[type=search]{flex:1;min-width:0}
+.legacy-content .pending-delete-form{margin-top:26px;padding:18px 0 0;border-top:2px solid #e9edf3;justify-content:stretch}
+.legacy-content .pending-delete-form::before{content:"Опасная зона · удаление необратимо";display:block;flex:1;align-self:center;margin-right:12px;color:#9b6b6b;font-size:12px}
+.legacy-content .pending-delete-form button{flex:0 0 auto;min-height:44px;padding:10px 15px;border:1px solid #c83232;border-radius:12px;background:#c83232;color:#fff;font-size:14px;font-weight:750;box-shadow:none}
+.legacy-content .pending-delete-form button:hover{background:#a92121;border-color:#a92121}
+@media(max-width:480px){
+ .legacy-content .home-search label{flex-basis:38px;width:38px}
+ .legacy-content .home-search label::before{font-size:29px}
+ .legacy-content .pending-delete-form{align-items:center;gap:8px}
+ .legacy-content .pending-delete-form::before{font-size:11px}
+ .legacy-content .pending-delete-form button{padding:9px 11px;font-size:13px}
+}
