@@ -203,14 +203,14 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
         b.append(f'<div class="card" id="patients-section"><h2>Архив: {html.escape(f["name"])}</h2><p>Хранение документов: {"локально на VPS" if STORAGE_BACKEND == "local" else "Яндекс Диск"}</p>')
         if STORAGE_BACKEND == "yandex" and not tenancy.disk_connected(fid):
             b.append(f'<p><a href="/families/{fid}/connect-disk">Подключить Яндекс Диск</a></p>')
-        b.append(f'<h2 id="patients">Пациенты</h2><p><a href="/families/{fid}/patients/new">＋ Добавить пациента</a></p>')
+        b.append(f'<div class="patient-heading"><h2 id="patients">Пациенты</h2><a class="button-link" href="/families/{fid}/patients/new">＋ Добавить пациента</a></div><div class="patient-grid">')
         ps=db.patients(fid)
         if not ps: b.append('<p>Пациентов пока нет.</p>')
         for p in ps:
             ep=html.escape(p,quote=True)
             parts=p.split()
             short_patient=(parts[1] if len(parts)>=2 else (parts[0] if parts else p))
-            b.append(f'<div class="card"><strong>{html.escape(short_patient)}</strong> · документов: {db.document_count(fid,p)}<form class="row" method="get" action="/families/{fid}/patients/{ep}"><input type="search" name="q" placeholder="Поиск по документам"><button>Искать</button></form><a href="/families/{fid}/patients/{ep}">История документов</a></div>')
+            b.append(f'<a class="patient-card" href="/families/{fid}/patients/{ep}"><span class="patient-avatar">{html.escape((short_patient[:1] or "П").upper())}</span><span><strong>{html.escape(short_patient)}</strong><br><small class="muted">{db.document_count(fid,p)} документов</small></span></a>')
         b.append('</div>')
     b.append('<div class="card" id="family-settings"><h2>Настройки архива</h2><form method="post" action="/families"><label>Название нового семейного архива<br><input name="name" required maxlength="80"></label> <button>Создать архив</button></form></div>')
     b.append('<div class="warn"><strong>Важно:</strong> не загружайте реальные медицинские документы до настройки резервного копирования и полной проверки прав доступа.</div>')
