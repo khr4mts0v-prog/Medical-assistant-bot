@@ -80,6 +80,12 @@ function App() {
   const [modal, setModal] = useState<Screen | null>(null);
   const [modalError, setModalError] = useState('');
   const [modalBusy, setModalBusy] = useState(false);
+  const [smartSearchOpen, setSmartSearchOpen] = useState(false);
+  const [smartQuery, setSmartQuery] = useState('');
+  const [smartConsent, setSmartConsent] = useState(false);
+  const [smartBusy, setSmartBusy] = useState(false);
+  const [smartError, setSmartError] = useState('');
+  const [smartResult, setSmartResult] = useState<any>(null);
   const [toast, setToast] = useState('');
   const contentRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<string[]>([]);
@@ -221,6 +227,12 @@ function App() {
       event.preventDefault();
       const method = (form.method || 'get').toUpperCase();
       if (method === 'GET') {
+        if (action.pathname === '/search' && form.classList.contains('home-search')) {
+          const data = new FormData(form);
+          setSmartQuery(String(data.get('q') || ''));
+          setSmartSearchOpen(true); setSmartConsent(false); setSmartError(''); setSmartResult(null);
+          return;
+        }
         const params = new URLSearchParams(new FormData(form) as any);
         navigate(action.pathname + (params.size ? '?' + params.toString() : ''));
         return;
@@ -268,6 +280,40 @@ function App() {
 
   return <div className="app-frame">
     {toast && <div className="app-toast" role="status" aria-live="polite"><span className="app-toast-check">✓</span><span>{toast}</span></div>}
+    {smartSearchOpen && <div className="modal-scrim smart-search-scrim" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !smartBusy) setSmartSearchOpen(false); }}>
+      <section className="app-modal smart-search-modal" role="dialog" aria-modal="true" aria-label="Интеллектуальный поиск по семейному архиву">
+        <header className="app-modal-header"><div><span className="modal-eyebrow">СЕМЕЙНЫЙ АРХИВ</span><h2>Умный поиск</h2><p className="smart-search-subtitle">Поиск по всей семье. Укажи имя, если нужен конкретный человек.</p></div><button type="button" className="icon-button" aria-label="Закрыть поиск" onClick={() => setSmartSearchOpen(false)}><X size={20}/></button></header>
+        <div className="smart-search-body">
+          <form className="smart-search-form" onSubmit={async event => {
+            event.preventDefault(); setSmartBusy(true); setSmartError('');
+            try {
+              const familyId = new URLSearchParams(location.search).get('family_id');
+              const response = await fetch('/api/intelligent-search', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({query:smartQuery, family_id:familyId ? Number(familyId) : undefined, consent:smartConsent})});
+              const result = await response.json();
+              if (!response.ok) throw new Error(result.detail || result.error || 'Не удалось выполнить поиск.');
+              setSmartResult(result);
+              if (result.needs_consent) setSmartConsent(false);
+            } catch (e) { setSmartError(e instanceof Error ? e.message : 'Ошибка поиска'); }
+            finally { setSmartBusy(false); }
+          }}>
+            <label htmlFor="smart-search-query">Что найти или проанализировать?</label>
+            <textarea id="smart-search-query" rows={2} maxLength={1200} value={smartQuery} onChange={e => setSmartQuery(e.target.value)} placeholder="Например: последние ФЛГ всех членов семьи" required />
+            {smartResult?.needs_consent && <label className="smart-consent"><input type="checkbox" checked={smartConsent} onChange={e => setSmartConsent(e.target.checked)} /> Я согласен отправить вопрос и найденные фрагменты медицинских документов внешнему ИИ-провайдеру для анализа.</label>}
+            <button type="submit" disabled={smartBusy || !smartQuery.trim()}>{smartBusy ? 'Ищем…' : smartResult?.needs_consent ? 'Продолжить анализ' : 'Найти и проанализировать'}</button>
+          </form>
+          {smartBusy && <div className="smart-search-loading" role="status"><span className="smart-spinner"/>Ищем документы и готовим ответ…</div>}
+          {smartError && <div className="error-banner" role="alert">{smartError}</div>}
+          {smartResult?.message && <p className="smart-consent-note">{smartResult.message}</p>}
+          {smartResult?.answer && <article className="smart-answer"><h3>Ответ</h3><pre>{smartResult.answer}</pre></article>}
+          {smartResult?.documents && <section className="smart-documents"><h3>{smartResult.mode === 'analysis' ? 'Документы-источники' : 'Найденные документы'} <span>{smartResult.documents.length}</span></h3>
+            {smartResult.documents.length === 0 ? <p className="muted">Документы не найдены. Попробуй уточнить запрос.</p> : smartResult.documents.map((doc:any) => <a className="smart-document" href={doc.url} key={doc.id} onClick={event => {event.preventDefault(); setSmartSearchOpen(false); navigate(doc.url);}}>
+              <span className="smart-document-date">{doc.date || 'Дата не указана'}</span><strong>{doc.name}</strong><span>{doc.patient} · {doc.kind}</span><span className="smart-document-open">Открыть документ <ChevronRight size={16}/></span>
+            </a>)}
+          </section>}
+          <p className="smart-search-footnote">Результаты отсортированы по дате исследования: сначала новые, затем старые. Обычный поиск выполняется локально; для медицинского анализа требуется отдельное согласие.</p>
+        </div>
+      </section>
+    </div>}
     {modal && <div className="modal-scrim" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !modalBusy) setModal(null); }}>
       <section className="app-modal" role="dialog" aria-modal="true" aria-label="Добавить члена семьи">
         <header className="app-modal-header"><div><span className="modal-eyebrow">СЕМЕЙНЫЙ АРХИВ</span><h2>Добавить члена семьи</h2></div><button type="button" className="icon-button" aria-label="Закрыть окно" onClick={() => setModal(null)}><X size={20}/></button></header>
