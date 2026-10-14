@@ -89,6 +89,23 @@ def update_patient_aliases(fid,name,aliases):
         if cur.rowcount != 1:
             raise ValueError("Пациент не найден в этом семейном архиве")
 
+def update_patient_profile(fid, old_name, new_name, birth_date=None, aliases=None):
+    old_name=" ".join((old_name or "").split()).strip()
+    new_name=" ".join((new_name or "").split()).strip()[:100]
+    if not old_name or not new_name:
+        raise ValueError("Имя пациента не может быть пустым")
+    alias_values=_clean_aliases(new_name, [old_name] + list(aliases or []))
+    encrypted=cipher().encrypt(json.dumps(alias_values,ensure_ascii=False).encode("utf-8"))
+    with connect() as c:
+        row=c.execute("SELECT id FROM patients WHERE family_id=? AND name=? COLLATE NOCASE",(int(fid),old_name)).fetchone()
+        if not row: raise ValueError("Пациент не найден в этом семейном архиве")
+        collision=c.execute("SELECT id FROM patients WHERE family_id=? AND name=? COLLATE NOCASE AND id<>?",(int(fid),new_name,int(row["id"]))).fetchone()
+        if collision: raise ValueError("В этом архиве уже есть человек с таким именем")
+        c.execute("UPDATE patients SET name=?,birth_date=?,aliases_enc=?,aliases_configured=1 WHERE id=? AND family_id=?",
+                  (new_name,birth_date or None,encrypted,int(row["id"]),int(fid)))
+        if old_name.casefold()!=new_name.casefold():
+            c.execute("UPDATE docs SET patient=? WHERE family_id=? AND patient=? COLLATE NOCASE",(new_name,int(fid),old_name))
+
 def patient_aliases_configured(fid,name):
     with connect() as c:
         row=c.execute("SELECT aliases_configured FROM patients WHERE family_id=? AND name=? COLLATE NOCASE",

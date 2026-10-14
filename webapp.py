@@ -3,7 +3,7 @@ import hashlib, hmac, html, logging, os, tempfile
 from pathlib import Path
 from urllib.parse import urlencode
 import requests
-from fastapi import FastAPI, Depends, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, Depends, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import database as db, tenancy
@@ -15,6 +15,8 @@ from utils import format_filename, normalize_extension, parse_date_from_text, sa
 from document_metadata import extract_registered_patient, extract_patient_birth_date
 
 app=FastAPI(title="Medical Archive", docs_url=None, redoc_url=None)
+from react_ui import install_react_ui
+install_react_ui(app)
 
 @app.get("/manifest.webmanifest")
 def pwa_manifest():
@@ -165,7 +167,11 @@ def explicit_document_date(text):
     return ""
 
 @app.get("/",response_class=HTMLResponse)
-def home(family_id:int|None=None,uid:int=Depends(current_user)):
+def home(request:Request,family_id:int|None=None,uid:int=Depends(current_user)):
+    # Browser entry serves the React shell; same-origin SPA requests ask for legacy HTML fragments.
+    if request.headers.get("x-requested-with") != "MedicalArchiveSPA":
+        index=Path(__file__).resolve().parent / "frontend" / "dist" / "index.html"
+        if index.is_file(): return FileResponse(index,media_type="text/html",headers={"Cache-Control":"no-cache"})
     fs=tenancy.families_for_user(uid)
     if family_id is not None and not tenancy.role_for_user(family_id,uid): raise HTTPException(403,"Нет доступа")
     f=tenancy.get_family(family_id) if family_id is not None else (tenancy.get_family(fs[0]["id"]) if fs else None)
@@ -303,6 +309,36 @@ def unified_search(q:str="",family_id:int|None=None,patient:str="",uid:int=Depen
         b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Тип: {html.escape(str(d.get("kind") or "не определено"))}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}{link}<p><a href="/families/{fid}/patients/{__import__("urllib.parse",fromlist=["quote"]).quote(chosen["name"],safe="")}">История пациента</a></p><details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape((d.get("text") or "")[:4000])+'</pre></details></div>')
     return page("Поиск по архиву","".join(b))
 
+@app.get("/settings",response_class=HTMLResponse)
+def archive_settings(family_id:int|None=None,updated:int=0,uid:int=Depends(current_user)):
+    fs=tenancy.families_for_user(uid)
+    f=tenancy.get_family(family_id) if family_id is not None else (tenancy.get_family(fs[0]["id"]) if fs else None)
+    if not f: return page("Настройки архива",'<h1>Настройки архива</h1><p>Сначала создайте семейный архив.</p><a class="button-link" href="/">На главную</a>')
+    family(int(f["id"]),uid)
+    role=tenancy.role_for_user(int(f["id"]),uid)
+    body=['<h1>Настройки архива</h1><p class="muted">Настройки семейного медицинского архива.</p>']
+    if updated: body.append('<div class="notice-success" role="status">Название архива сохранено.</div>')
+    body.append('<form class="card" method="post" action="/settings"><input type="hidden" name="family_id" value="'+str(int(f["id"]))+'"><h2>Название архива</h2><label>Название<input name="name" maxlength="80" required value="'+html.escape(str(f["name"]),quote=True)+'" '+('' if role=="owner" else 'disabled')+'></label>')
+    if role=="owner": body.append('<button type="submit">Сохранить название</button>')
+    else: body.append('<p class="muted">Переименовывать архив может только владелец.</p>')
+    body.append('</form>')
+    body.append('<section class="card"><h2>Хранение документов</h2><p>Текущий режим: '+('Яндекс Диск' if STORAGE_BACKEND=="yandex" else 'локально на VPS')+'</p>')
+    if STORAGE_BACKEND=="yandex":
+        body.append('<p>'+('Яндекс Диск подключён.' if tenancy.disk_connected(int(f["id"])) else 'Яндекс Диск ещё не подключён.')+'</p>')
+        if not tenancy.disk_connected(int(f["id"])): body.append('<p><a class="button-link" href="/families/'+str(int(f["id"]))+'/connect-disk">Подключить Яндекс Диск</a></p>')
+    else:
+        body.append('<p class="muted">Подключение Яндекс Диска добавим отдельным этапом, сохранив локальное хранилище как текущий рабочий вариант.</p>')
+    body.append('</section><section class="card"><h2>Резервное копирование</h2><p>Перед загрузкой реальных медицинских документов проверьте наличие внешней резервной копии и возможность восстановления.</p></section>')
+    return page("Настройки архива","".join(body))
+
+@app.post("/settings",response_class=HTMLResponse)
+def save_archive_settings(family_id:int=Form(...),name:str=Form(...),uid:int=Depends(current_user)):
+    family(family_id,uid)
+    try: tenancy.rename_family(family_id,name,uid)
+    except PermissionError as e: raise HTTPException(403,str(e))
+    except ValueError as e: raise HTTPException(400,str(e))
+    return RedirectResponse("/settings?family_id="+str(family_id)+"&updated=1",status_code=303)
+
 @app.post("/families")
 def create_family(name:str=Form(...),uid:int=Depends(current_user)):
     try: fid=tenancy.create_family(name,uid)
@@ -328,6 +364,41 @@ def new_patient_page(fid:int,uid:int=Depends(current_user)):
     return page("Новый пациент",body)
 
 
+@app.get("/families/{fid}/patients/{patient}/edit",response_class=HTMLResponse)
+def edit_patient_page(fid:int,patient:str,uid:int=Depends(current_user)):
+    family(fid,uid)
+    record=next((p for p in db.patient_records(fid) if p["name"].casefold()==patient.casefold()),None)
+    if not record: raise HTTPException(404,"Член семьи не найден")
+    from datetime import datetime
+    date_value=""
+    try: date_value=datetime.strptime(record.get("birth_date") or "", "%d-%m-%Y").strftime("%Y-%m-%d")
+    except ValueError: pass
+    aliases=", ".join(x for x in record.get("aliases",[]) if x.casefold()!=patient.casefold())
+    from urllib.parse import quote
+    base="/families/"+str(fid)+"/patients/"+quote(patient,safe="")
+    body=('<p><a href="'+base+'">← К карточке</a></p><h2>Данные члена семьи</h2>'
+          '<form class="card" method="post" action="'+base+'/edit">'
+          '<label>Имя и фамилия<input name="name" required maxlength="100" value="'+html.escape(record["name"],quote=True)+'"></label>'
+          '<label>Дата рождения<input type="date" name="birth_date" value="'+date_value+'"></label>'
+          '<label>Другие варианты имени<input name="aliases" maxlength="500" value="'+html.escape(aliases,quote=True)+'" placeholder="Через запятую"></label>'
+          '<p class="muted">При переименовании карточки связанные документы будут привязаны к новому имени.</p>'
+          '<button type="submit">Сохранить изменения</button></form>')
+    return page("Редактирование члена семьи",body)
+
+@app.post("/families/{fid}/patients/{patient}/edit",response_class=HTMLResponse)
+def save_patient_page(fid:int,patient:str,name:str=Form(...),birth_date:str=Form(""),aliases:str=Form(""),uid:int=Depends(current_user)):
+    family(fid,uid)
+    from datetime import datetime
+    from urllib.parse import quote
+    birth_date=(birth_date or "").strip()
+    if birth_date:
+        try: birth_date=datetime.strptime(birth_date,"%Y-%m-%d").strftime("%d-%m-%Y")
+        except ValueError: raise HTTPException(400,"Проверьте дату рождения")
+    alias_list=[x.strip() for x in (aliases or "").replace(";",",").split(",") if x.strip()]
+    try: db.update_patient_profile(fid,patient,name,birth_date or None,alias_list)
+    except ValueError as e: raise HTTPException(400,str(e))
+    return RedirectResponse("/families/"+str(fid)+"/patients/"+quote(" ".join(name.split()),safe="")+"?updated=1",status_code=303)
+
 @app.get("/families/{fid}/patients/{patient}",response_class=HTMLResponse)
 def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,cleanup_warning:int=0,uid:int=Depends(current_user)):
     family(fid,uid)
@@ -337,7 +408,7 @@ def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,
     from urllib.parse import quote
     safe_patient=quote(patient,safe="")
     base=f"/families/{fid}/patients/{safe_patient}"
-    b=[f'<p><a href="/?family_id={fid}">← К архиву</a></p>',f'<div class="patient-heading"><div><h2>{html.escape(patient)}</h2><p class="muted">Документов: {len(rows)}</p></div><a class="button-link" href="#patient-upload">＋ Добавить документы</a></div>']
+    b=[f'<p><a href="/?family_id={fid}">← К архиву</a></p>',f'<div class="patient-heading"><div><h2>{html.escape(patient)}</h2><p class="muted">Документов: {len(rows)}</p></div><div class="row"><a class="button-link" href="/families/{fid}/patients/{safe_patient}/edit">✎ Редактировать</a><a class="button-link" href="#patient-upload">＋ Добавить документы</a></div></div>']
     if deleted: b.append('<div class="notice-success" role="status">Документ удалён из архива.</div>')
     if cleanup_warning: b.append('<div class="notice-warning" role="status">Запись удалена, но временный файл не удалось окончательно очистить. Проверьте журнал приложения.</div>')
     b.append(f'<form class="card patient-search" method="get" action="{base}"><label for="patient-q">Поиск по документам пациента</label><div class="row"><input id="patient-q" type="search" name="q" value="{html.escape(q,quote=True)}" placeholder="Например: анализы, УЗИ, выписка"><input type="hidden" name="view" value="{view}"><button type="submit">Найти</button>')
@@ -681,15 +752,30 @@ def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)
     ext=Path(d["name"]).suffix.lower()
     preview_url=f"/families/{fid}/inbox/{pending_id}/preview"
     if ext in {".jpg",".jpeg",".png",".webp",".bmp",".tif",".tiff"}:
-        preview=f'<img class="preview-image" src="{preview_url}" alt="Превью документа">'
+        preview=f'<a class="document-preview-link" href="{preview_url}" target="_blank" rel="noopener" aria-label="Открыть изображение в полном размере"><img class="preview-image" src="{preview_url}" alt="Предпросмотр документа"><span>Нажмите, чтобы открыть полностью ↗</span></a>'
     elif ext==".pdf":
-        preview=f'<p><a href="{preview_url}" target="_blank" rel="noopener">Открыть PDF в новой вкладке ↗</a></p>'
+        preview=f'<div class="pdf-preview"><div class="pdf-preview-toolbar">Предпросмотр PDF · прокрутите документ ниже</div><iframe src="{preview_url}#view=FitH" title="Предпросмотр PDF" loading="lazy"></iframe><p><a href="{preview_url}" target="_blank" rel="noopener">Открыть PDF отдельно ↗</a></p></div>'
     else:
         preview=""
-    body=f'<p><a href="/families/{fid}/inbox">← К входящим</a></p><h2>Классификация документа</h2><div class="card"><strong>Файл:</strong> {html.escape(d["name"])}{preview}<details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape(d["text"][:12000])}</pre></details></div>'
+    body=f'<p><a href="/families/{fid}/inbox">← К входящим</a></p><h2>Классификация документа</h2><div class="card pending-review-card"><strong>Файл:</strong> {html.escape(d["name"])}{preview}<details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape(d["text"][:12000])}</pre></details></div>'
     body+=f'<p><a href="/families/{fid}/patients/new">＋ Добавить пациента</a></p>'
-    body+=f'<form method="post" action="/families/{fid}/inbox/{pending_id}/assign"><label>Пациент<br><select name="patient" required>{patient_options}</select></label><br><label>Тип документа<br><select name="kind" required>{kind_options}</select></label><br><label>Название в архиве<br><input name="title" required maxlength="180" value="{html.escape(str(d["analysis"].get("display_title") or d["analysis"].get("primary_type") or d["name"]),quote=True)}"></label><br><label>Дата документа (ДД-ММ-ГГГГ)<br><input name="date" placeholder="17-03-2025" maxlength="10"></label><p><button type="submit">Сохранить в историю пациента</button></p></form>'
+    body+=f'<form class="pending-classification-form" method="post" action="/families/{fid}/inbox/{pending_id}/assign"><label>Пациент<br><select name="patient" required>{patient_options}</select></label><label>Тип документа<br><select name="kind" required>{kind_options}</select></label><label>Название в архиве<br><input name="title" required maxlength="180" value="{html.escape(str(d["analysis"].get("display_title") or d["analysis"].get("primary_type") or d["name"]),quote=True)}"></label><label>Дата документа (ДД-ММ-ГГГГ)<br><input name="date" placeholder="17-03-2025" maxlength="10"></label><p><button type="submit">Сохранить в историю пациента</button></p></form>'
+    body+=f'<form class="pending-delete-form" method="post" action="/families/{fid}/inbox/{pending_id}/delete" onsubmit="return confirm(\'Удалить этот документ из входящих без возможности восстановления?\')"><input type="hidden" name="confirm" value="yes"><button type="submit">Удалить документ</button></form>'
     return page("Ручная классификация",body)
+
+
+@app.post("/families/{fid}/inbox/{pending_id}/delete", response_class=HTMLResponse)
+def delete_pending_document(fid:int,pending_id:int,confirm:str=Form(...),uid:int=Depends(current_user)):
+    family(fid,uid)
+    if confirm != "yes":
+        raise HTTPException(400,"Удаление не подтверждено")
+    d=db.get_pending_doc(fid,pending_id)
+    if not d:
+        raise HTTPException(404,"Документ не найден во входящих")
+    # Only remove a record that is still in the pending inbox; do not touch
+    # patient archive files or shared storage paths here.
+    db.delete_pending_doc(fid,pending_id)
+    return RedirectResponse(f"/families/{fid}/inbox?deleted=1",status_code=303)
 
 @app.post("/families/{fid}/inbox/{pending_id}/assign", response_class=HTMLResponse)
 def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:str=Form(...),title:str=Form(...),date:str=Form(""),uid:int=Depends(current_user)):
