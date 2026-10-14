@@ -87,6 +87,36 @@ function App() {
   }, []);
 
   useEffect(() => {
+    let startX = 0;
+    let startY = 0;
+    let tracking = false;
+    const onTouchStart = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!touch) return;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      tracking = menuOpen ? startX < 330 : startX < 24;
+    };
+    const onTouchEnd = (event: TouchEvent) => {
+      if (!tracking) return;
+      tracking = false;
+      const touch = event.changedTouches[0];
+      if (!touch) return;
+      const dx = touch.clientX - startX;
+      const dy = touch.clientY - startY;
+      if (Math.abs(dx) < 65 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
+      if (!menuOpen && dx > 0) setMenuOpen(true);
+      if (menuOpen && dx < 0) setMenuOpen(false);
+    };
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchend', onTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
     const root = contentRef.current;
     if (!root || !screen) return;
     const zone = root.querySelector<HTMLElement>('#quick-upload');
