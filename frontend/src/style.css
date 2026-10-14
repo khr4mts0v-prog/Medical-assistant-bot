@@ -330,3 +330,28 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
  .legacy-content .pending-delete-form::before{font-size:11px}
  .legacy-content .pending-delete-form button{padding:9px 11px;font-size:13px}
 }
+
+/* Modal sheet for adding a family member */
+.modal-scrim{position:fixed;z-index:100;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(17,31,52,.42);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);animation:modal-fade-in .16s ease-out}
+.app-modal{position:relative;width:min(100%,480px);max-height:min(86dvh,760px);overflow:auto;border:1px solid rgba(255,255,255,.75);border-radius:24px;background:#fff;box-shadow:0 24px 80px rgba(20,42,73,.25);animation:modal-rise-in .2s ease-out}
+.app-modal-header{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:20px 20px 16px;border-bottom:1px solid #e8edf4;background:rgba(255,255,255,.96);backdrop-filter:blur(14px)}
+.app-modal-header h2{margin:4px 0 0;color:#20334f;font-size:22px;letter-spacing:-.04em}
+.modal-eyebrow{color:#73839b;font-size:10px;font-weight:800;letter-spacing:.12em}
+.app-modal-content{padding:20px}
+.app-modal-content>p:first-child,.app-modal-content>h2:first-child{display:none}
+.app-modal-content form{display:grid;gap:12px;margin:0;padding:0;border:0;background:transparent;box-shadow:none}
+.app-modal-content form label{display:grid;gap:6px;margin:0;color:#43546c;font-size:13px;font-weight:650}
+.app-modal-content form input,.app-modal-content form select{width:100%;min-height:48px;border:1px solid #dfe6f0;border-radius:13px;background:#f8faff;padding:11px 13px}
+.app-modal-content form button[type=submit]{width:100%;min-height:49px;margin-top:6px;border:1px solid #2868d7;border-radius:13px;background:#2868d7;color:#fff;font-size:15px;font-weight:750}
+.app-modal-content form .muted{color:#78869a;font-size:12px}
+.modal-busy{position:sticky;bottom:0;padding:12px 18px;background:#eef4ff;color:#275cae;font-weight:650;text-align:center}
+@keyframes modal-fade-in{from{opacity:0}to{opacity:1}}
+@keyframes modal-rise-in{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(max-width:520px){
+ .modal-scrim{align-items:flex-end;padding:0}
+ .app-modal{width:100%;max-height:90dvh;border-radius:24px 24px 0 0;border-bottom:0;padding-bottom:env(safe-area-inset-bottom);animation:modal-sheet-in .22s ease-out}
+ .app-modal-header{padding:18px 18px 14px}
+ .app-modal-content{padding:17px 18px 24px}
+ @keyframes modal-sheet-in{from{transform:translateY(24px);opacity:.8}to{transform:translateY(0);opacity:1}}
+}
+@media(prefers-reduced-motion:reduce){.modal-scrim,.app-modal{animation:none!important}}
