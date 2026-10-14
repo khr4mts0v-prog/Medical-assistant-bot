@@ -405,7 +405,8 @@ def assign_selected_pending(fid:int,patient:str=Form(...),pending_ids:list[int]=
         except Exception as exc:
             logging.exception("Bulk pending assignment failed (%s)",type(exc).__name__)
             results.append("<li><strong>"+html.escape(d["name"])+"</strong>: ошибка обработки; требуется повторная проверка.</li>")
-    body='<p><a href="/families/'+str(fid)+'/inbox">← Ко входящим</a></p><h2>Результат массового назначения</h2><div class="card"><ul>'+''.join(results)+'</ul></div>'\n    return page("Массовое назначение",body)
+    body='<p><a href="/families/'+str(fid)+'/inbox">← Ко входящим</a></p><h2>Результат массового назначения</h2><div class="card"><ul>'+''.join(results)+'</ul></div>'
+    return page("Массовое назначение",body)
 
 @app.get("/families/{fid}/inbox/{pending_id}/preview")
 def preview_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)):
