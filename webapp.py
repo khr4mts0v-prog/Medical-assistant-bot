@@ -252,7 +252,7 @@ def new_patient_page(fid:int,uid:int=Depends(current_user)):
 
 
 @app.get("/families/{fid}/patients/{patient}",response_class=HTMLResponse)
-def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,uid:int=Depends(current_user)):
+def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,cleanup_warning:int=0,uid:int=Depends(current_user)):
     family(fid,uid)
     if patient not in db.patients(fid): raise HTTPException(404,"Пациент не найден")
     view = "tree" if view == "tree" else "timeline"
@@ -262,6 +262,7 @@ def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,
     base=f"/families/{fid}/patients/{safe_patient}"
     b=[f'<p><a href="/?family_id={fid}">← К архиву</a></p>',f'<div class="patient-heading"><div><h2>{html.escape(patient)}</h2><p class="muted">Документов: {len(rows)}</p></div><a class="button-link" href="#patient-upload">＋ Добавить документы</a></div>']
     if deleted: b.append('<div class="notice-success" role="status">Документ удалён из архива.</div>')
+    if cleanup_warning: b.append('<div class="notice-warning" role="status">Запись удалена, но временный файл не удалось окончательно очистить. Проверьте журнал приложения.</div>')
     b.append(f'<form class="card patient-search" method="get" action="{base}"><label for="patient-q">Поиск по документам пациента</label><div class="row"><input id="patient-q" type="search" name="q" value="{html.escape(q,quote=True)}" placeholder="Например: анализы, УЗИ, выписка"><input type="hidden" name="view" value="{view}"><button type="submit">Найти</button>')
     if q: b.append(f'<a class="button-link" href="{base}?view={view}">Сбросить</a>')
     b.append('</div></form>')
