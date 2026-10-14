@@ -155,6 +155,7 @@ function App() {
     const zone = root.querySelector<HTMLElement>('#quick-upload');
     const input = root.querySelector<HTMLInputElement>('#upload-files');
     const familySelect = root.querySelector<HTMLSelectElement>('#upload-family');
+    const aiConsent = root.querySelector<HTMLInputElement>('#ai-classification-consent');
     const queue = root.querySelector<HTMLElement>('#upload-queue');
     const choose = root.querySelector<HTMLButtonElement>('#choose-files');
     const openPicker = (event: MouseEvent) => {
@@ -178,6 +179,7 @@ function App() {
         const data = new FormData();
         data.append('family_id', familySelect?.value || '');
         data.append('files', file, file.name);
+        data.append('ai_consent', aiConsent?.checked ? 'true' : 'false');
         const xhr = new XMLHttpRequest();
         pendingRequests += 1;
         xhr.open('POST', '/upload');

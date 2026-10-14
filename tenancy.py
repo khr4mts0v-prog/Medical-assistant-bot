@@ -1,6 +1,7 @@
 """Family tenants, membership, encrypted cloud tokens and OAuth state."""
 import os, sqlite3, secrets
 from pathlib import Path
+from datetime import datetime, timezone
 from cryptography.fernet import Fernet, InvalidToken
 
 DB_PATH = Path(os.getenv("DB_PATH", "data/archive.sqlite3"))
@@ -34,6 +35,9 @@ def init():
         CREATE TABLE IF NOT EXISTS oauth_states(
           state TEXT PRIMARY KEY, family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
           telegram_id INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS demo_tenants(
+          family_id INTEGER PRIMARY KEY REFERENCES families(id) ON DELETE CASCADE,
+          expires_at TEXT NOT NULL);
         """)
 
 def create_family(name, owner_id):
@@ -114,3 +118,59 @@ def consume_oauth_state(state):
 def disk_connected(fid):
     f=get_family(fid)
     return bool(f and f.get("yadisk_token_enc"))
+
+
+def ensure_demo_family(user_id, max_active=50):
+    """Return a dedicated demo family with an absolute two-hour idle TTL.
+
+    A single BEGIN IMMEDIATE transaction prevents concurrent first requests from
+    creating duplicate demo families for the same browser session.
+    """
+    init()
+    now = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as c:
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute(
+            "SELECT f.id,d.expires_at FROM families f JOIN demo_tenants d ON d.family_id=f.id "
+            "WHERE f.owner_telegram_id=? ORDER BY f.id LIMIT 1", (int(user_id),)
+        ).fetchone()
+        if row:
+            if str(row["expires_at"]) > now:
+                return int(row["id"])
+            # File artifacts must be removed before metadata is deleted. The web
+            # layer performs that cleanup and retries tenant creation.
+            raise RuntimeError("Срок хранения демо-архива истёк; требуется очистка перед новым архивом")
+        active = c.execute("SELECT COUNT(*) AS n FROM demo_tenants WHERE expires_at > datetime('now')").fetchone()["n"]
+        if int(active) >= max(1, int(max_active)):
+            raise RuntimeError("Демо-режим временно достиг лимита активных архивов. Попробуйте позже.")
+        cur = c.execute("INSERT INTO families(name,owner_telegram_id) VALUES(?,?)", ("Демо-архив", int(user_id)))
+        fid = int(cur.lastrowid)
+        c.execute("INSERT INTO family_members(family_id,telegram_id,role) VALUES(?,?,'owner')", (fid, int(user_id)))
+        c.execute("INSERT INTO demo_tenants(family_id,expires_at) VALUES(?,datetime('now','+2 hours'))", (fid,))
+        return fid
+
+def refresh_demo_expiry(family_id):
+    init()
+    with connect() as c:
+        c.execute("UPDATE demo_tenants SET expires_at=datetime('now','+2 hours') WHERE family_id=?", (int(family_id),))
+
+def expired_demo_families():
+    init()
+    with connect() as c:
+        return [int(r["family_id"]) for r in c.execute("SELECT family_id FROM demo_tenants WHERE expires_at <= datetime('now')").fetchall()]
+
+def delete_demo_family(family_id):
+    """Delete only explicitly marked demo tenants; never ordinary family data."""
+    init()
+    with connect() as c:
+        marked = c.execute("SELECT 1 FROM demo_tenants WHERE family_id=?", (int(family_id),)).fetchone()
+        if not marked:
+            return False
+        c.execute("DELETE FROM families WHERE id=?", (int(family_id),))
+        return True
+
+
+def is_demo_family(family_id):
+    init()
+    with connect() as c:
+        return c.execute("SELECT 1 FROM demo_tenants WHERE family_id=?", (int(family_id),)).fetchone() is not None
