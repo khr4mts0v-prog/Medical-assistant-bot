@@ -269,3 +269,10 @@ def delete_pending_doc(fid,pending_id):
     with connect() as c:
         cur=c.execute("DELETE FROM pending_docs WHERE family_id=? AND id=?",(int(fid),int(pending_id)))
         return cur.rowcount == 1
+
+
+def delete_doc(fid, doc_id):
+    """Delete one document index row scoped to its family."""
+    with connect() as c:
+        cur=c.execute("DELETE FROM docs WHERE family_id=? AND id=?", (int(fid), int(doc_id)))
+        return cur.rowcount == 1
