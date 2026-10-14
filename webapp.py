@@ -80,6 +80,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
         pending_for_actions = len(db.pending_documents(selected_for_actions))
         patient_count = len(db.patients(selected_for_actions))
         b.append('<nav class="home-actions" aria-label="Основные действия"><button class="home-action primary" type="button" id="home-upload-trigger">＋ Загрузить документы</button><a class="home-action" href="/families/' + str(selected_for_actions) + '/inbox">Входящие · на проверку (' + str(pending_for_actions) + ')</a><a class="home-action" href="#patients">История пациентов (' + str(patient_count) + ')</a><a class="home-action" href="#family-settings">Настройки архива</a></nav>')
+        b.append('<form class="card row" method="get" action="/search"><input type="hidden" name="family_id" value="' + str(selected_for_actions) + '"><label for="archive-search">Поиск по архиву</label><input id="archive-search" type="search" name="q" placeholder="Например: Саша анализы" required><button type="submit">Найти документы</button></form>')
     # Inbox-first workflow: files can be uploaded before opening a patient record.
     if fs:
         selected_fid = f["id"] if f else fs[0]["id"]
@@ -97,7 +98,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
             '<script>(function(){const input=document.getElementById("upload-files"),queue=document.getElementById("upload-queue"),family=document.getElementById("upload-family");let items=[],seq=0;document.getElementById("home-upload-trigger").addEventListener("click",function(){input.click()});'
             'function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c]})}'
             'function render(){queue.innerHTML=items.map(function(x){return \'<div class="upload-item"><div class="upload-top"><div class="upload-name"><strong>\'+esc(x.file.name)+\'</strong><div class="upload-status">\'+(x.file.size/1048576).toFixed(2)+\' МБ · \'+esc(x.status)+\'</div></div><button class="upload-remove" type="button" data-remove="\'+x.id+\'" aria-label="Убрать файл из списка">×</button></div><div class="upload-track"><div class="upload-fill" style="width:\'+x.progress+\'%"></div></div><small>\'+x.progress+\'%</small></div>\'}).join("");queue.querySelectorAll("[data-remove]").forEach(function(b){b.addEventListener("click",function(){const id=Number(b.dataset.remove),item=items.find(function(x){return x.id===id});if(item&&item.xhr){item.cancelled=true;item.status="Отменено в браузере; результат сервера неизвестен";item.xhr.abort()}items=items.filter(function(x){return x.id!==id});render()})})}window.addEventListener("beforeunload",function(e){if(items.some(function(x){return x.xhr&&!x.cancelled})){e.preventDefault();e.returnValue=""}});'
-            'function upload(item){item.status="Загрузка";const xhr=new XMLHttpRequest(),form=new FormData();item.xhr=xhr;form.append("family_id",family.value);form.append("files",item.file,item.file.name);xhr.open("POST","/upload");xhr.upload.onprogress=function(e){if(e.lengthComputable){item.progress=Math.round(e.loaded/e.total*100);item.status=item.progress>=100?"Передан · обработка на сервере":"Загрузка";render()}};xhr.onload=function(){item.xhr=null;if(item.cancelled)return;item.progress=100;const body=(xhr.responseText||"").toLowerCase();if(xhr.status>=200&&xhr.status<300){if(body.includes("добавлен во входящие"))item.status="100% · OCR завершён · нужна ручная проверка";else if(body.includes("сохранён пациенту"))item.status="100% · OCR и классификация завершены";else if(body.includes("дубликат"))item.status="100% · дубликат";else {item.progress=95;item.status="Передан серверу · результат обработки не подтверждён"}}else {item.progress=Math.min(item.progress,95);item.status="Ошибка HTTP "+xhr.status}render()};xhr.onerror=function(){item.xhr=null;if(!item.cancelled){item.status="Ошибка сети";render()}};xhr.onabort=function(){item.xhr=null};xhr.send(form)}'
+            'function upload(item){item.status="Загрузка";const xhr=new XMLHttpRequest(),form=new FormData();item.xhr=xhr;form.append("family_id",family.value);form.append("files",item.file,item.file.name);xhr.open("POST","/upload");xhr.upload.onprogress=function(e){if(e.lengthComputable){item.progress=Math.round(e.loaded/e.total*100);item.status=item.progress>=100?"Передан · обработка на сервере":"Загрузка";render()}};xhr.onload=function(){item.xhr=null;if(item.cancelled)return;item.progress=100;const body=(xhr.responseText||"").toLowerCase();if(xhr.status>=200&&xhr.status<300){if(body.includes("добавлен во входящие"))item.status="100% · OCR завершён · нужна ручная проверка";else if(body.includes("документ сохранён")||body.includes("файл уже есть в индексе"))item.status="100% · OCR и классификация завершены";else if(body.includes("дубликат")||body.includes("уже сохранён в архиве"))item.status="100% · дубликат";else {item.progress=95;item.status="Передан серверу · результат обработки не подтверждён"}}else {item.progress=Math.min(item.progress,95);item.status="Ошибка HTTP "+xhr.status}render()};xhr.onerror=function(){item.xhr=null;if(!item.cancelled){item.status="Ошибка сети";render()}};xhr.onabort=function(){item.xhr=null};xhr.send(form)}'
             'document.getElementById("choose-files").addEventListener("click",function(){input.click()});input.addEventListener("change",function(){const selected=Array.from(input.files||[]);input.value="";selected.forEach(function(file){const item={id:++seq,file:file,status:"В очереди",progress:0,xhr:null,cancelled:false};if(!/\\.(pdf|png|jpe?g|webp|tiff?|bmp)$/i.test(file.name)){item.status="Формат не поддерживается";item.progress=0;items.push(item);render();return}if(file.size>'+str(MAX_UPLOAD_MB*1024*1024)+'){item.status="Превышен лимит размера";items.push(item);render();return}items.push(item);render();upload(item)})});'
             '})();</script>'
         )
@@ -137,6 +138,87 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
     b.append('<div class="card" id="family-settings"><h2>Настройки архива</h2><form method="post" action="/families"><label>Название нового семейного архива<br><input name="name" required maxlength="80"></label> <button>Создать архив</button></form></div>')
     b.append('<div class="warn"><strong>Важно:</strong> не загружайте реальные медицинские документы до настройки резервного копирования и полной проверки прав доступа.</div>')
     return page("Главная","".join(b))
+
+@app.get("/search",response_class=HTMLResponse)
+def unified_search(q:str="",family_id:int|None=None,patient:str="",uid:int=Depends(current_user)):
+    fs=tenancy.families_for_user(uid)
+    if not fs:
+        return page("Поиск по архиву","<p>Сначала создайте семейный архив и добавьте пациентов.</p>")
+    allowed={int(x["id"]) for x in fs}
+    fid=int(family_id) if family_id is not None else int(fs[0]["id"])
+    if fid not in allowed: raise HTTPException(403,"Нет доступа к этому семейному архиву")
+    query=" ".join((q or "").split())[:300]
+    records=db.patient_records(fid)
+    if not query:
+        return page("Поиск по архиву",f'<p><a href="/?family_id={fid}">← В архив</a></p><form class="card" method="get" action="/search"><input type="hidden" name="family_id" value="{fid}"><input type="search" name="q" placeholder="Например: Саша анализы" required><button>Найти</button></form>')
+    import re
+    def norm(value):
+        return re.sub(r"[^0-9a-zа-яё]+"," ",str(value or "").casefold()).strip()
+    cleaned=norm(query)
+    chosen=next((p for p in records if p["name"]==patient),None) if patient else None
+    matched_aliases=[]
+    if not chosen:
+        for record in records:
+            for alias in record.get("aliases",[]):
+                alias_norm=norm(alias)
+                if alias_norm and re.search(r"(?<![0-9a-zа-яё])"+re.escape(alias_norm)+r"(?![0-9a-zа-яё])",cleaned):
+                    matched_aliases.append((len(alias_norm),record,alias_norm))
+        if matched_aliases:
+            longest=max(x[0] for x in matched_aliases)
+            candidate_records={x[1]["name"]:x[1] for x in matched_aliases if x[0]==longest}
+            if len(candidate_records)>1:
+                options="".join('<li><a href="/search?family_id='+str(fid)+'&patient='+__import__("urllib.parse",fromlist=["quote"]).quote(name,safe="")+'&q='+__import__("urllib.parse",fromlist=["quote"]).quote(query,safe="")+'">'+html.escape(name)+'</a></li>' for name in sorted(candidate_records))
+                return page("Уточните пациента",f'<p><a href="/?family_id={fid}">← В архив</a></p><h2>Кого вы имели в виду?</h2><p>Запрос совпал с несколькими пациентами. Выберите пациента, поиск не будет выполнен автоматически.</p><ul>{options}</ul>')
+            chosen=next(iter(candidate_records.values()))
+            cleaned=re.sub(r"(?<![0-9a-zа-яё])"+re.escape(max((x[2] for x in matched_aliases if x[0]==longest),key=len))+r"(?![0-9a-zа-яё])"," ",cleaned,count=1).strip()
+    if not chosen:
+        return page("Выберите пациента",f'<p><a href="/?family_id={fid}">← В архив</a></p><h2>Не удалось однозначно определить пациента</h2><p>Укажите имя или псевдоним пациента в запросе либо выберите его:</p><ul>'+ "".join('<li><a href="/search?family_id='+str(fid)+'&patient='+__import__("urllib.parse",fromlist=["quote"]).quote(p["name"],safe="")+'&q='+__import__("urllib.parse",fromlist=["quote"]).quote(query,safe="")+'">'+html.escape(p["name"])+'</a></li>' for p in records)+'</ul>')
+    # Recognize common document-type wording separately from free-text terms.
+    type_patterns=[
+      (r"\b(?:анализы|анализ|лабораторн\w*|крови|мочи)\b","lab"),
+      (r"\b(?:узи|ультразвук\w*)\b","ultrasound"),
+      (r"\b(?:кт|компьютерн\w* томограф\w*)\b","ct"),
+      (r"\b(?:мрт|магнитно резонансн\w*)\b","mri"),
+      (r"\b(?:рентген|рентгенограф\w*)\b","xray"),
+      (r"\b(?:экг|электрокардиограмм\w*)\b","ecg"),
+      (r"\b(?:выписка|эпикриз)\b","discharge"),
+      (r"\b(?:назначения|рецепт|лекарств\w*)\b","prescription"),
+      (r"\b(?:прививки|вакцинац\w*)\b","vaccine")
+    ]
+    type_hint=None
+    for pattern,hint in type_patterns:
+        if re.search(pattern,cleaned):
+            type_hint=hint
+            cleaned=re.sub(pattern," ",cleaned).strip()
+            break
+    terms=" ".join(cleaned.split())
+    rows=db.search(fid,chosen["name"],terms,1000)
+    if type_hint:
+        def has_type(doc):
+            a=doc.get("analysis") or {}
+            blob=norm(" ".join([str(doc.get("kind") or ""),*map(str,a.get("types",[])),*map(str,a.get("document_types",[])),str(a.get("primary_category") or "")]))
+            checks={
+              "lab":("лаборатор","анализ","кров","моч"),
+              "ultrasound":("узи","ультразвук"),
+              "ct":("кт","компьютерн"),
+              "mri":("мрт","магнитно резонанс"),
+              "xray":("рентген",),
+              "ecg":("экг","электрокардиограмм"),
+              "discharge":("выпис","эпикриз"),
+              "prescription":("рецепт","назначен","лекарств"),
+              "vaccine":("вакцин","привив")
+            }
+            return any(term in blob for term in checks[type_hint])
+        rows=[d for d in rows if has_type(d)]
+    b=[f'<p><a href="/?family_id={fid}">← В архив</a></p><h2>Результаты поиска</h2><p>Пациент: <strong>{html.escape(chosen["name"])}</strong></p><p>Запрос: {html.escape(query)} · найдено документов: {len(rows)}</p>']
+    if not rows:
+        b.append('<div class="card">Подходящие документы не найдены. Попробуйте уточнить запрос или выбрать другой тип документа.</div>')
+    for d in rows:
+        a=d.get("analysis") or {}
+        title=display_document_title(d,a)
+        link=f'<p><a href="/families/{fid}/documents/{int(d["id"])}">Открыть оригинал</a></p>' if STORAGE_BACKEND=="local" and d.get("remote") else ""
+        b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Тип: {html.escape(str(d.get("kind") or "не определено"))}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}{link}<p><a href="/families/{fid}/patients/{__import__("urllib.parse",fromlist=["quote"]).quote(chosen["name"],safe="")}/edit">Карточка пациента</a></p><details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape((d.get("text") or "")[:4000])+'</pre></details></div>')
+    return page("Поиск по архиву","".join(b))
 
 @app.post("/families")
 def create_family(name:str=Form(...),uid:int=Depends(current_user)):
