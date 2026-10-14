@@ -274,3 +274,22 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
  .legacy-content .card,.legacy-content form.card,.legacy-content .app-form-card{padding:14px;border-radius:16px}
  .legacy-content button,.legacy-content button[type=submit],.legacy-content input[type=submit]{max-width:100%;font-size:14px}
 }
+
+/* Patient detail: one upload action in the header, no duplicate upload card */
+.legacy-content #patient-upload{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+.legacy-content #patient-upload form{display:none!important}
+.legacy-content .patient-heading{align-items:flex-start}
+.legacy-content .patient-heading>div:last-child{display:flex;gap:8px;width:100%;margin-top:4px}
+.legacy-content .patient-heading>div:last-child a{flex:1;min-width:0;min-height:46px;padding:10px 8px;border-radius:13px;text-align:center;line-height:1.25;font-size:14px}
+.legacy-content .patient-heading>div:last-child a[href*="/edit"]{background:#fff;border:1px solid #dce5f1;color:#385477}
+.legacy-content .patient-heading>div:last-child a[href="#patient-upload"]{background:#2868d7;border:1px solid #2868d7;color:#fff}
+.legacy-content .patient-search{margin-top:18px}
+.legacy-content .patient-search>label{display:block;margin:0 0 9px;font-size:16px;font-weight:700;color:#31435d}
+.legacy-content .patient-search .row{display:flex;gap:8px;align-items:center;flex-wrap:nowrap}
+.legacy-content .patient-search input[type=search]{flex:1;min-width:0;width:0}
+.legacy-content .patient-search button{flex:0 0 auto;min-width:76px}
+@media(max-width:480px){
+ .legacy-content .patient-heading>div:last-child a{font-size:13px}
+ .legacy-content .patient-search .row{gap:7px}
+ .legacy-content .patient-search button{min-width:66px;padding:9px 12px}
+}
