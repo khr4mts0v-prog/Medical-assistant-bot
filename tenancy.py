@@ -53,6 +53,15 @@ def families_for_user(user_id):
           FROM families f JOIN family_members m ON m.family_id=f.id
           WHERE m.telegram_id=? ORDER BY f.name""",(int(user_id),))]
 
+def rename_family(fid, name, actor_id):
+    name = " ".join((name or "").split())[:80]
+    if not name: raise ValueError("Введите название архива")
+    role = role_for_user(fid, actor_id)
+    if role != "owner": raise PermissionError("Переименовывать архив может только владелец")
+    with connect() as c:
+        cur = c.execute("UPDATE families SET name=? WHERE id=?", (name, int(fid)))
+        if cur.rowcount != 1: raise ValueError("Архив не найден")
+
 def get_family(fid):
     init()
     with connect() as c:
