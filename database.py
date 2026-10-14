@@ -20,15 +20,22 @@ def init():
         c.executescript("""
         CREATE TABLE IF NOT EXISTS patients(
           id INTEGER PRIMARY KEY, family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
-          name TEXT NOT NULL COLLATE NOCASE, UNIQUE(family_id,name));
+          name TEXT NOT NULL COLLATE NOCASE, birth_date TEXT, UNIQUE(family_id,name));
         CREATE TABLE IF NOT EXISTS docs(
           id INTEGER PRIMARY KEY, family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
           patient TEXT NOT NULL COLLATE NOCASE, name TEXT, kind TEXT, date TEXT,
           remote TEXT, ocr_remote TEXT, text TEXT, keywords TEXT, analysis TEXT, digest TEXT, added TEXT,
           UNIQUE(family_id,patient,digest));
         CREATE INDEX IF NOT EXISTS docs_family_patient ON docs(family_id,patient,date);
+        CREATE TABLE IF NOT EXISTS pending_docs(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
+          name TEXT NOT NULL, digest TEXT NOT NULL, file_blob BLOB NOT NULL, text_enc BLOB NOT NULL,
+          analysis_enc BLOB NOT NULL, created TEXT NOT NULL, UNIQUE(family_id,digest));
+        CREATE INDEX IF NOT EXISTS pending_docs_family_created ON pending_docs(family_id,created);
         """)
         patient_cols={row["name"] for row in c.execute("PRAGMA table_info(patients)")}
+        if "birth_date" not in patient_cols:
+            c.execute("ALTER TABLE patients ADD COLUMN birth_date TEXT")
         if "aliases_enc" not in patient_cols:
             c.execute("ALTER TABLE patients ADD COLUMN aliases_enc BLOB")
         if "aliases_configured" not in patient_cols:
@@ -52,15 +59,15 @@ def _clean_aliases(name, aliases):
             seen.add(key); unique.append(value)
     return unique[:80]
 
-def add_patient(fid,name,aliases=None,aliases_configured=None):
+def add_patient(fid,name,aliases=None,aliases_configured=None,birth_date=None):
     name=" ".join((name or "").split())[:100]
     if not name: raise ValueError("Имя пациента не может быть пустым")
     configured = (aliases is not None) if aliases_configured is None else bool(aliases_configured)
     alias_values=_clean_aliases(name, aliases)
     encrypted=cipher().encrypt(json.dumps(alias_values,ensure_ascii=False).encode("utf-8"))
     with connect() as c:
-        c.execute("INSERT OR IGNORE INTO patients(family_id,name,aliases_enc,aliases_configured) VALUES(?,?,?,?)",
-                  (int(fid),name,encrypted,int(configured)))
+        c.execute("INSERT OR IGNORE INTO patients(family_id,name,birth_date,aliases_enc,aliases_configured) VALUES(?,?,?,?,?)",
+                  (int(fid),name,birth_date,encrypted,int(configured)))
         if aliases is not None:
             row=c.execute("SELECT id,aliases_enc FROM patients WHERE family_id=? AND name=? COLLATE NOCASE",
                           (int(fid),name)).fetchone()
@@ -91,7 +98,7 @@ def patient_aliases_configured(fid,name):
 def patient_records(fid):
     "Return short display labels and decrypt alias lists only for this family."
     with connect() as c:
-        rows=c.execute("SELECT id,name,aliases_enc,aliases_configured FROM patients WHERE family_id=? ORDER BY name",
+        rows=c.execute("SELECT id,name,birth_date,aliases_enc,aliases_configured FROM patients WHERE family_id=? ORDER BY name",
                        (int(fid),)).fetchall()
     result=[]
     for row in rows:
@@ -102,7 +109,7 @@ def patient_records(fid):
             except Exception:
                 logging.exception("Cannot decrypt patient aliases; falling back to display name")
         result.append({"id":row["id"],"name":row["name"],"aliases":_clean_aliases(row["name"],aliases),
-                       "aliases_configured":bool(row["aliases_configured"])})
+                       "aliases_configured":bool(row["aliases_configured"]),"birth_date":row["birth_date"]})
     return result
 
 def patients(fid):
@@ -226,3 +233,46 @@ def document_count(fid,p):
     with connect() as c:
         r=c.execute("SELECT COUNT(*) n FROM docs WHERE family_id=? AND patient=?",(int(fid),p)).fetchone()
         return r["n"]
+
+def add_pending_doc(fid,name,digest,file_bytes,text,analysis):
+    """Keep unmatched originals encrypted until a human assigns a patient."""
+    with connect() as c:
+        cur=c.execute("""INSERT OR IGNORE INTO pending_docs
+          (family_id,name,digest,file_blob,text_enc,analysis_enc,created)
+          VALUES(?,?,?,?,?,?,?)""",
+          (int(fid),str(name)[:255],digest,cipher().encrypt(file_bytes),
+           cipher().encrypt((text or "").encode("utf-8")),
+           cipher().encrypt(json.dumps(analysis or {},ensure_ascii=False).encode("utf-8")),
+           datetime.now().isoformat()))
+        return cur.lastrowid if cur.rowcount == 1 else None
+
+def pending_documents(fid):
+    with connect() as c:
+        rows=c.execute("SELECT id,family_id,name,digest,created FROM pending_docs WHERE family_id=? ORDER BY created DESC",(int(fid),)).fetchall()
+    return [dict(r) for r in rows]
+
+def get_pending_doc(fid,pending_id):
+    with connect() as c:
+        row=c.execute("SELECT * FROM pending_docs WHERE family_id=? AND id=?",(int(fid),int(pending_id))).fetchone()
+    if not row: return None
+    d=dict(row)
+    try:
+        d["file_bytes"]=cipher().decrypt(d["file_blob"])
+        d["text"]=cipher().decrypt(d["text_enc"]).decode("utf-8")
+        d["analysis"]=json.loads(cipher().decrypt(d["analysis_enc"]).decode("utf-8"))
+    except Exception:
+        logging.exception("Cannot decrypt pending document")
+        return None
+    return d
+
+def delete_pending_doc(fid,pending_id):
+    with connect() as c:
+        cur=c.execute("DELETE FROM pending_docs WHERE family_id=? AND id=?",(int(fid),int(pending_id)))
+        return cur.rowcount == 1
+
+
+def delete_doc(fid, doc_id):
+    """Delete one document index row scoped to its family."""
+    with connect() as c:
+        cur=c.execute("DELETE FROM docs WHERE family_id=? AND id=?", (int(fid), int(doc_id)))
+        return cur.rowcount == 1
