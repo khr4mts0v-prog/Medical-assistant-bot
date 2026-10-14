@@ -35,7 +35,7 @@ def current_user(credentials: HTTPBasicCredentials=Depends(security))->int:
 
 def page(title,body,status=200):
     return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
-:root{color-scheme:light dark;--bg:#fff;--fg:#171717;--card:#fff;--line:#d1d5db;--muted:#626262;--field:#fff;--accent:#166534;--warn:#b8860b} @media(prefers-color-scheme:dark){:root{--bg:#101114;--fg:#f2f2f2;--card:#191b20;--line:#3c4048;--muted:#b4b7bf;--field:#22252b;--accent:#4ade80;--warn:#eab308}}*{box-sizing:border-box}body{max-width:850px;margin:auto;padding:18px;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}h1{font-size:1.5rem}h2{font-size:1.15rem}.card{border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0;background:var(--card)}input,select,button{font:inherit;max-width:100%;padding:9px;margin:4px 0;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--fg)}button{cursor:pointer}input[type=text],input[type=search]{width:min(100%,440px)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.muted{color:var(--muted)}.warn{border-left:4px solid var(--warn);padding:8px 12px}a{overflow-wrap:anywhere;color:inherit}.home-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0}.home-action{display:flex;aspect-ratio:1/0.82;align-items:center;justify-content:center;min-height:125px;padding:12px;border-radius:16px;border:1px solid var(--line);background:var(--card);text-align:center;text-decoration:none;font-weight:700;font-size:1.02rem}.home-action.primary{background:var(--accent);color:#fff;border-color:var(--accent)}.pending-thumbs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}.pending-thumb{display:block;min-width:0;text-decoration:none}.pending-thumb img,.file-thumb{display:flex;width:100%;height:90px;object-fit:cover;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;background:var(--field)}.pending-thumb span:last-child{display:block;font-size:.78rem;overflow-wrap:anywhere;max-height:2.6em;overflow:hidden}.pending-more{align-self:center}.preview-image{display:block;width:100%;max-height:60vh;object-fit:contain;border:1px solid var(--line);border-radius:10px;margin:12px 0}.upload-item{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}@media(max-width:520px){body{padding:12px}.home-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.home-action{min-height:125px;font-size:.95rem;padding:8px}.card{padding:12px}}.upload-top{display:flex;gap:10px;align-items:center}.upload-name{flex:1;min-width:0;overflow-wrap:anywhere}.upload-remove{font-size:22px;line-height:1;min-width:42px}.upload-track{height:7px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:9px}.upload-fill{height:100%;width:0;background:var(--accent);transition:width .12s}.upload-status{font-size:.9rem;color:var(--muted)}</style></head><body><h1>Медицинский архив</h1>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></body></html>""",status_code=status)
+:root{color-scheme:light dark;--bg:#fff;--fg:#171717;--card:#fff;--line:#d1d5db;--muted:#626262;--field:#fff;--accent:#166534;--warn:#b8860b} @media(prefers-color-scheme:dark){:root{--bg:#101114;--fg:#f2f2f2;--card:#191b20;--line:#3c4048;--muted:#b4b7bf;--field:#22252b;--accent:#4ade80;--warn:#eab308}}*{box-sizing:border-box}body{max-width:850px;margin:auto;padding:18px;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}h1{font-size:1.5rem}h2{font-size:1.15rem}.card{border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0;background:var(--card)}input,select,button{font:inherit;max-width:100%;padding:9px;margin:4px 0;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--fg)}button{cursor:pointer}input[type=text],input[type=search]{width:min(100%,440px)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.muted{color:var(--muted)}.warn{border-left:4px solid var(--warn);padding:8px 12px}a{overflow-wrap:anywhere;color:inherit}.home-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0}.home-action{display:flex;aspect-ratio:1/0.82;align-items:center;justify-content:center;min-height:125px;padding:12px;border-radius:16px;border:1px solid var(--line);background:var(--card);text-align:center;text-decoration:none;font-weight:700;font-size:1.02rem}.home-action.primary{background:var(--accent);color:#fff;border-color:var(--accent)}.pending-thumbs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}.pending-thumb{display:block;min-width:0;text-decoration:none}.pending-thumb img,.file-thumb{display:flex;width:100%;height:90px;object-fit:cover;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;background:var(--field)}.pending-thumb span:last-child{display:block;font-size:.78rem;overflow-wrap:anywhere;max-height:2.6em;overflow:hidden}.pending-more{align-self:center}.preview-image{display:block;width:100%;max-height:60vh;object-fit:contain;border:1px solid var(--line);border-radius:10px;margin:12px 0}.upload-item{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}@media(max-width:520px){body{padding:12px}.home-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.home-action{min-height:125px;font-size:.95rem;padding:8px}.card{padding:12px}}.upload-top{display:flex;gap:10px;align-items:center}.upload-name{flex:1;min-width:0;overflow-wrap:anywhere}.upload-remove{font-size:22px;line-height:1;min-width:42px}.upload-track{height:7px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:9px}.upload-fill{height:100%;width:0;background:var(--accent);transition:width .12s}.upload-status{font-size:.9rem;color:var(--muted)}.patient-heading{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.button-link{display:inline-block;border:1px solid var(--line);border-radius:8px;padding:8px 11px;text-decoration:none}.tabs{display:flex;gap:8px;border-bottom:1px solid var(--line);margin:14px 0}.tab{padding:10px 13px;text-decoration:none;border-bottom:3px solid transparent}.tab.active{border-color:var(--accent);font-weight:700}.patient-search label{display:block;font-weight:600}.timeline-date{margin:20px 0 8px}.document-row{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px;border:1px solid var(--line);border-radius:10px;margin:8px 0;background:var(--card)}.document-main{min-width:0;overflow-wrap:anywhere}.tree-group{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.tree-group summary{cursor:pointer;font-weight:700}.notice-success{border-left:4px solid #16865b;padding:10px 14px;background:var(--card);border-radius:8px}.danger{border-color:#b91c1c;color:#b91c1c}@media(max-width:520px){.document-row{align-items:flex-start;flex-direction:column}.tabs{gap:2px}.tab{padding:9px 7px}} </style></head><body><h1>Медицинский архив</h1>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></body></html>""",status_code=status)
 
 def display_document_title(document, analysis):
     saved=(analysis or {}).get("display_title")
@@ -250,34 +250,81 @@ def new_patient_page(fid:int,uid:int=Depends(current_user)):
     body=('<p><a href="/?family_id='+str(fid)+'">← В архив</a></p><h2>Новый пациент</h2><form class="card" method="post" action="/families/'+str(fid)+'/patients"><label>Полное ФИО<br><input name="name" required maxlength="100" placeholder="Иванов Александр Сергеевич"></label><br><label>Дата рождения<br><input type="date" name="birth_date"></label><br><label>Другие варианты имени (через запятую)<br><input name="aliases" maxlength="500" placeholder="Саша, Александр"></label><p class="muted">Дата рождения помогает сверять документы, но не является единственным подтверждением личности.</p><button type="submit">Создать карточку</button></form>')
     return page("Новый пациент",body)
 
+
 @app.get("/families/{fid}/patients/{patient}",response_class=HTMLResponse)
-def patient_page(fid:int,patient:str,q:str="",uid:int=Depends(current_user)):
+def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,uid:int=Depends(current_user)):
     family(fid,uid)
     if patient not in db.patients(fid): raise HTTPException(404,"Пациент не найден")
-    rows=db.search(fid,patient,q)
-    b=[f'<p><a href="/?family_id={fid}">← К архиву</a></p><h2>{html.escape(patient)}</h2><p>Найдено документов: {len(rows)}</p>']
+    view = "tree" if view == "tree" else "timeline"
+    rows=db.search(fid,patient,q,limit=1000)
+    from urllib.parse import quote
+    safe_patient=quote(patient,safe="")
+    base=f"/families/{fid}/patients/{safe_patient}"
+    b=[f'<p><a href="/?family_id={fid}">← К архиву</a></p>',f'<div class="patient-heading"><div><h2>{html.escape(patient)}</h2><p class="muted">Документов: {len(rows)}</p></div><a class="button-link" href="#patient-upload">＋ Добавить документы</a></div>']
+    if deleted: b.append('<div class="notice-success" role="status">Документ удалён из архива.</div>')
+    b.append(f'<form class="card patient-search" method="get" action="{base}"><label for="patient-q">Поиск по документам пациента</label><div class="row"><input id="patient-q" type="search" name="q" value="{html.escape(q,quote=True)}" placeholder="Например: анализы, УЗИ, выписка"><input type="hidden" name="view" value="{view}"><button type="submit">Найти</button>')
+    if q: b.append(f'<a class="button-link" href="{base}?view={view}">Сбросить</a>')
+    b.append('</div></form>')
     if STORAGE_BACKEND == "yandex" and not tenancy.disk_connected(fid):
-        b.append(f'<p><a href="/families/{fid}/connect-disk">Подключить Яндекс Диск</a></p>')
+        b.append(f'<div class="card"><a href="/families/{fid}/connect-disk">Подключить Яндекс Диск</a></div>')
     else:
-        b.append(f'<div class="card"><h2>Загрузить документ</h2><form method="post" enctype="multipart/form-data" action="/families/{fid}/patients/{html.escape(patient,quote=True)}/upload"><input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" required><button>Загрузить и распознать</button></form><small>PDF/изображение до {MAX_UPLOAD_MB} МБ. Файл сохранится {"на VPS" if STORAGE_BACKEND == "local" else "на Яндекс Диск"}.</small></div>')
-    b.append('<div class="card"><h2>Документы</h2>')
-    if not rows: b.append('<p>Документы не найдены.</p>')
-    for d in rows:
-        a=d.get("analysis") or {}
-        doc_types=a.get("document_types",a.get("types",[]))
-        tags=a.get("content_tags",[])
-        confidence=a.get("confidence","неизвестно")
-        review=a.get("review_required",False)
-        label_text=", ".join(doc_types) or "не определено"
-        tag_text=", ".join(tags)
-        status = " · требует проверки" if review else ""
-        link = f'<p><a href="/families/{fid}/documents/{int(d["id"])}">Открыть оригинал</a></p>' if STORAGE_BACKEND == "local" and d.get("remote") else ""
-        title = display_document_title(d, a)
-        edit_url = f"/families/{fid}/documents/{int(d['id'])}/edit"
-        edit_label = "Редактировать карточку" if review or d.get("kind") == "не определено" else "Изменить данные"
-        b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Пациент: {html.escape(str(d.get("patient") or patient))}<br>Обследование: {html.escape(str(d.get("kind") or "не определено"))}{status}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}<br><span class="muted">Уверенность: {html.escape(str(confidence))}</span>{link}<p><a href="{edit_url}">{edit_label}</a></p><details><summary>Показать распознанный текст (OCR)</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape((d.get("text") or "")[:12000])}</pre></details></div>')
-    b.append('</div>')
+        b.append(f'<div class="card" id="patient-upload"><h3>Добавить документы</h3><form method="post" enctype="multipart/form-data" action="/families/{fid}/patients/{html.escape(patient,quote=True)}/upload"><input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" required><button type="submit">Загрузить и распознать</button></form><small class="muted">PDF и изображения · до {MAX_UPLOAD_MB} МБ на файл</small></div>')
+    b.append('<nav class="tabs" aria-label="Вид документов">')
+    b.append(f'<a class="tab {"active" if view=="timeline" else ""}" href="{base}?view=timeline&q={quote(q)}">Хронология</a><a class="tab {"active" if view=="tree" else ""}" href="{base}?view=tree&q={quote(q)}">Дерево документов</a></nav>')
+    if not rows: b.append('<div class="card"><p>Документы не найдены.</p><p class="muted">Попробуйте изменить запрос или загрузить документ.</p></div>')
+    elif view == "timeline":
+        grouped={}
+        for d in rows: grouped.setdefault(str(d.get("date") or "Дата не указана"),[]).append(d)
+        from datetime import datetime
+        def sort_date(item):
+            try: return datetime.strptime(item[0],"%d-%m-%Y")
+            except Exception: return datetime.min
+        for date,docs in sorted(grouped.items(),key=sort_date,reverse=True):
+            b.append(f'<h3 class="timeline-date">{html.escape(date)}</h3>')
+            for d in docs:
+                title=display_document_title(d,d.get("analysis") or {}); did=int(d["id"])
+                b.append(f'<article class="document-row"><div class="document-main"><strong>{html.escape(str(title))}</strong><div class="muted">{html.escape(str(d.get("kind") or "не определено"))} · {html.escape(str(d.get("name") or ""))}</div></div><a class="button-link" href="/families/{fid}/documents/{did}/edit">Открыть</a></article>')
+    else:
+        grouped={}
+        for d in rows: grouped.setdefault(str(d.get("kind") or "Не определено"),[]).append(d)
+        for kind,docs in sorted(grouped.items(),key=lambda x:x[0].casefold()):
+            b.append(f'<details class="tree-group" open><summary>{html.escape(kind)} <span class="muted">({len(docs)})</span></summary>')
+            for d in sorted(docs,key=lambda x:str(x.get("date") or ""),reverse=True):
+                title=display_document_title(d,d.get("analysis") or {}); did=int(d["id"])
+                b.append(f'<div class="document-row"><div class="document-main"><strong>{html.escape(str(title))}</strong><div class="muted">{html.escape(str(d.get("date") or "Дата не указана"))}</div></div><a class="button-link" href="/families/{fid}/documents/{did}/edit">Открыть</a></div>')
+            b.append('</details>')
     return page("Пациент","".join(b))
+
+@app.post("/families/{fid}/documents/{doc_id}/delete",response_class=HTMLResponse)
+def delete_document(fid:int,doc_id:int,confirm:str=Form(...),uid:int=Depends(current_user)):
+    family(fid,uid)
+    if confirm != "yes": raise HTTPException(400,"Удаление не подтверждено")
+    d=db.get_doc(fid,doc_id)
+    if not d: raise HTTPException(404,"Документ не найден")
+    patient=str(d.get("patient") or "")
+    try:
+        if STORAGE_BACKEND=="local":
+            from local_storage import document_dir
+            expected=document_dir(fid,patient).resolve()
+            for raw in (d.get("remote"),d.get("ocr_remote")):
+                if not raw: continue
+                path=Path(str(raw)).resolve()
+                if path.parent != expected: raise HTTPException(400,"Путь файла не совпадает с каталогом пациента; удаление остановлено")
+                if path.exists():
+                    if not path.is_file(): raise HTTPException(400,"Ожидался файл; удаление остановлено")
+                    path.unlink()
+        else:
+            token=tenancy.get_yadisk_token(fid)
+            if not token: raise HTTPException(400,"Сначала подключите Яндекс Диск")
+            disk=YaDiskClient(token)
+            for raw in (d.get("remote"),d.get("ocr_remote")):
+                if raw: disk.delete_file(raw,permanently=True)
+    except HTTPException: raise
+    except Exception:
+        logging.exception("Document file deletion failed for doc_id=%s",doc_id)
+        raise HTTPException(502,"Не удалось удалить оригинал или OCR-файл. Запись архива сохранена; проверьте хранилище.")
+    if not db.delete_doc(fid,doc_id): raise HTTPException(500,"Файлы удалены, но запись архива не удалось удалить. Требуется проверка индекса.")
+    return RedirectResponse("/families/"+str(fid)+"/patients/"+quote(patient,safe="")+"?deleted=1",status_code=303)
 
 @app.get("/families/{fid}/documents/{doc_id}")
 def download_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
@@ -311,6 +358,7 @@ def edit_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
     body+="<label>Название для архива<br><input type=\"text\" name=\"title\" maxlength=\"180\" value=\""+html.escape(str(title),quote=True)+"\" required></label><br>"
     body+="<label>Дата документа (ДД-ММ-ГГГГ)<br><input type=\"text\" name=\"date\" maxlength=\"10\" placeholder=\"17-03-2025\" value=\""+html.escape(str(d.get("date") or ""),quote=True)+"\"></label>"
     body+="<p class=\"muted\">Оригинал и первоначальный OCR-текст останутся без изменений.</p><button type=\"submit\">Сохранить изменения</button></form>"
+    body+='<form method="post" action="/families/'+str(fid)+'/documents/'+str(doc_id)+'/delete" onsubmit="return confirm(\'Удалить документ и его OCR-файл из архива? Это действие нельзя отменить.\')"><input type="hidden" name="confirm" value="yes"><button class="danger" type="submit">Удалить документ</button></form>'
     return page("Редактирование документа",body)
 
 @app.post("/families/{fid}/documents/{doc_id}/edit", response_class=HTMLResponse)
