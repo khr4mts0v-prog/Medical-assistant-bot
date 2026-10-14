@@ -156,6 +156,12 @@ def unified_search(q:str="",family_id:int|None=None,patient:str="",uid:int=Depen
         return re.sub(r"[^0-9a-zа-яё]+"," ",str(value or "").casefold()).strip()
     cleaned=norm(query)
     chosen=next((p for p in records if p["name"]==patient),None) if patient else None
+    if chosen:
+        explicit_aliases=sorted((norm(a) for a in chosen.get("aliases",[]) if norm(a)),key=len,reverse=True)
+        for alias_norm in explicit_aliases:
+            if re.search(r"(?<![0-9a-zа-яё])"+re.escape(alias_norm)+r"(?![0-9a-zа-яё])",cleaned):
+                cleaned=re.sub(r"(?<![0-9a-zа-яё])"+re.escape(alias_norm)+r"(?![0-9a-zа-яё])"," ",cleaned,count=1).strip()
+                break
     matched_aliases=[]
     if not chosen:
         for record in records:
@@ -217,7 +223,7 @@ def unified_search(q:str="",family_id:int|None=None,patient:str="",uid:int=Depen
         a=d.get("analysis") or {}
         title=display_document_title(d,a)
         link=f'<p><a href="/families/{fid}/documents/{int(d["id"])}">Открыть оригинал</a></p>' if STORAGE_BACKEND=="local" and d.get("remote") else ""
-        b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Тип: {html.escape(str(d.get("kind") or "не определено"))}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}{link}<p><a href="/families/{fid}/patients/{__import__("urllib.parse",fromlist=["quote"]).quote(chosen["name"],safe="")}/edit">Карточка пациента</a></p><details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape((d.get("text") or "")[:4000])+'</pre></details></div>')
+        b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Тип: {html.escape(str(d.get("kind") or "не определено"))}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}{link}<p><a href="/families/{fid}/patients/{__import__("urllib.parse",fromlist=["quote"]).quote(chosen["name"],safe="")}">История пациента</a></p><details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape((d.get("text") or "")[:4000])+'</pre></details></div>')
     return page("Поиск по архиву","".join(b))
 
 @app.post("/families")
