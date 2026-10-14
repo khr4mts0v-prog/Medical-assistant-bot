@@ -27,8 +27,7 @@ function extractContent(documentText: string): string {
   if (actions && upload) upload.after(actions);
   const archiveHeading = main.querySelector('#patients-section > h2');
   if (archiveHeading) archiveHeading.textContent = 'Семья';
-  const patientHeading = main.querySelector('#patients');
-  if (patientHeading) patientHeading.textContent = 'Члены семьи';
+  main.querySelector('#patients > h2')?.remove();
   const addPatient = Array.from(main.querySelectorAll('a')).find(a => a.textContent?.includes('Добавить пациента'));
   if (addPatient) addPatient.textContent = '＋ Добавить члена семьи';
   main.querySelector('#patients-section > p')?.remove();
