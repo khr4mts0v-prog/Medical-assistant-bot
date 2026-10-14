@@ -174,7 +174,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
         selected_for_actions = f["id"] if f else fs[0]["id"]
         pending_for_actions = len(db.pending_documents(selected_for_actions))
         patient_count = len(db.patients(selected_for_actions))
-        b.append('<nav class="home-actions" aria-label="Основные действия"><button class="home-action primary" type="button" id="home-upload-trigger">＋ Загрузить документы</button><a class="home-action" href="/families/' + str(selected_for_actions) + '/inbox">Входящие · на проверку (' + str(pending_for_actions) + ')</a><a class="home-action" href="#patients">История пациентов (' + str(patient_count) + ')</a><a class="home-action" href="#family-settings">Настройки архива</a></nav>')
+        b.append('<nav class="home-actions" aria-label="Основные действия"><a class="home-action" href="/families/' + str(selected_for_actions) + '/inbox">▤ Входящие · на проверку (' + str(pending_for_actions) + ')</a><a class="home-action" href="#patients">♧ Пациенты (' + str(patient_count) + ')</a></nav>')
         b.append('<section class="home-welcome"><h1>Добро пожаловать!</h1><p>Ваш семейный медицинский архив</p></section>')
         b.append('<form class="card row home-search" method="get" action="/search"><input type="hidden" name="family_id" value="' + str(selected_for_actions) + '"><label for="archive-search">⌕</label><input id="archive-search" type="search" name="q" placeholder="Найти документ, анализ, обследование…" required><button type="submit">Найти</button></form>')
     # Inbox-first workflow: files can be uploaded before opening a patient record.
@@ -185,7 +185,7 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
             for x in fs
         )
         b.append(
-            '<div class="card" id="quick-upload"><h2>Загрузка файлов</h2>'
+            '<div class="card upload-dropzone" id="quick-upload"><div style="font-size:42px;color:#3478df">⇧</div><h2>Добавить документы</h2><p class="muted">PDF, фотографии и сканы. Можно выбрать несколько файлов сразу.</p>'
             '<p class="muted">Статус обновляется после передачи файла и завершения распознавания и классификации.</p>'
             '<select id="upload-family" hidden aria-hidden="true">' + upload_options + '</select>'
             '<input id="upload-files" type="file" accept="image/*,application/pdf,.tif,.tiff,.bmp" multiple hidden>' '<button type="button" id="choose-files">＋ Выбрать документы</button>'
