@@ -1,5 +1,5 @@
 """Test web interface for Medical Archive. MUST be exposed only behind HTTPS."""
-import hashlib, hmac, html, logging, os, tempfile
+import base64, hashlib, hmac, html, logging, os, tempfile, threading, time, secrets
 from pathlib import Path
 from urllib.parse import urlencode
 import requests
@@ -10,7 +10,7 @@ import database as db, tenancy
 from cloud import YaDiskClient
 from local_storage import save_file as save_local_file
 from ocr import ocr_file
-from AIAnalise import analyze_document, extract_keywords
+from AIAnalise import analyze_document, extract_keywords, classify_with_ai
 from utils import format_filename, normalize_extension, parse_date_from_text, safe_name
 from document_metadata import extract_registered_patient, extract_patient_birth_date
 
@@ -42,20 +42,146 @@ def pwa_service_worker():
 security=HTTPBasic()
 WEB_USERNAME=os.getenv("WEB_USERNAME","").strip()
 WEB_PASSWORD=os.getenv("WEB_PASSWORD","")
+DEMO_USERNAME=os.getenv("DEMO_USERNAME", "test").strip()
+DEMO_PASSWORD=os.getenv("DEMO_PASSWORD", "test")
+# Real web users occupy the negative 48-bit hash range; demo tenant identities
+# are derived from a random, HttpOnly per-browser cookie in a separate range.
+DEMO_UID_FLOOR=10**15
+DEMO_UID=-(DEMO_UID_FLOOR + int(hashlib.sha256(b"medical-archive-demo-tenant-v1").hexdigest()[:14],16))
+AUTH_FAILURES={}
+AUTH_FAILURES_LOCK=threading.Lock()
+DEMO_CLEANUP_STARTED=False
+DEMO_MAX_ACTIVE_TENANTS=max(1,int(os.getenv("DEMO_MAX_ACTIVE_TENANTS","20")))
+DEMO_MAX_DOCUMENTS=max(1,int(os.getenv("DEMO_MAX_DOCUMENTS","10")))
+DEMO_MAX_PATIENTS=max(1,int(os.getenv("DEMO_MAX_PATIENTS","10")))
+DEMO_MAX_UPLOAD_MB=min(5,max(1,int(os.getenv("DEMO_MAX_UPLOAD_MB","5"))))
 ROOT=os.getenv("YANDEX_ROOT_FOLDER","MedArchive").strip("/")
 STORAGE_BACKEND=os.getenv("DOCUMENT_STORAGE_BACKEND","local").strip().lower()
 MAX_UPLOAD_MB=max(1,int(os.getenv("MAX_UPLOAD_MB","20")))
 ALLOWED={".pdf",".png",".jpg",".jpeg",".webp",".tif",".tiff",".bmp"}
 logging.basicConfig(level=os.getenv("LOG_LEVEL","INFO"),format="%(asctime)s %(levelname)s %(message)s")
 
-def current_user(credentials: HTTPBasicCredentials=Depends(security))->int:
-    if not WEB_USERNAME or not WEB_PASSWORD:
-        raise HTTPException(503,"Web login is not configured")
-    u=hmac.compare_digest(credentials.username.encode(),WEB_USERNAME.encode())
-    p=hmac.compare_digest(credentials.password.encode(),WEB_PASSWORD.encode())
-    if not (u and p):
-        raise HTTPException(401,"Invalid username or password",headers={"WWW-Authenticate":'Basic realm="Medical Archive"'})
-    return -(int(hashlib.sha256(WEB_USERNAME.encode()).hexdigest()[:12],16) or 1)
+def is_demo_user(uid):
+    return int(uid) <= -DEMO_UID_FLOOR
+
+@app.middleware("http")
+async def demo_session_cookie(request: Request, call_next):
+    """Give each HTTPS browser its own expiring demo tenant, despite shared Basic Auth."""
+    is_demo_auth = False
+    authorization = request.headers.get("authorization", "")
+    if authorization.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(authorization[6:], validate=True).decode("utf-8")
+            username, password = decoded.split(":", 1)
+            is_demo_auth = bool(
+                DEMO_USERNAME and DEMO_PASSWORD
+                and hmac.compare_digest(username.encode(), DEMO_USERNAME.encode())
+                and hmac.compare_digest(password.encode(), DEMO_PASSWORD.encode())
+            )
+        except (ValueError, UnicodeDecodeError):
+            is_demo_auth = False
+    if not is_demo_auth:
+        return await call_next(request)
+    if request.url.path == "/upload" or request.url.path.endswith("/upload"):
+        length = request.headers.get("content-length", "")
+        if length.isdigit() and int(length) > (DEMO_MAX_UPLOAD_MB * 5 + 1) * 1024 * 1024:
+            return Response("Демо-загрузка превышает общий лимит размера запроса.", status_code=413)
+    cookie = request.cookies.get("medical_demo_session", "") or secrets.token_urlsafe(32)
+    request.state.medical_demo_session = cookie
+    response = await call_next(request)
+    response.set_cookie("medical_demo_session", cookie, max_age=7200, httponly=True,
+                        secure=True, samesite="lax", path="/")
+    return response
+
+def current_user(request: Request, credentials: HTTPBasicCredentials=Depends(security))->int:
+    ip = request.client.host if request and request.client else "unknown"
+    now = time.monotonic()
+    rate_key = ip + ":" + hashlib.sha256(credentials.username.encode()).hexdigest()[:16]
+    demo_ok = bool(DEMO_USERNAME and DEMO_PASSWORD and
+                   hmac.compare_digest(credentials.username.encode(), DEMO_USERNAME.encode()) and
+                   hmac.compare_digest(credentials.password.encode(), DEMO_PASSWORD.encode()))
+    main_ok = bool(WEB_USERNAME and WEB_PASSWORD and
+                   hmac.compare_digest(credentials.username.encode(), WEB_USERNAME.encode()) and
+                   hmac.compare_digest(credentials.password.encode(), WEB_PASSWORD.encode()))
+    with AUTH_FAILURES_LOCK:
+        if len(AUTH_FAILURES) > 10000:
+            for key, stamps in list(AUTH_FAILURES.items()):
+                fresh = [stamp for stamp in stamps if now - stamp < 300]
+                if fresh:
+                    AUTH_FAILURES[key] = fresh
+                else:
+                    AUTH_FAILURES.pop(key, None)
+        failures = [t for t in AUTH_FAILURES.get(rate_key, []) if now - t < 300]
+        AUTH_FAILURES[rate_key] = failures
+        if len(failures) >= 20 and not (demo_ok or main_ok):
+            raise HTTPException(429, "Слишком много неудачных попыток входа. Попробуйте через 5 минут.")
+        if demo_ok or main_ok:
+            AUTH_FAILURES.pop(rate_key, None)
+    if main_ok:
+        return -(int(hashlib.sha256(WEB_USERNAME.encode()).hexdigest()[:12],16) or 1)
+    if demo_ok:
+        cookie = (getattr(request.state, "medical_demo_session", "") or request.cookies.get("medical_demo_session", "")) if request else ""
+        demo_uid = -(DEMO_UID_FLOOR + int(hashlib.sha256(cookie.encode()).hexdigest()[:14], 16)) if cookie else DEMO_UID
+        _ensure_demo_tenant(demo_uid)
+        return demo_uid
+    with AUTH_FAILURES_LOCK:
+        AUTH_FAILURES.setdefault(ip, []).append(now)
+    raise HTTPException(401,"Invalid username or password",headers={"WWW-Authenticate":'Basic realm="Medical Archive"'})
+
+def _cleanup_expired_demo_tenants_once():
+    """Purge artifacts only for expired tenants explicitly marked as demo."""
+    import shutil
+    from local_storage import DATA_ROOT
+    root = DATA_ROOT.resolve()
+    removed = 0
+    for fid in tenancy.expired_demo_families():
+        try:
+            candidate = root / f"family_{int(fid)}"
+            # Unlink a family-directory symlink itself; never follow it outside root.
+            if candidate.is_symlink():
+                candidate.unlink(missing_ok=True)
+            elif candidate.exists():
+                resolved = candidate.resolve(strict=True)
+                if resolved.parent != root or resolved.name != candidate.name:
+                    raise RuntimeError("Demo directory path is outside local storage root")
+                # Do not swallow filesystem errors: leave DB metadata marked so cleanup retries.
+                shutil.rmtree(candidate)
+            if tenancy.delete_demo_family(fid):
+                removed += 1
+        except Exception:
+            logging.exception("Unable to fully clean expired demo tenant %s; will retry", int(fid))
+    return removed
+
+def _ensure_demo_tenant(user_id):
+    """Create a new tenant only after an expired tenant's files were successfully purged."""
+    try:
+        return tenancy.ensure_demo_family(user_id, max_active=DEMO_MAX_ACTIVE_TENANTS)
+    except RuntimeError as first_error:
+        try:
+            _cleanup_expired_demo_tenants_once()
+        except Exception as exc:
+            logging.exception("Expired demo tenant cleanup failed")
+            raise HTTPException(503, "Срок хранения демо-архива истёк, но очистка пока не завершена") from exc
+        try:
+            return tenancy.ensure_demo_family(user_id, max_active=DEMO_MAX_ACTIVE_TENANTS)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc or first_error)) from exc
+
+def _cleanup_expired_demo_data():
+    """Keep cleaning expired demo uploads while the web app is running."""
+    while True:
+        try:
+            _cleanup_expired_demo_tenants_once()
+        except Exception:
+            logging.exception("Demo cleanup failed")
+        time.sleep(60)
+
+@app.on_event("startup")
+def start_demo_cleanup_worker():
+    global DEMO_CLEANUP_STARTED
+    if not DEMO_CLEANUP_STARTED:
+        threading.Thread(target=_cleanup_expired_demo_data, daemon=True, name="demo-data-cleanup").start()
+        DEMO_CLEANUP_STARTED = True
 
 def page(title,body,status=200):
     return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#16794b"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Медархив"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/app-icon.svg" type="image/svg+xml"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
@@ -148,10 +274,17 @@ def display_document_title(document, analysis):
     return "Документ — требуется классификация"
 
 def family(fid,uid):
+    if is_demo_user(uid) and not tenancy.is_demo_family(fid):
+        raise HTTPException(403,"Демо-аккаунт может работать только со своим временным архивом")
     if not tenancy.role_for_user(fid,uid): raise HTTPException(403,"Нет доступа к этому семейному архиву")
     f=tenancy.get_family(fid)
     if not f: raise HTTPException(404,"Архив не найден")
     return f
+
+def enforce_demo_document_quota(fid, incoming=1):
+    current=db.family_document_count(fid)
+    if current + int(incoming) > DEMO_MAX_DOCUMENTS:
+        raise HTTPException(413, f"В демо можно загрузить не более {DEMO_MAX_DOCUMENTS} документов за время сессии")
 
 def home_url(fid=None): return RedirectResponse("/" if fid is None else f"/?family_id={int(fid)}",status_code=303)
 
@@ -173,9 +306,15 @@ def home(request:Request,family_id:int|None=None,uid:int=Depends(current_user)):
         index=Path(__file__).resolve().parent / "frontend" / "dist" / "index.html"
         if index.is_file(): return FileResponse(index,media_type="text/html",headers={"Cache-Control":"no-cache"})
     fs=tenancy.families_for_user(uid)
+    if is_demo_user(uid) and not fs:
+        _ensure_demo_tenant(uid)
+        fs=tenancy.families_for_user(uid)
     if family_id is not None and not tenancy.role_for_user(family_id,uid): raise HTTPException(403,"Нет доступа")
     f=tenancy.get_family(family_id) if family_id is not None else (tenancy.get_family(fs[0]["id"]) if fs else None)
     b=[]
+    upload_ui_limit_mb=min(MAX_UPLOAD_MB, DEMO_MAX_UPLOAD_MB) if is_demo_user(uid) else MAX_UPLOAD_MB
+    if is_demo_user(uid):
+        b.append('<div class="notice-warning"><strong>Демо-режим.</strong> Используйте только тестовые документы. Все данные демо-архива автоматически удаляются примерно через 2 часа после последней загрузки. ИИ-классификация отправляет OCR-текст внешнему провайдеру только после отдельного согласия.</div>')
     if fs:
         selected_for_actions = f["id"] if f else fs[0]["id"]
         pending_for_actions = len(db.pending_documents(selected_for_actions))
@@ -192,22 +331,22 @@ def home(request:Request,family_id:int|None=None,uid:int=Depends(current_user)):
         )
         b.append(
             '<div class="card upload-dropzone" id="quick-upload"><div style="font-size:42px;color:#3478df">⇧</div><h2>Добавить документы</h2><p class="muted">PDF, фотографии и сканы. Можно выбрать несколько файлов сразу.</p>'
-            '<p class="muted">Статус обновляется после передачи файла и завершения распознавания и классификации.</p>'
+            '<p class="muted">Статус обновляется после передачи файла и завершения распознавания и классификации.</p><label style="display:block;font-weight:400"><input id="ai-classification-consent" type="checkbox" style="width:auto;min-height:auto"> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label>'
             '<select id="upload-family" hidden aria-hidden="true">' + upload_options + '</select>'
             '<input id="upload-files" type="file" accept="image/*,application/pdf,.tif,.tiff,.bmp" multiple hidden>' '<button type="button" id="choose-files">＋ Выбрать документы</button>'
             '<div id="upload-queue" aria-live="polite"></div>'
-            '<small>До ' + str(MAX_UPLOAD_MB) + ' МБ на файл. OCR и классификация выполняются на сервере после передачи.</small></div>'
+            '<small>До ' + str(upload_ui_limit_mb) + ' МБ на файл. OCR и классификация выполняются на сервере после передачи.</small></div>'
             '<script>(function(){const input=document.getElementById("upload-files"),queue=document.getElementById("upload-queue"),family=document.getElementById("upload-family");let items=[],seq=0;document.getElementById("home-upload-trigger").addEventListener("click",function(){input.click()});'
             'function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c]})}'
             'function render(){queue.innerHTML=items.map(function(x){return \'<div class="upload-item"><div class="upload-top"><div class="upload-name"><strong>\'+esc(x.file.name)+\'</strong><div class="upload-status">\'+(x.file.size/1048576).toFixed(2)+\' МБ · \'+esc(x.status)+\'</div></div><button class="upload-remove" type="button" data-remove="\'+x.id+\'" aria-label="Убрать файл из списка">×</button></div><div class="upload-track"><div class="upload-fill" style="width:\'+x.progress+\'%"></div></div><small>\'+x.progress+\'%</small></div>\'}).join("");queue.querySelectorAll("[data-remove]").forEach(function(b){b.addEventListener("click",function(){const id=Number(b.dataset.remove),item=items.find(function(x){return x.id===id});if(item&&item.xhr){item.cancelled=true;item.status="Отменено в браузере; результат сервера неизвестен";item.xhr.abort()}items=items.filter(function(x){return x.id!==id});render()})})}window.addEventListener("beforeunload",function(e){if(items.some(function(x){return x.xhr&&!x.cancelled})){e.preventDefault();e.returnValue=""}});'
-            'function upload(item){item.status="Загрузка";const xhr=new XMLHttpRequest(),form=new FormData();item.xhr=xhr;form.append("family_id",family.value);form.append("files",item.file,item.file.name);xhr.open("POST","/upload");xhr.upload.onprogress=function(e){if(e.lengthComputable){item.progress=Math.round(e.loaded/e.total*100);item.status=item.progress>=100?"Передан · обработка на сервере":"Загрузка";render()}};xhr.onload=function(){item.xhr=null;if(item.cancelled)return;item.progress=100;const body=(xhr.responseText||"").toLowerCase();if(xhr.status>=200&&xhr.status<300){if(body.includes("добавлен во входящие"))item.status="100% · OCR завершён · нужна ручная проверка";else if(body.includes("документ сохранён")||body.includes("файл уже есть в индексе"))item.status="100% · OCR и классификация завершены";else if(body.includes("дубликат")||body.includes("уже сохранён в архиве"))item.status="100% · дубликат";else {item.progress=95;item.status="Передан серверу · результат обработки не подтверждён"}}else {item.progress=Math.min(item.progress,95);item.status="Ошибка HTTP "+xhr.status}render()};xhr.onerror=function(){item.xhr=null;if(!item.cancelled){item.status="Ошибка сети";render()}};xhr.onabort=function(){item.xhr=null};xhr.send(form)}'
-            'document.getElementById("choose-files").addEventListener("click",function(){input.click()});input.addEventListener("change",function(){const selected=Array.from(input.files||[]);input.value="";selected.forEach(function(file){const item={id:++seq,file:file,status:"В очереди",progress:0,xhr:null,cancelled:false};if(!/\\.(pdf|png|jpe?g|webp|tiff?|bmp)$/i.test(file.name)){item.status="Формат не поддерживается";item.progress=0;items.push(item);render();return}if(file.size>'+str(MAX_UPLOAD_MB*1024*1024)+'){item.status="Превышен лимит размера";items.push(item);render();return}items.push(item);render();upload(item)})});'
+            'function upload(item){item.status="Загрузка";const xhr=new XMLHttpRequest(),form=new FormData();item.xhr=xhr;form.append("family_id",family.value);form.append("files",item.file,item.file.name);form.append("ai_consent",document.getElementById("ai-classification-consent")?.checked?"true":"false");xhr.open("POST","/upload");xhr.upload.onprogress=function(e){if(e.lengthComputable){item.progress=Math.round(e.loaded/e.total*100);item.status=item.progress>=100?"Передан · обработка на сервере":"Загрузка";render()}};xhr.onload=function(){item.xhr=null;if(item.cancelled)return;item.progress=100;const body=(xhr.responseText||"").toLowerCase();if(xhr.status>=200&&xhr.status<300){if(body.includes("добавлен во входящие"))item.status="100% · OCR завершён · нужна ручная проверка";else if(body.includes("документ сохранён")||body.includes("файл уже есть в индексе"))item.status="100% · OCR и классификация завершены";else if(body.includes("дубликат")||body.includes("уже сохранён в архиве"))item.status="100% · дубликат";else {item.progress=95;item.status="Передан серверу · результат обработки не подтверждён"}}else {item.progress=Math.min(item.progress,95);item.status="Ошибка HTTP "+xhr.status}render()};xhr.onerror=function(){item.xhr=null;if(!item.cancelled){item.status="Ошибка сети";render()}};xhr.onabort=function(){item.xhr=null};xhr.send(form)}'
+            'document.getElementById("choose-files").addEventListener("click",function(){input.click()});input.addEventListener("change",function(){const selected=Array.from(input.files||[]);input.value="";selected.forEach(function(file){const item={id:++seq,file:file,status:"В очереди",progress:0,xhr:null,cancelled:false};if(!/\\.(pdf|png|jpe?g|webp|tiff?|bmp)$/i.test(file.name)){item.status="Формат не поддерживается";item.progress=0;items.push(item);render();return}if(file.size>'+str(upload_ui_limit_mb*1024*1024)+'){item.status="Превышен лимит размера";items.push(item);render();return}items.push(item);render();upload(item)})});'
             '})();</script>'
         )
     if f:
         fid=f["id"]
-        b.append(f'<div class="card" id="patients-section"><h2>Архив: {html.escape(f["name"])}</h2><p>Хранение документов: {"локально на VPS" if STORAGE_BACKEND == "local" else "Яндекс Диск"}</p>')
-        if STORAGE_BACKEND == "yandex" and not tenancy.disk_connected(fid):
+        b.append(f'<div class="card" id="patients-section"><h2>Архив: {html.escape(f["name"])}</h2><p>Хранение документов: {"локально во временном демо-хранилище" if is_demo_user(uid) else ("локально на VPS" if STORAGE_BACKEND == "local" else "Яндекс Диск")}</p>')
+        if STORAGE_BACKEND == "yandex" and not is_demo_user(uid) and not tenancy.disk_connected(fid):
             b.append(f'<p><a href="/families/{fid}/connect-disk">Подключить Яндекс Диск</a></p>')
         b.append(f'<div class="patient-heading"><h2 id="patients">Пациенты</h2><a class="button-link" href="/families/{fid}/patients/new">＋ Добавить пациента</a></div><div class="patient-grid">')
         ps=db.patients(fid)
@@ -305,7 +444,7 @@ def unified_search(q:str="",family_id:int|None=None,patient:str="",uid:int=Depen
     for d in rows:
         a=d.get("analysis") or {}
         title=display_document_title(d,a)
-        link=f'<p><a href="/families/{fid}/documents/{int(d["id"])}">Открыть оригинал</a></p>' if STORAGE_BACKEND=="local" and d.get("remote") else ""
+        link=f'<p><a href="/families/{fid}/documents/{int(d["id"])}">Открыть оригинал</a></p>' if (STORAGE_BACKEND=="local" or is_demo_user(uid)) and d.get("remote") else ""
         b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Тип: {html.escape(str(d.get("kind") or "не определено"))}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}{link}<p><a href="/families/{fid}/patients/{__import__("urllib.parse",fromlist=["quote"]).quote(chosen["name"],safe="")}">История пациента</a></p><details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape((d.get("text") or "")[:4000])+'</pre></details></div>')
     return page("Поиск по архиву","".join(b))
 
@@ -317,13 +456,17 @@ def archive_settings(family_id:int|None=None,updated:int=0,uid:int=Depends(curre
     family(int(f["id"]),uid)
     role=tenancy.role_for_user(int(f["id"]),uid)
     body=['<h1>Настройки архива</h1><p class="muted">Настройки семейного медицинского архива.</p>']
+    if is_demo_user(uid):
+        body.append('<div class="notice-warning"><strong>Демо-режим.</strong> Временный архив хранится только локально и очищается автоматически примерно через 2 часа.</div>')
     if updated: body.append('<div class="notice-success" role="status">Название архива сохранено.</div>')
     body.append('<form class="card" method="post" action="/settings"><input type="hidden" name="family_id" value="'+str(int(f["id"]))+'"><h2>Название архива</h2><label>Название<input name="name" maxlength="80" required value="'+html.escape(str(f["name"]),quote=True)+'" '+('' if role=="owner" else 'disabled')+'></label>')
     if role=="owner": body.append('<button type="submit">Сохранить название</button>')
     else: body.append('<p class="muted">Переименовывать архив может только владелец.</p>')
     body.append('</form>')
-    body.append('<section class="card"><h2>Хранение документов</h2><p>Текущий режим: '+('Яндекс Диск' if STORAGE_BACKEND=="yandex" else 'локально на VPS')+'</p>')
-    if STORAGE_BACKEND=="yandex":
+    body.append('<section class="card"><h2>Хранение документов</h2><p>Текущий режим: '+('локально во временном демо-хранилище' if is_demo_user(uid) else ('Яндекс Диск' if STORAGE_BACKEND=="yandex" else 'локально на VPS'))+'</p>')
+    if is_demo_user(uid):
+        body.append('<p class="muted">Подключение внешнего хранилища отключено для демо-аккаунта.</p>')
+    elif STORAGE_BACKEND=="yandex":
         body.append('<p>'+('Яндекс Диск подключён.' if tenancy.disk_connected(int(f["id"])) else 'Яндекс Диск ещё не подключён.')+'</p>')
         if not tenancy.disk_connected(int(f["id"])): body.append('<p><a class="button-link" href="/families/'+str(int(f["id"]))+'/connect-disk">Подключить Яндекс Диск</a></p>')
     else:
@@ -341,6 +484,7 @@ def save_archive_settings(family_id:int=Form(...),name:str=Form(...),uid:int=Dep
 
 @app.post("/families")
 def create_family(name:str=Form(...),uid:int=Depends(current_user)):
+    if is_demo_user(uid): raise HTTPException(403,"В демо-режиме доступен один временный архив")
     try: fid=tenancy.create_family(name,uid)
     except ValueError as e: raise HTTPException(400,str(e))
     return home_url(fid)
@@ -348,6 +492,9 @@ def create_family(name:str=Form(...),uid:int=Depends(current_user)):
 @app.post("/families/{fid}/patients")
 def add_patient(fid:int,name:str=Form(...),birth_date:str=Form(""),aliases:str=Form(""),uid:int=Depends(current_user)):
     family(fid,uid)
+    if is_demo_user(uid) and len(db.patients(fid)) >= DEMO_MAX_PATIENTS:
+        raise HTTPException(413, f"В демо можно создать не более {DEMO_MAX_PATIENTS} карточек пациентов")
+    if is_demo_user(uid): tenancy.refresh_demo_expiry(fid)
     from datetime import datetime
     birth_date=(birth_date or "").strip()
     if birth_date:
@@ -403,6 +550,7 @@ def save_patient_page(fid:int,patient:str,name:str=Form(...),birth_date:str=Form
 def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,cleanup_warning:int=0,uid:int=Depends(current_user)):
     family(fid,uid)
     if patient not in db.patients(fid): raise HTTPException(404,"Пациент не найден")
+    upload_ui_limit_mb=min(MAX_UPLOAD_MB, DEMO_MAX_UPLOAD_MB) if is_demo_user(uid) else MAX_UPLOAD_MB
     view = "tree" if view == "tree" else "timeline"
     rows=db.search(fid,patient,q,limit=1000)
     from urllib.parse import quote
@@ -414,10 +562,10 @@ def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,
     b.append(f'<form class="card patient-search" method="get" action="{base}"><label for="patient-q">Поиск по документам пациента</label><div class="row"><input id="patient-q" type="search" name="q" value="{html.escape(q,quote=True)}" placeholder="Например: анализы, УЗИ, выписка"><input type="hidden" name="view" value="{view}"><button type="submit">Найти</button>')
     if q: b.append(f'<a class="button-link" href="{base}?view={view}">Сбросить</a>')
     b.append('</div></form>')
-    if STORAGE_BACKEND == "yandex" and not tenancy.disk_connected(fid):
+    if STORAGE_BACKEND == "yandex" and not is_demo_user(uid) and not tenancy.disk_connected(fid):
         b.append(f'<div class="card"><a href="/families/{fid}/connect-disk">Подключить Яндекс Диск</a></div>')
     else:
-        b.append(f'<div class="card" id="patient-upload"><h3>Добавить документы</h3><form method="post" enctype="multipart/form-data" action="/families/{fid}/patients/{html.escape(patient,quote=True)}/upload"><input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" required><button type="submit">Загрузить и распознать</button></form><small class="muted">PDF и изображения · до {MAX_UPLOAD_MB} МБ на файл</small></div>')
+        b.append(f'<div class="card" id="patient-upload"><h3>Добавить документы</h3><form method="post" enctype="multipart/form-data" action="/families/{fid}/patients/{html.escape(patient,quote=True)}/upload"><input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" required><label style="font-weight:400"><input type="checkbox" name="ai_consent" value="true" style="width:auto;min-height:auto"> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label><button type="submit">Загрузить и распознать</button></form><small class="muted">PDF и изображения · до {upload_ui_limit_mb} МБ на файл</small></div>')
     b.append('<nav class="tabs" aria-label="Вид документов">')
     b.append(f'<a class="tab {"active" if view=="timeline" else ""}" href="{base}?view=timeline&q={quote(q)}">Хронология</a><a class="tab {"active" if view=="tree" else ""}" href="{base}?view=tree&q={quote(q)}">Дерево документов</a></nav>')
     if not rows: b.append('<div class="card"><p>Документы не найдены.</p><p class="muted">Попробуйте изменить запрос или загрузить документ.</p></div>')
@@ -449,7 +597,7 @@ def delete_document(fid:int,doc_id:int,confirm:str=Form(...),uid:int=Depends(cur
     family(fid,uid)
     if confirm != "yes":
         raise HTTPException(400,"Удаление не подтверждено")
-    if STORAGE_BACKEND != "local":
+    if STORAGE_BACKEND != "local" and not is_demo_user(uid):
         raise HTTPException(503,"На текущем этапе поддерживается только локальное хранилище")
     d=db.get_doc(fid,doc_id)
     if not d:
@@ -529,7 +677,7 @@ def delete_document(fid:int,doc_id:int,confirm:str=Form(...),uid:int=Depends(cur
 def view_document_original(fid: int, doc_id: int, uid: int = Depends(current_user)):
     """Serve a private PDF inline after validating family access and its storage path."""
     family(fid, uid)
-    if STORAGE_BACKEND != "local":
+    if STORAGE_BACKEND != "local" and not is_demo_user(uid):
         raise HTTPException(503, "Встроенный просмотр пока поддерживает локальное хранилище")
     d = db.get_doc(fid, doc_id)
     if not d:
@@ -575,7 +723,7 @@ def edit_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
     patient=html.escape(str(d.get("patient") or ""),quote=True)
     body="<p><a href=\"/families/"+str(fid)+"/patients/"+patient+"\">← Назад к документам</a></p>"
     body+="<h2>Редактирование карточки документа</h2><div class=\"card\"><strong>Пациент:</strong> "+html.escape(str(d.get("patient") or ""))+"<br><strong>Исходный файл:</strong> "+html.escape(str(d.get("name") or ""))+"</div>"
-    if STORAGE_BACKEND == "local" and Path(str(d.get("name") or "")).suffix.lower() == ".pdf":
+    if (STORAGE_BACKEND == "local" or is_demo_user(uid)) and Path(str(d.get("name") or "")).suffix.lower() == ".pdf":
         viewer_url = f"/families/{fid}/documents/{doc_id}/original"
         body += (
             '<section class="card"><h3>Просмотр PDF</h3>'
@@ -618,15 +766,25 @@ def save_document_edit(fid:int,doc_id:int,kind:str=Form(...),title:str=Form(...)
     return RedirectResponse("/families/"+str(fid)+"/patients/"+str(d.get("patient") or ""),status_code=303)
 
 @app.post("/upload", response_class=HTMLResponse)
-def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), uid:int=Depends(current_user)):
+def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), ai_consent:bool=Form(False), uid:int=Depends(current_user)):
     """Batch inbox upload: infer patient from OCR, never guess when matching is ambiguous."""
     f=family(family_id,uid)
+    if is_demo_user(uid):
+        if family_id not in {int(x["id"]) for x in tenancy.families_for_user(uid)}:
+            raise HTTPException(403,"Нет доступа к демо-архиву")
+        tenancy.refresh_demo_expiry(family_id)
+    storage_backend = "local" if is_demo_user(uid) else STORAGE_BACKEND
+    upload_limit_mb = min(MAX_UPLOAD_MB, DEMO_MAX_UPLOAD_MB) if is_demo_user(uid) else MAX_UPLOAD_MB
+    if is_demo_user(uid):
+        if len(files) > 5:
+            raise HTTPException(413,"В демо разрешено не более 5 файлов за одну загрузку")
+        enforce_demo_document_quota(family_id, len(files))
     if not files:
         raise HTTPException(400,"Выберите хотя бы один файл")
-    if STORAGE_BACKEND not in {"local","yandex"}:
+    if storage_backend not in {"local","yandex"}:
         raise HTTPException(503,"Неизвестный backend хранения")
-    token=tenancy.get_yadisk_token(family_id) if STORAGE_BACKEND=="yandex" else None
-    if STORAGE_BACKEND=="yandex" and not token:
+    token=tenancy.get_yadisk_token(family_id) if storage_backend=="yandex" else None
+    if storage_backend=="yandex" and not token:
         raise HTTPException(400,"Сначала подключите Яндекс Диск для выбранного архива")
     roster=db.patient_records(family_id)
     if not roster:
@@ -650,14 +808,19 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), uid:
                         chunk=upload_file.file.read(1024*1024)
                         if not chunk: break
                         size+=len(chunk)
-                        if size>MAX_UPLOAD_MB*1024*1024:
+                        if size>upload_limit_mb*1024*1024:
                             break
                         out.write(chunk)
-                if size==0 or size>MAX_UPLOAD_MB*1024*1024:
-                    results.append('<li><strong>'+html.escape(name)+'</strong>: файл пустой или превышает '+str(MAX_UPLOAD_MB)+' МБ; пропущен.</li>')
+                if size==0 or size>upload_limit_mb*1024*1024:
+                    results.append('<li><strong>'+html.escape(name)+'</strong>: файл пустой или превышает '+str(upload_limit_mb)+' МБ; пропущен.</li>')
                     continue
                 text=ocr_file(str(local))
                 analysis=analyze_document(text)
+                if ai_consent and os.getenv("AI_CLASSIFICATION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}:
+                    try:
+                        analysis=classify_with_ai(text, analysis)
+                    except Exception as exc:
+                        logging.warning("AI classification unavailable (%s); retaining local classification", type(exc).__name__)
                 patient=extract_registered_patient(text,roster)
                 document_dob=extract_patient_birth_date(text)
                 # A DOB can disambiguate only when it uniquely matches a registered patient.
@@ -689,7 +852,7 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), uid:
                 ex=normalize_extension(name)
                 stored=f"{Path(format_filename(patient,kind,date,ex)).stem}_{digest[:8]}.{ex}"
                 ocr_stored=Path(stored).stem+".txt"
-                if STORAGE_BACKEND=="local":
+                if storage_backend=="local":
                     saved_path=save_local_file(family_id,patient,stored,local); saved_paths.append(saved_path)
                     ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(text,encoding="utf-8")
                     saved_paths.append(save_local_file(family_id,patient,ocr_stored,ocr_tmp))
@@ -703,13 +866,13 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), uid:
                     with tempfile.TemporaryDirectory() as od:
                         op=Path(od)/"ocr.txt"; op.write_text(text,encoding="utf-8"); disk.upload_file(str(op),oremote)
                 if not db.add_doc(family_id,patient,stored,kind,date,remote,oremote,text,keywords,digest,analysis=analysis):
-                    if STORAGE_BACKEND=="local":
+                    if storage_backend=="local":
                         for candidate in saved_paths:
                             try: candidate.unlink()
                             except FileNotFoundError: pass
                     results.append('<li><strong>'+html.escape(name)+'</strong>: дубликат, запись не добавлена.</li>')
                     continue
-                if STORAGE_BACKEND=="yandex":
+                if storage_backend=="yandex":
                     with tempfile.TemporaryDirectory() as hd:
                         hp=Path(hd)/"history.txt"; hp.write_text(db.history(family_id,patient),encoding="utf-8")
                         disk.upload_file(str(hp),folder+"/history.txt")
@@ -826,6 +989,8 @@ def delete_pending_document(fid:int,pending_id:int,confirm:str=Form(...),uid:int
 @app.post("/families/{fid}/inbox/{pending_id}/assign", response_class=HTMLResponse)
 def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:str=Form(...),title:str=Form(...),date:str=Form(""),uid:int=Depends(current_user)):
     family(fid,uid)
+    storage_backend = "local" if is_demo_user(uid) else STORAGE_BACKEND
+    if is_demo_user(uid): tenancy.refresh_demo_expiry(fid)
     d=db.get_pending_doc(fid,pending_id)
     if not d: raise HTTPException(404,"Документ не найден во входящих")
     if patient not in db.patients(fid): raise HTTPException(400,"Выбранный пациент не найден")
@@ -841,8 +1006,8 @@ def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:st
     if db.document_exists(fid,patient,d["digest"]):
         db.delete_pending_doc(fid,pending_id)
         return RedirectResponse(f"/families/{fid}/inbox",status_code=303)
-    token=tenancy.get_yadisk_token(fid) if STORAGE_BACKEND=="yandex" else None
-    if STORAGE_BACKEND=="yandex" and not token: raise HTTPException(400,"Сначала подключите Яндекс Диск")
+    token=tenancy.get_yadisk_token(fid) if storage_backend=="yandex" else None
+    if storage_backend=="yandex" and not token: raise HTTPException(400,"Сначала подключите Яндекс Диск")
     analysis=d["analysis"] or {}
     analysis.update({"primary_type":kind,"primary_category":DOCUMENT_TAXONOMY.get(kind,{}).get("category","не определено"),
       "taxonomy_path":[DOCUMENT_TAXONOMY.get(kind,{}).get("category","не определено"),kind] if kind in DOCUMENT_TAXONOMY else [],
@@ -854,7 +1019,7 @@ def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:st
     with tempfile.TemporaryDirectory() as td:
         local=Path(td)/Path(d["name"]).name
         local.write_bytes(d["file_bytes"])
-        if STORAGE_BACKEND=="local":
+        if storage_backend=="local":
             remote_path=save_local_file(fid,patient,stored,local)
             ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(d["text"],encoding="utf-8")
             ocr_path=save_local_file(fid,patient,ocr_stored,ocr_tmp)
@@ -868,17 +1033,22 @@ def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:st
         if not db.add_doc(fid,patient,stored,kind,date,remote,oremote,d["text"],extract_keywords(d["text"],analysis),d["digest"],analysis=analysis):
             raise HTTPException(409,"Не удалось добавить документ в историю; запись во входящих сохранена")
         db.delete_pending_doc(fid,pending_id)
-        if STORAGE_BACKEND=="yandex":
+        if storage_backend=="yandex":
             hp=Path(td)/"history.txt"; hp.write_text(db.history(fid,patient),encoding="utf-8"); disk.upload_file(str(hp),folder+"/history.txt")
     return RedirectResponse(f"/families/{fid}/patients/{patient}",status_code=303)
 
 @app.post("/families/{fid}/patients/{patient}/upload",response_class=HTMLResponse)
-def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current_user)):
+def upload(fid:int,patient:str,file:UploadFile=File(...),ai_consent:bool=Form(False),uid:int=Depends(current_user)):
     family(fid,uid)
+    storage_backend = "local" if is_demo_user(uid) else STORAGE_BACKEND
+    upload_limit_mb = min(MAX_UPLOAD_MB, DEMO_MAX_UPLOAD_MB) if is_demo_user(uid) else MAX_UPLOAD_MB
+    if is_demo_user(uid):
+        tenancy.refresh_demo_expiry(fid)
+        enforce_demo_document_quota(fid, 1)
     if patient not in db.patients(fid): raise HTTPException(404,"Пациент не найден")
-    if STORAGE_BACKEND not in {"local","yandex"}: raise HTTPException(503,"Неизвестный backend хранения")
-    token=tenancy.get_yadisk_token(fid) if STORAGE_BACKEND == "yandex" else None
-    if STORAGE_BACKEND == "yandex" and not token: raise HTTPException(400,"Сначала подключите Яндекс Диск")
+    if storage_backend not in {"local","yandex"}: raise HTTPException(503,"Неизвестный backend хранения")
+    token=tenancy.get_yadisk_token(fid) if storage_backend == "yandex" else None
+    if storage_backend == "yandex" and not token: raise HTTPException(400,"Сначала подключите Яндекс Диск")
     name=Path(file.filename or "document.bin").name
     ext=Path(name).suffix.lower()
     if ext not in ALLOWED: raise HTTPException(400,"Формат файла не поддерживается")
@@ -890,12 +1060,17 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current
                 chunk=file.file.read(1024*1024)
                 if not chunk: break
                 size+=len(chunk)
-                if size>MAX_UPLOAD_MB*1024*1024: raise HTTPException(413,f"Файл больше {MAX_UPLOAD_MB} МБ")
+                if size>upload_limit_mb*1024*1024: raise HTTPException(413,f"Файл больше {upload_limit_mb} МБ")
                 out.write(chunk)
         saved_paths=[]
         try:
             text=ocr_file(str(local))
             analysis=analyze_document(text)
+            if ai_consent and os.getenv("AI_CLASSIFICATION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}:
+                try:
+                    analysis=classify_with_ai(text, analysis)
+                except Exception as exc:
+                    logging.warning("AI classification unavailable (%s); retaining local classification", type(exc).__name__)
             kind=analysis["primary_type"]
             keywords=extract_keywords(text,analysis)
             date=parse_date_from_text(text)
@@ -905,7 +1080,7 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current
                 return page("Дубликат",f'<p>Этот файл уже сохранён в архиве.</p><p><a href="/families/{fid}/patients/{html.escape(patient,quote=True)}">Назад к пациенту</a></p>')
             stored=f"{Path(format_filename(patient,kind,date,ex)).stem}_{digest[:8]}.{ex}"
             ocr_stored=Path(stored).stem+".txt"
-            if STORAGE_BACKEND == "local":
+            if storage_backend == "local":
                 saved_path=save_local_file(fid,patient,stored,local); saved_paths.append(saved_path)
                 ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(text,encoding="utf-8")
                 saved_paths.append(save_local_file(fid,patient,ocr_stored,ocr_tmp))
@@ -919,12 +1094,12 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current
                 with tempfile.TemporaryDirectory() as od:
                     op=Path(od)/"ocr.txt"; op.write_text(text,encoding="utf-8"); disk.upload_file(str(op),oremote)
             if not db.add_doc(fid,patient,stored,kind,date,remote,oremote,text,keywords,digest,analysis=analysis):
-                if STORAGE_BACKEND == "local":
+                if storage_backend == "local":
                     for candidate in saved_paths:
                         try: candidate.unlink()
                         except FileNotFoundError: pass
                 return page("Дубликат",'<p>Файл уже есть в индексе.</p><p><a href="/">На главную</a></p>')
-            if STORAGE_BACKEND == "yandex":
+            if storage_backend == "yandex":
                 with tempfile.TemporaryDirectory() as hd:
                     hp=Path(hd)/"history.txt"; hp.write_text(db.history(fid,patient),encoding="utf-8"); disk.upload_file(str(hp),folder+"/history.txt")
             status="Требуется проверить тип вручную." if analysis["review_required"] else "Тип определён автоматически; проверьте по оригиналу."
@@ -932,7 +1107,7 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current
             return page("Сохранено",f'<p>Документ сохранён.</p><p>Основной тип: {html.escape(kind)}.</p><p>Типы документа: {html.escape(other_types)}.</p><p>Уверенность: {html.escape(analysis["confidence"])}.</p><p>{html.escape(status)}</p><p><a href="/families/{fid}/patients/{html.escape(patient,quote=True)}">Назад к пациенту</a></p>')
         except HTTPException: raise
         except Exception as e:
-            if STORAGE_BACKEND == "local":
+            if storage_backend == "local":
                 for candidate in saved_paths:
                     try: candidate.unlink()
                     except FileNotFoundError: pass
@@ -941,6 +1116,7 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),uid:int=Depends(current
 
 @app.get("/families/{fid}/connect-disk")
 def connect_disk(fid:int,uid:int=Depends(current_user)):
+    if is_demo_user(uid): raise HTTPException(403,"В демо-режиме доступно только локальное временное хранилище")
     family(fid,uid)
     if tenancy.role_for_user(fid,uid) not in ("owner","admin"): raise HTTPException(403,"Нет прав")
     cid=os.getenv("YANDEX_CLIENT_ID","").strip(); secret=os.getenv("YANDEX_CLIENT_SECRET","").strip(); uri=os.getenv("YANDEX_REDIRECT_URI","").strip()

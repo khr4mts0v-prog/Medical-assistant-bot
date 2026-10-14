@@ -293,3 +293,14 @@ def delete_doc(fid, doc_id):
     with connect() as c:
         cur=c.execute("DELETE FROM docs WHERE family_id=? AND id=?", (int(fid), int(doc_id)))
         return cur.rowcount == 1
+
+
+def family_document_count(fid):
+    """Count indexed and pending documents for one isolated family tenant."""
+    with connect() as c:
+        row = c.execute(
+            "SELECT (SELECT COUNT(*) FROM docs WHERE family_id=?) + "
+            "(SELECT COUNT(*) FROM pending_docs WHERE family_id=?) AS n",
+            (int(fid), int(fid)),
+        ).fetchone()
+        return int(row["n"])

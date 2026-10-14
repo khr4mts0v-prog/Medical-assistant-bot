@@ -45,6 +45,31 @@ def _page(title, body, status=200):
         status_code=status,
     )
 
+ARCHIVE_INTENT_TERMS = re.compile(
+    r"\b(медицин\w*|здоров\w*|болезн\w*|диагноз\w*|симптом\w*|анализ\w*|кров\w*|моч\w*|"
+    r"гемоглобин|ферритин|лейкоцит\w*|эритроцит\w*|тромбоцит\w*|гематокрит|билирубин|креатинин|"
+    r"узи|экг|мрт|кт|флг|флюорограф\w*|рентген\w*|врач\w*|лечени\w*|препарат\w*|лекарств\w*|"
+    r"назначени\w*|рецепт\w*|привив\w*|вакцин\w*|беремен\w*|род\w*|реб[её]н\w*|пациент\w*|"
+    r"документ\w*|архив\w*|выписк\w*|эпикриз\w*|медкарт\w*|анем\w*|давлени\w*|пульс|температур\w*)\b", re.I)
+
+OFF_TOPIC_TERMS = re.compile(
+    r"\b(погод\w*|weather|политик\w*|выбор\w*|парти\w*|геополит\w*|"
+    r"программирован\w*|программ\w+ на|programming|python|javascript|typescript|java|c\+\+|code|script|код|скрипт|компилятор|"
+    r"html|css|api|git|linux|windows|сервер|politics|election|анекдот\w*|joke|мем\w*|фильм\w*|movie|сериал\w*|игр\w*|game|"
+    r"word|excel|powerpoint|zip|rar|winrar|news|sport\w*|футбол|баскетбол|теннис|travel|путешеств\w*|туризм|отел\w*|"
+    r"доллар\w*|евро|валют\w*|финанс\w*|акци\w*|бирж\w*|bitcoin|crypto|shopping|купить|покупк\w*|price|цен\w*|скидк\w*|"
+    r"ресторан\w*|кулинар\w*|рецепт\s+(?:борщ\w*|пицц\w*|блюд\w*|торт\w*)|автомобил\w*|машин\w*)\b", re.I)
+
+def _is_archive_related(question):
+    """No provider call is made for clearly unrelated or programming/politics requests."""
+    q = " ".join(str(question or "").casefold().replace("ё", "е").split())
+    if not q or len(q) > 1200 or OFF_TOPIC_TERMS.search(q):
+        return False
+    return bool(ARCHIVE_INTENT_TERMS.search(q))
+
+def _off_topic_response():
+    return "Я отвечаю только на вопросы о медицинских документах, результатах обследований и анализов, истории здоровья и поиске по семейному архиву. Погоду, политику, программирование и другие посторонние темы я не обрабатываю."
+
 def _parse_date(value):
     value = str(value or "").strip()
     for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
@@ -214,6 +239,8 @@ def install_assistant_routes(app, current_user, family_guard):
         question = " ".join((question or "").split())[:1200]
         if not question:
             raise HTTPException(400, "Введите вопрос")
+        if not _is_archive_related(question):
+            return _page("Вопрос вне тематики", '<div class="card">' + html.escape(_off_topic_response()) + '</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться к медицинскому вопросу</a></p>', 400)
         if consent != "yes":
             return _page("Требуется согласие", '<div class="card">Вопрос и медицинские фрагменты не отправлялись нейросети. Чтобы продолжить, вернитесь и явно подтвердите согласие.</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться</a></p>', 400)
         try:
@@ -276,6 +303,8 @@ def install_assistant_routes(app, current_user, family_guard):
         family_guard(fid, uid)
         if not query:
             raise HTTPException(400, "Введите запрос")
+        if not _is_archive_related(query):
+            return JSONResponse({"error": _off_topic_response(), "mode": "off_topic"}, status_code=400)
 
         people = db.patients(fid)
         qfold = query.casefold().replace("ё", "е")
