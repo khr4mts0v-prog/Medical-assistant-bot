@@ -15,6 +15,8 @@ from utils import format_filename, normalize_extension, parse_date_from_text, sa
 from document_metadata import extract_registered_patient, extract_patient_birth_date
 
 app=FastAPI(title="Medical Archive", docs_url=None, redoc_url=None)
+from react_ui import install_react_ui
+install_react_ui(app)
 
 @app.get("/manifest.webmanifest")
 def pwa_manifest():
