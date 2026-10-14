@@ -15,6 +15,28 @@ from utils import format_filename, normalize_extension, parse_date_from_text, sa
 from document_metadata import extract_registered_patient, extract_patient_birth_date
 
 app=FastAPI(title="Medical Archive", docs_url=None, redoc_url=None)
+
+@app.get("/manifest.webmanifest")
+def pwa_manifest():
+    return Response(
+        '{"name":"Медицинский архив","short_name":"Медархив","description":"Личный семейный архив медицинских документов","lang":"ru","start_url":"/","scope":"/","display":"standalone","background_color":"#f4f7f5","theme_color":"#16794b","icons":[{"src":"/app-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}',
+        media_type="application/manifest+json",
+        headers={"Cache-Control":"no-cache"},
+    )
+
+@app.get("/app-icon.svg")
+def pwa_icon():
+    return Response(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#16794b"/><path d="M224 112h64v112h112v64H288v112h-64V288H112v-64h112z" fill="#fff"/></svg>',
+        media_type="image/svg+xml",
+        headers={"Cache-Control":"public, max-age=86400"},
+    )
+
+@app.get("/sw.js")
+def pwa_service_worker():
+    # Deliberately network-only: never cache private medical records or OCR text.
+    script='self.addEventListener("install",e=>self.skipWaiting());self.addEventListener("activate",e=>e.waitUntil(self.clients.claim()));self.addEventListener("fetch",e=>{if(e.request.method!=="GET")return;e.respondWith(fetch(e.request));});'
+    return Response(script,media_type="application/javascript",headers={"Cache-Control":"no-cache","Service-Worker-Allowed":"/"})
 security=HTTPBasic()
 WEB_USERNAME=os.getenv("WEB_USERNAME","").strip()
 WEB_PASSWORD=os.getenv("WEB_PASSWORD","")
@@ -34,7 +56,7 @@ def current_user(credentials: HTTPBasicCredentials=Depends(security))->int:
     return -(int(hashlib.sha256(WEB_USERNAME.encode()).hexdigest()[:12],16) or 1)
 
 def page(title,body,status=200):
-    return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
+    return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#16794b"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Медархив"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/app-icon.svg" type="image/svg+xml"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
 :root{color-scheme:light;--bg:#f4f7f5;--fg:#17231d;--card:#ffffff;--line:#e0e8e3;--muted:#65756b;--field:#f8faf9;--accent:#16794b;--accent-strong:#0e633b;--accent-soft:#e7f5ec;--warn:#a76800;--danger:#b42318;--shadow:0 5px 22px rgba(25,55,38,.055);--radius:18px}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -106,7 +128,7 @@ button[type=submit]:hover{background:var(--accent-strong)}
 #archive-search{flex:1 1 220px;width:auto}
 hr{border:0;border-top:1px solid var(--line);margin:18px 0}
 @media(max-width:600px){body{padding:17px 14px 34px}.home-actions{gap:10px}.home-action{aspect-ratio:1.05/1;min-height:120px;padding:11px;border-radius:17px;font-size:.96rem}.card{padding:16px;margin:12px 0;border-radius:15px}.home-search{padding:13px;margin-bottom:14px}.home-search .search-row{gap:7px}.home-search button{padding-inline:12px;font-size:.93rem}.document-row{align-items:flex-start;flex-direction:column}.tabs{gap:0}.tab{padding:10px 9px;font-size:.92rem}.timeline-date{margin-top:21px}.pending-thumbs{gap:8px}}
-@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}</style></head><body><h1>Медицинский архив</h1>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></body></html>""",status_code=status)
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}</style></head><body><h1>Медицинский архив</h1><script>if("serviceWorker" in navigator && location.protocol==="https:"){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}))}</script>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></body></html>""",status_code=status)
 
 def display_document_title(document, analysis):
     saved=(analysis or {}).get("display_title")
