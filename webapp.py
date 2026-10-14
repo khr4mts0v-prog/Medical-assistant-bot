@@ -3,7 +3,7 @@ import hashlib, hmac, html, logging, os, tempfile
 from pathlib import Path
 from urllib.parse import urlencode
 import requests
-from fastapi import FastAPI, Depends, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, Depends, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import database as db, tenancy
@@ -167,7 +167,11 @@ def explicit_document_date(text):
     return ""
 
 @app.get("/",response_class=HTMLResponse)
-def home(family_id:int|None=None,uid:int=Depends(current_user)):
+def home(request:Request,family_id:int|None=None,uid:int=Depends(current_user)):
+    # Browser entry serves the React shell; same-origin SPA requests ask for legacy HTML fragments.
+    if request.headers.get("x-requested-with") != "MedicalArchiveSPA":
+        index=Path(__file__).resolve().parent / "frontend" / "dist" / "index.html"
+        if index.is_file(): return FileResponse(index,media_type="text/html",headers={"Cache-Control":"no-cache"})
     fs=tenancy.families_for_user(uid)
     if family_id is not None and not tenancy.role_for_user(family_id,uid): raise HTTPException(403,"Нет доступа")
     f=tenancy.get_family(family_id) if family_id is not None else (tenancy.get_family(fs[0]["id"]) if fs else None)
