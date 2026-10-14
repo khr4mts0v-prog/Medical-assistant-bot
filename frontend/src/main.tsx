@@ -17,6 +17,15 @@ function extractContent(documentText: string): string {
   main.querySelector('#sidebar-backdrop')?.remove();
   main.querySelectorAll('script').forEach(node => node.remove());
   main.querySelector('#family-settings')?.remove();
+  if (!main.querySelector('.home-welcome')) {
+    main.querySelectorAll('a').forEach(a => {
+      if (/^←\\s*(к архиву|назад)$/i.test((a.textContent || '').trim())) a.remove();
+    });
+    const patientHeading = main.querySelector('.patient-heading');
+    if (patientHeading) patientHeading.classList.add('screen-heading');
+    main.querySelectorAll('form.card, form:not(.home-search)').forEach(form => form.classList.add('app-form-card'));
+    main.querySelectorAll('.tabs, .tab-row, nav.tabs').forEach(tabs => tabs.classList.add('app-tabs'));
+  }
   const welcome = main.querySelector('.home-welcome');
   const search = main.querySelector('form.home-search');
   const upload = main.querySelector('#quick-upload');
