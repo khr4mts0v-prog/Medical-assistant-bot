@@ -378,7 +378,7 @@ def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,
     from urllib.parse import quote
     safe_patient=quote(patient,safe="")
     base=f"/families/{fid}/patients/{safe_patient}"
-    b=[f'<p><a href="/?family_id={fid}">← К архиву</a></p>',f'<div class="patient-heading"><div><h2>{html.escape(patient)}</h2><p class="muted">Документов: {len(rows)}</p></div><a class="button-link" href="#patient-upload">＋ Добавить документы</a></div>']
+    b=[f'<p><a href="/?family_id={fid}">← К архиву</a></p>',f'<div class="patient-heading"><div><h2>{html.escape(patient)}</h2><p class="muted">Документов: {len(rows)}</p></div><div class="row"><a class="button-link" href="/families/{fid}/patients/{safe_patient}/edit">✎ Редактировать</a><a class="button-link" href="#patient-upload">＋ Добавить документы</a></div></div>']
     if deleted: b.append('<div class="notice-success" role="status">Документ удалён из архива.</div>')
     if cleanup_warning: b.append('<div class="notice-warning" role="status">Запись удалена, но временный файл не удалось окончательно очистить. Проверьте журнал приложения.</div>')
     b.append(f'<form class="card patient-search" method="get" action="{base}"><label for="patient-q">Поиск по документам пациента</label><div class="row"><input id="patient-q" type="search" name="q" value="{html.escape(q,quote=True)}" placeholder="Например: анализы, УЗИ, выписка"><input type="hidden" name="view" value="{view}"><button type="submit">Найти</button>')
