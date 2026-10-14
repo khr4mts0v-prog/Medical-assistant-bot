@@ -88,3 +88,55 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 @media(min-width:720px){.main-area{padding:22px 34px 54px}.topbar{margin-bottom:28px}.legacy-content .patient-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.legacy-content .document-row{flex-direction:row;align-items:center}.legacy-content .home-search .search-row{gap:10px}}
 @media(max-width:380px){.main-area{padding:12px 12px 30px}.topbar{gap:8px;margin-bottom:18px}.topbar-title{font-size:13px}.legacy-content .home-search{padding:8px}.legacy-content .home-search button{padding:9px 10px}.legacy-content .home-welcome h1{font-size:30px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+/* Polished mobile home screen */
+:root{--bg:#f2f6ff;--card:#fff;--line:#e2ebfa;--blue:#3478e5;--blue-dark:#205fc5;--blue-soft:#edf4ff;--radius:22px}
+body{font-size:16px;background:linear-gradient(180deg,#f2f6ff 0%,#f5f8ff 100%)}
+.main-area{max-width:900px;padding:18px 20px 44px}
+.topbar{gap:14px;margin-bottom:34px;min-height:60px}
+.menu-button{width:54px;height:54px;flex-basis:54px;border-radius:19px;border:1px solid #dce8fb;box-shadow:0 5px 18px #315f9910}
+.topbar-title{font-size:clamp(17px,2.4vw,24px);font-weight:800;letter-spacing:-.04em}
+.legacy-content .home-welcome{margin:0 0 25px}
+.legacy-content .home-welcome h1{font-size:clamp(34px,7vw,52px);line-height:1.07;letter-spacing:-.065em;margin:0 0 10px;color:#172d50}
+.legacy-content .home-welcome p{font-size:clamp(17px,3.4vw,23px);line-height:1.45;color:#7b8eaa}
+.legacy-content .home-search{padding:12px;border-radius:22px;border:1px solid #e1eafa;box-shadow:0 10px 28px #4778b30c;margin-bottom:16px}
+.legacy-content .home-search .search-row{align-items:center;gap:10px}
+.legacy-content .home-search input[type=search],.legacy-content .home-search input[type=text]{min-height:58px;padding:15px 17px;border-radius:16px;border-color:#e0e9f8;background:#f8fbff;font-size:16px}
+.legacy-content .home-search button,.legacy-content button[type=submit]{min-height:54px;padding:13px 22px;border:1px solid #3478e5;border-radius:16px;background:linear-gradient(135deg,#438cf4,#2e6fda);color:#fff;font-size:16px;font-weight:750;box-shadow:0 7px 16px #3478e52a;transition:transform .16s ease,box-shadow .16s ease,filter .16s ease}
+.legacy-content .home-search button:active,.legacy-content button[type=submit]:active,.legacy-content .home-action:active{transform:scale(.985)}
+.legacy-content #quick-upload{border:0!important;border-radius:23px;background:linear-gradient(115deg,#4796ff 0%,#2f72e4 100%)!important;box-shadow:0 12px 24px #3478e52b!important;overflow:hidden;margin:0 0 17px}
+.legacy-content #quick-upload label{position:relative;justify-content:flex-start;gap:16px;min-height:122px;padding:24px;color:#fff;text-align:left;font-size:19px;font-weight:800;line-height:1.35}
+.legacy-content #quick-upload label:before{content:"＋";display:grid;place-items:center;flex:0 0 62px;width:62px;height:62px;margin:0;border-radius:20px;background:#ffffff30;color:#fff;font-size:38px;font-weight:400}
+.legacy-content #quick-upload label:after{content:"›";margin-left:auto;font-size:36px;font-weight:400;opacity:.95}
+.legacy-content .home-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 20px}
+.legacy-content .home-action{position:relative;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:8px;min-width:0;min-height:145px;padding:16px 13px;border:1px solid #e5edfb;border-radius:22px;background:#fff;color:#172d50;text-decoration:none;font-size:15px;font-weight:750;box-shadow:0 7px 20px #315f990b;overflow:hidden}
+.legacy-content .home-action:before{content:"";display:block;width:42px;height:42px;border-radius:15px;background:#e9f1ff}
+.legacy-content .home-action:after{content:"›";position:absolute;top:17px;right:13px;color:#8396b4;font-size:24px}
+.legacy-content .home-action[href*="search"]{background:#fff}
+.legacy-content .home-action[href*="inbox"]{grid-column:1/-1;order:0;min-height:88px;flex-direction:row;align-items:center;justify-content:flex-start;padding:18px 20px;border:1px solid #ffebc4;background:linear-gradient(110deg,#fff8e9,#fffdf8);color:#183154;box-shadow:0 7px 18px #ba85200e}
+.legacy-content .home-action[href*="inbox"]:before{flex:0 0 48px;width:48px;height:48px;background:#ffedd0}
+.legacy-content .home-action[href*="inbox"]:after{top:27px;color:#c17b15}
+.legacy-content #patients-section{margin-top:20px;padding:22px 17px;border:1px solid #e3ecfa;border-radius:25px;background:#fff;box-shadow:0 9px 26px #315f990b}
+.legacy-content #patients-section>h2{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:27px;letter-spacing:-.05em;margin:0 0 16px}
+.legacy-content #patients{margin-top:0}
+.legacy-content #patients h2{display:none}
+.legacy-content #patients-section a[href*="patient"],.legacy-content #patients-section a[href*="family"]{text-decoration:none}
+.legacy-content .patient-grid{gap:10px}
+.legacy-content .patient-card{padding:15px;border-radius:20px;border-color:#e6eefb;box-shadow:0 5px 16px #315f9908;transition:border-color .15s,transform .15s}
+.legacy-content .patient-card:hover{border-color:#b7d0f7;transform:translateY(-1px)}
+.legacy-content .patient-avatar{flex-basis:52px;width:52px;height:52px;font-size:20px}
+.legacy-content .card{border-radius:21px;box-shadow:0 7px 22px #315f990a}
+.legacy-content input,.legacy-content select,.legacy-content textarea{border-radius:14px}
+.legacy-content button,.legacy-content .button-link{border-radius:14px;transition:filter .15s,transform .15s}
+.legacy-content button:hover,.legacy-content .button-link:hover{filter:brightness(.98)}
+@media(max-width:480px){
+ .main-area{padding:16px 18px 34px}
+ .topbar{margin-bottom:30px}
+ .legacy-content .home-search .search-row{flex-direction:column;align-items:stretch}
+ .legacy-content .home-search button{align-self:flex-start}
+ .legacy-content .home-actions{gap:8px}
+ .legacy-content .home-action{min-height:130px;padding:13px 10px;border-radius:19px;font-size:14px}
+ .legacy-content .home-action[href*="inbox"]{min-height:80px;padding:15px}
+ .legacy-content #patients-section{padding:19px 14px}
+}
+@media(prefers-reduced-motion:reduce){.legacy-content .patient-card,.legacy-content button{transition:none}}
