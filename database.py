@@ -94,7 +94,7 @@ def update_patient_profile(fid, old_name, new_name, birth_date=None, aliases=Non
     new_name=" ".join((new_name or "").split()).strip()[:100]
     if not old_name or not new_name:
         raise ValueError("Имя пациента не может быть пустым")
-    alias_values=_clean_aliases(new_name, aliases or [])
+    alias_values=_clean_aliases(new_name, [old_name] + list(aliases or []))
     encrypted=cipher().encrypt(json.dumps(alias_values,ensure_ascii=False).encode("utf-8"))
     with connect() as c:
         row=c.execute("SELECT id FROM patients WHERE family_id=? AND name=? COLLATE NOCASE",(int(fid),old_name)).fetchone()
