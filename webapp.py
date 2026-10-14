@@ -35,7 +35,73 @@ def current_user(credentials: HTTPBasicCredentials=Depends(security))->int:
 
 def page(title,body,status=200):
     return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
-:root{color-scheme:light dark;--bg:#fff;--fg:#171717;--card:#fff;--line:#d1d5db;--muted:#626262;--field:#fff;--accent:#166534;--warn:#b8860b} @media(prefers-color-scheme:dark){:root{--bg:#101114;--fg:#f2f2f2;--card:#191b20;--line:#3c4048;--muted:#b4b7bf;--field:#22252b;--accent:#4ade80;--warn:#eab308}}*{box-sizing:border-box}body{max-width:850px;margin:auto;padding:18px;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}h1{font-size:1.5rem}h2{font-size:1.15rem}.card{border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0;background:var(--card)}input,select,button{font:inherit;max-width:100%;padding:9px;margin:4px 0;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--fg)}button{cursor:pointer}input[type=text],input[type=search]{width:min(100%,440px)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.muted{color:var(--muted)}.warn{border-left:4px solid var(--warn);padding:8px 12px}a{overflow-wrap:anywhere;color:inherit}.home-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0}.home-action{display:flex;aspect-ratio:1/0.82;align-items:center;justify-content:center;min-height:125px;padding:12px;border-radius:16px;border:1px solid var(--line);background:var(--card);text-align:center;text-decoration:none;font-weight:700;font-size:1.02rem}.home-action.primary{background:var(--accent);color:#fff;border-color:var(--accent)}.pending-thumbs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}.pending-thumb{display:block;min-width:0;text-decoration:none}.pending-thumb img,.file-thumb{display:flex;width:100%;height:90px;object-fit:cover;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;background:var(--field)}.pending-thumb span:last-child{display:block;font-size:.78rem;overflow-wrap:anywhere;max-height:2.6em;overflow:hidden}.pending-more{align-self:center}.preview-image{display:block;width:100%;max-height:60vh;object-fit:contain;border:1px solid var(--line);border-radius:10px;margin:12px 0}.upload-item{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}@media(max-width:520px){body{padding:12px}.home-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.home-action{min-height:125px;font-size:.95rem;padding:8px}.card{padding:12px}}.upload-top{display:flex;gap:10px;align-items:center}.upload-name{flex:1;min-width:0;overflow-wrap:anywhere}.upload-remove{font-size:22px;line-height:1;min-width:42px}.upload-track{height:7px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:9px}.upload-fill{height:100%;width:0;background:var(--accent);transition:width .12s}.upload-status{font-size:.9rem;color:var(--muted)}.patient-heading{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.button-link{display:inline-block;border:1px solid var(--line);border-radius:8px;padding:8px 11px;text-decoration:none}.tabs{display:flex;gap:8px;border-bottom:1px solid var(--line);margin:14px 0}.tab{padding:10px 13px;text-decoration:none;border-bottom:3px solid transparent}.tab.active{border-color:var(--accent);font-weight:700}.patient-search label{display:block;font-weight:600}.timeline-date{margin:20px 0 8px}.document-row{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px;border:1px solid var(--line);border-radius:10px;margin:8px 0;background:var(--card)}.document-main{min-width:0;overflow-wrap:anywhere}.tree-group{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}.tree-group summary{cursor:pointer;font-weight:700}.notice-success{border-left:4px solid #16865b;padding:10px 14px;background:var(--card);border-radius:8px}.danger{border-color:#b91c1c;color:#b91c1c}@media(max-width:520px){.document-row{align-items:flex-start;flex-direction:column}.tabs{gap:2px}.tab{padding:9px 7px}} </style></head><body><h1>Медицинский архив</h1>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></body></html>""",status_code=status)
+:root{color-scheme:light dark;--bg:#f5f7f8;--fg:#18212b;--card:#ffffff;--line:#dce3e7;--muted:#64727e;--field:#f8fafb;--accent:#168653;--accent-strong:#087443;--accent-soft:#e4f6ec;--warn:#a76800;--danger:#b42318;--shadow:0 8px 24px rgba(25,45,55,.055);--radius:18px}
+@media(prefers-color-scheme:dark){:root{--bg:#101316;--fg:#f1f5f7;--card:#191e23;--line:#303941;--muted:#a8b3bc;--field:#20262c;--accent:#42d88a;--accent-strong:#6be6a5;--accent-soft:#173b2a;--warn:#f2c45d;--danger:#ff8d86;--shadow:0 8px 24px rgba(0,0,0,.16)}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{max-width:900px;margin:0 auto;padding:28px 22px 48px;font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--fg);letter-spacing:-.012em}
+body>h1{font-size:clamp(1.7rem,4vw,2.35rem);line-height:1.18;letter-spacing:-.045em;margin:22px 0 28px;font-weight:780}
+h2{font-size:1.3rem;line-height:1.3;letter-spacing:-.025em;margin:0 0 14px}
+h3{font-size:1.08rem;line-height:1.35;margin:0 0 8px}
+p{margin:10px 0 14px}
+small{line-height:1.45}
+.card{border:1px solid var(--line);border-radius:var(--radius);padding:22px;margin:16px 0;background:var(--card);box-shadow:var(--shadow)}
+input,select,button{font:inherit;max-width:100%;padding:12px 15px;margin:5px 0;border:1px solid var(--line);border-radius:12px;background:var(--field);color:var(--fg);min-height:46px}
+input:focus,select:focus,button:focus-visible,a:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 35%,transparent);outline-offset:2px}
+button{cursor:pointer;font-weight:620;transition:transform .15s ease,border-color .15s ease,background .15s ease}
+button:hover{border-color:var(--accent)}
+button:active{transform:scale(.985)}
+input[type=text],input[type=search],input[type=date],input[type=file],select{width:100%}
+input[type=checkbox],input[type=radio]{width:18px;min-height:18px;accent-color:var(--accent)}
+label{font-weight:620}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--muted)}
+.warn{border-left:4px solid var(--warn);padding:12px 16px;background:var(--card);border-radius:0 12px 12px 0}
+a{overflow-wrap:anywhere;color:inherit;text-underline-offset:3px}
+a:hover{color:var(--accent)}
+.home-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:18px 0 22px}
+.home-action{display:flex;aspect-ratio:1.12/1;align-items:center;justify-content:center;min-height:145px;padding:18px;border-radius:22px;border:1px solid var(--line);background:var(--card);text-align:center;text-decoration:none;font-weight:720;font-size:clamp(1rem,2.8vw,1.2rem);line-height:1.35;box-shadow:var(--shadow);transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}
+.home-action:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:0 12px 28px rgba(25,45,55,.09);color:var(--fg)}
+.home-action.primary{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 8px 22px color-mix(in srgb,var(--accent) 22%,transparent)}
+.home-action.primary:hover{background:var(--accent-strong);color:#fff}
+#quick-upload{scroll-margin-top:16px}
+.pending-thumbs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0}
+.pending-thumb{display:block;min-width:0;text-decoration:none}
+.pending-thumb img,.file-thumb{display:flex;width:100%;height:110px;object-fit:cover;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:12px;background:var(--field)}
+.pending-thumb span:last-child{display:block;font-size:.82rem;overflow-wrap:anywhere;max-height:2.6em;overflow:hidden;margin-top:5px}
+.pending-more{align-self:center}
+.preview-image{display:block;width:100%;max-height:60vh;object-fit:contain;border:1px solid var(--line);border-radius:14px;margin:14px 0;background:var(--field)}
+.upload-item{border:1px solid var(--line);border-radius:14px;padding:14px;margin:12px 0;background:var(--field)}
+.upload-top{display:flex;gap:10px;align-items:center}
+.upload-name{flex:1;min-width:0;overflow-wrap:anywhere}
+.upload-remove{font-size:22px;line-height:1;min-width:42px;padding:5px}
+.upload-track{height:8px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:10px}
+.upload-fill{height:100%;width:0;background:var(--accent);transition:width .12s}
+.upload-status{font-size:.9rem;color:var(--muted)}
+.patient-heading{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.button-link{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:11px;padding:10px 14px;min-height:44px;text-decoration:none;font-weight:620;background:var(--card)}
+.button-link:hover{border-color:var(--accent);color:var(--accent)}
+.tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin:22px 0 18px;overflow-x:auto}
+.tab{flex:0 0 auto;padding:12px 16px;text-decoration:none;border-bottom:3px solid transparent;color:var(--muted);font-weight:620;white-space:nowrap}
+.tab.active{border-color:var(--accent);color:var(--fg);font-weight:760}
+.patient-search label{display:block;font-weight:700;margin-bottom:6px}
+.timeline-date{margin:26px 0 10px;font-size:1.25rem;letter-spacing:-.025em}
+.document-row{display:flex;gap:14px;align-items:center;justify-content:space-between;padding:16px;border:1px solid var(--line);border-radius:14px;margin:10px 0;background:var(--card);transition:border-color .15s ease}
+.document-row:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.document-main{min-width:0;overflow-wrap:anywhere}
+.tree-group{border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0;background:var(--card)}
+.tree-group summary{cursor:pointer;font-weight:720;padding:3px 0}
+.tree-group summary::marker{color:var(--accent)}
+.notice-success{border-left:4px solid var(--accent);padding:12px 16px;background:var(--accent-soft);border-radius:0 12px 12px 0}
+.danger{border-color:var(--danger);color:var(--danger)}
+button[type=submit]{background:var(--accent);border-color:var(--accent);color:#fff}
+button[type=submit]:hover{background:var(--accent-strong)}
+form.card>label{flex-basis:100%}
+#archive-search{flex:1 1 240px;width:auto}
+#quick-upload>small{display:block;color:var(--muted);margin-top:12px}
+hr{border:0;border-top:1px solid var(--line);margin:20px 0}
+@media(max-width:600px){body{padding:18px 14px 36px}.home-actions{gap:11px}.home-action{aspect-ratio:1/0.9;min-height:135px;padding:12px;border-radius:19px;font-size:.98rem}.card{padding:17px;margin:13px 0;border-radius:16px}.document-row{align-items:flex-start;flex-direction:column}.tabs{gap:0}.tab{padding:11px 10px;font-size:.94rem}.timeline-date{margin-top:22px}.pending-thumbs{gap:8px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}</style></head><body><h1>Медицинский архив</h1>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></body></html>""",status_code=status)
 
 def display_document_title(document, analysis):
     saved=(analysis or {}).get("display_title")
