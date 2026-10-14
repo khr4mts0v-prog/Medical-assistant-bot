@@ -146,7 +146,7 @@ function App() {
     const changeFiles = () => {
       const files = Array.from(input?.files || []);
       if (input) input.value = '';
-      let pendingRequests = files.length;
+      let pendingRequests = 0;
       const finishRequest = () => {
         pendingRequests -= 1;
         if (pendingRequests === 0) window.setTimeout(() => window.dispatchEvent(new Event('medical-archive-refresh')), 350);
@@ -160,6 +160,7 @@ function App() {
         data.append('family_id', familySelect?.value || '');
         data.append('files', file, file.name);
         const xhr = new XMLHttpRequest();
+        pendingRequests += 1;
         xhr.open('POST', '/upload');
         xhr.onload = () => { item.textContent = file.name + (xhr.status >= 200 && xhr.status < 300 ? ' · Передан серверу' : ' · Ошибка HTTP ' + xhr.status); finishRequest(); };
         xhr.onerror = () => { item.textContent = file.name + ' · Ошибка сети'; finishRequest(); };
