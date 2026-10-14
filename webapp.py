@@ -334,6 +334,41 @@ def new_patient_page(fid:int,uid:int=Depends(current_user)):
     return page("Новый пациент",body)
 
 
+@app.get("/families/{fid}/patients/{patient}/edit",response_class=HTMLResponse)
+def edit_patient_page(fid:int,patient:str,uid:int=Depends(current_user)):
+    family(fid,uid)
+    record=next((p for p in db.patient_records(fid) if p["name"].casefold()==patient.casefold()),None)
+    if not record: raise HTTPException(404,"Член семьи не найден")
+    from datetime import datetime
+    date_value=""
+    try: date_value=datetime.strptime(record.get("birth_date") or "", "%d-%m-%Y").strftime("%Y-%m-%d")
+    except ValueError: pass
+    aliases=", ".join(x for x in record.get("aliases",[]) if x.casefold()!=patient.casefold())
+    from urllib.parse import quote
+    base="/families/"+str(fid)+"/patients/"+quote(patient,safe="")
+    body=('<p><a href="'+base+'">← К карточке</a></p><h2>Данные члена семьи</h2>'
+          '<form class="card" method="post" action="'+base+'/edit">'
+          '<label>Имя и фамилия<input name="name" required maxlength="100" value="'+html.escape(record["name"],quote=True)+'"></label>'
+          '<label>Дата рождения<input type="date" name="birth_date" value="'+date_value+'"></label>'
+          '<label>Другие варианты имени<input name="aliases" maxlength="500" value="'+html.escape(aliases,quote=True)+'" placeholder="Через запятую"></label>'
+          '<p class="muted">При переименовании карточки связанные документы будут привязаны к новому имени.</p>'
+          '<button type="submit">Сохранить изменения</button></form>')
+    return page("Редактирование члена семьи",body)
+
+@app.post("/families/{fid}/patients/{patient}/edit",response_class=HTMLResponse)
+def save_patient_page(fid:int,patient:str,name:str=Form(...),birth_date:str=Form(""),aliases:str=Form(""),uid:int=Depends(current_user)):
+    family(fid,uid)
+    from datetime import datetime
+    from urllib.parse import quote
+    birth_date=(birth_date or "").strip()
+    if birth_date:
+        try: birth_date=datetime.strptime(birth_date,"%Y-%m-%d").strftime("%d-%m-%Y")
+        except ValueError: raise HTTPException(400,"Проверьте дату рождения")
+    alias_list=[x.strip() for x in (aliases or "").replace(";",",").split(",") if x.strip()]
+    try: db.update_patient_profile(fid,patient,name,birth_date or None,alias_list)
+    except ValueError as e: raise HTTPException(400,str(e))
+    return RedirectResponse("/families/"+str(fid)+"/patients/"+quote(" ".join(name.split()),safe="")+"?updated=1",status_code=303)
+
 @app.get("/families/{fid}/patients/{patient}",response_class=HTMLResponse)
 def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,cleanup_warning:int=0,uid:int=Depends(current_user)):
     family(fid,uid)
