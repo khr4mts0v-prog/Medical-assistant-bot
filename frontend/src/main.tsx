@@ -128,7 +128,7 @@ function App() {
       <button className="nav-item" onClick={() => { const link = document.querySelector<HTMLAnchorElement>('.app-content a[href*="/inbox"]'); navigate(link?.getAttribute('href') || '/search'); }}><ClipboardCheck size={19}/>Требуют проверки</button>
       <button className="nav-item" onClick={() => navigate('/search')}><Search size={19}/>Поиск</button>
       <div className="sidebar-spacer"/>
-      <button className={'nav-item ' + (settingsOpen ? 'active' : '')} onClick={() => { setSettingsOpen(true); setMenuOpen(false); }}><Settings size={19}/>Настройки архива</button>
+      <button className={'nav-item ' + (settingsOpen ? 'active' : '')} onClick={() => navigate('/settings' + (location.search || ''))}><Settings size={19}/>Настройки архива</button>
       <div className="sidebar-foot"><ShieldCheck size={16}/> Данные хранятся на вашем сервере</div>
     </aside>
     <main className="main-area">
