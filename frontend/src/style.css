@@ -140,3 +140,43 @@ body{font-size:16px;background:linear-gradient(180deg,#f2f6ff 0%,#f5f8ff 100%)}
  .legacy-content #patients-section{padding:19px 14px}
 }
 @media(prefers-reduced-motion:reduce){.legacy-content .patient-card,.legacy-content button{transition:none}}
+
+/* Home page finishing pass: preserve real content and touch-friendly controls */
+.legacy-content #quick-upload{display:grid;grid-template-columns:58px minmax(0,1fr);align-items:center;column-gap:15px;row-gap:3px;padding:19px 21px!important;min-height:112px;cursor:pointer}
+.legacy-content #quick-upload>div:first-child{grid-column:1;grid-row:1/3;display:grid;place-items:center;width:58px;height:58px;border-radius:18px;background:#ffffff30;color:#fff!important;font-size:0!important}
+.legacy-content #quick-upload>div:first-child:before{content:"＋";font-size:36px;font-weight:400;line-height:1}
+.legacy-content #quick-upload>h2{display:block!important;grid-column:2;grid-row:1;margin:0!important;color:#fff;font-size:clamp(16px,3.7vw,20px);line-height:1.3;letter-spacing:-.025em}
+.legacy-content #quick-upload>h2:after{content:"›";float:right;font-size:30px;font-weight:400;line-height:1}
+.legacy-content #quick-upload>p,.legacy-content #quick-upload>small{display:none!important}
+.legacy-content #quick-upload #upload-queue{grid-column:1/-1;width:100%;cursor:default}
+.legacy-content #quick-upload #upload-queue:not(:empty){margin-top:12px}
+.legacy-content .home-search{display:block!important;padding:14px!important}
+.legacy-content .home-search .search-row{display:flex;flex-direction:row!important;align-items:center;gap:10px}
+.legacy-content .home-search input[type=search],.legacy-content .home-search input[type=text]{width:100%;min-width:0;flex:1;min-height:54px}
+.legacy-content .home-search button{flex:0 0 auto;min-height:54px;padding:12px 20px;white-space:nowrap}
+.legacy-content #patients-section>h2{display:block;font-size:27px;margin:0 0 16px}
+.legacy-content #patients-section>.patient-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 15px}
+.legacy-content #patients-section>.patient-heading h2{display:none!important}
+.legacy-content #patients-section>.patient-heading a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 14px;border-radius:15px;background:#edf4ff;color:#205fc5;text-decoration:none;font-weight:750;white-space:nowrap}
+.legacy-content #patients-section>.patient-grid{margin-top:0}
+.legacy-content .home-action[href*="/inbox"]{font-size:0}
+.legacy-content .home-action[href*="/inbox"]:before{content:"▤";display:grid;place-items:center;color:#c17b15;font-size:25px;font-weight:600}
+.legacy-content .home-action[href*="/inbox"]:after{content:"›"}
+.legacy-content .home-action[href*="/inbox"]{position:relative}
+.legacy-content .home-action[href*="/inbox"]{--inbox-label:"Входящие · на проверку"}
+.legacy-content .home-action[href*="/inbox"]:after{font-size:28px}
+.legacy-content .home-action[href*="/inbox"]{font-size:16px}
+.legacy-content .home-action[href*="/inbox"]::first-line{font-size:16px}
+.legacy-content #patients-section{padding:22px 18px;margin-bottom:20px}
+.legacy-content .patient-card{min-height:86px}
+@media(max-width:480px){
+ .main-area{padding-bottom:calc(34px + env(safe-area-inset-bottom))}
+ .legacy-content .home-search{padding:12px!important}
+ .legacy-content .home-search .search-row{gap:8px}
+ .legacy-content .home-search input[type=search],.legacy-content .home-search input[type=text]{font-size:15px;padding:12px}
+ .legacy-content .home-search button{padding:11px 14px;font-size:15px}
+ .legacy-content #quick-upload{grid-template-columns:50px minmax(0,1fr);padding:17px!important;min-height:96px;column-gap:12px}
+ .legacy-content #quick-upload>div:first-child{width:50px;height:50px}
+ .legacy-content #patients-section>h2{font-size:25px}
+ .legacy-content #patients-section>.patient-heading a{font-size:14px;padding:9px 11px}
+}
