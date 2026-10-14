@@ -68,6 +68,9 @@ function App() {
   const [error, setError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modal, setModal] = useState<Screen | null>(null);
+  const [modalError, setModalError] = useState('');
+  const [modalBusy, setModalBusy] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<string[]>([]);
 
@@ -193,6 +196,11 @@ function App() {
       const next = new URL(href, location.origin);
       if (next.origin !== location.origin) return;
       event.preventDefault();
+      if (/\/patients\/new\/?$/.test(next.pathname)) {
+        setModalError('');
+        fetchScreen(next.pathname + next.search).then(setModal).catch(e => setModalError(e instanceof Error ? e.message : 'Не удалось открыть форму'));
+        return;
+      }
       navigate(next.pathname + next.search + next.hash);
     };
     const onSubmit = async (event: SubmitEvent) => {
@@ -232,6 +240,27 @@ function App() {
   };
 
   return <div className="app-frame">
+    {modal && <div className="modal-scrim" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !modalBusy) setModal(null); }}>
+      <section className="app-modal" role="dialog" aria-modal="true" aria-label="Добавить члена семьи">
+        <header className="app-modal-header"><div><span className="modal-eyebrow">СЕМЕЙНЫЙ АРХИВ</span><h2>Добавить члена семьи</h2></div><button type="button" className="icon-button" aria-label="Закрыть окно" onClick={() => setModal(null)}><X size={20}/></button></header>
+        {modalError && <div className="error-banner" role="alert">{modalError}</div>}
+        <div className="app-modal-content" onSubmit={async event => {
+          const form = event.target as HTMLFormElement;
+          if (!(form instanceof HTMLFormElement) || !form.action.includes('/patients')) return;
+          event.preventDefault(); setModalBusy(true); setModalError('');
+          try {
+            const response = await fetch(form.action, {method:(form.method || 'post').toUpperCase(), body:new FormData(form), credentials:'same-origin', redirect:'follow'});
+            const html = await response.text();
+            if (!response.ok) throw new Error('Не удалось сохранить данные (' + response.status + ').');
+            const finalUrl = new URL(response.url);
+            const next: Screen = {url:finalUrl.pathname + finalUrl.search, html:extractContent(html), title:new DOMParser().parseFromString(html,'text/html').title || 'Медицинский архив'};
+            window.history.pushState({medicalArchive:true},'',next.url); setPath(next.url); setScreen(next); setModal(null); window.scrollTo({top:0,behavior:'instant' as ScrollBehavior});
+          } catch (e) {setModalError(e instanceof Error ? e.message : 'Ошибка сохранения');}
+          finally {setModalBusy(false);}
+        }} dangerouslySetInnerHTML={{__html:modal.html}} />
+        {modalBusy && <div className="modal-busy" role="status">Сохраняем карточку…</div>}
+      </section>
+    </div>}
     {menuOpen && <button className="scrim" aria-label="Закрыть меню" onClick={() => setMenuOpen(false)} />}
     <aside className={'sidebar ' + (menuOpen ? 'sidebar-open' : '')}>
       <div className="brand"><span className="brand-icon"><HeartPulse size={22}/></span><span>Медицинский архив</span><button className="icon-button sidebar-close" onClick={() => setMenuOpen(false)} aria-label="Закрыть"><X size={20}/></button></div>
