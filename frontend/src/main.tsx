@@ -159,11 +159,25 @@ function App() {
     zone?.addEventListener('click', openPicker);
     choose?.addEventListener('click', chooseFiles);
     input?.addEventListener('change', changeFiles);
+    const patientUploadForm = root.querySelector<HTMLFormElement>('#patient-upload form');
+    const patientFileInput = patientUploadForm?.querySelector<HTMLInputElement>('input[type="file"]');
+    const openPatientUpload = (event: MouseEvent) => {
+      const anchor = (event.target as HTMLElement).closest('a[href="#patient-upload"]');
+      if (!anchor) return;
+      event.preventDefault();
+      patientFileInput?.click();
+    };
+    const submitPatientUploadOnSelect = () => {
+      if (patientFileInput?.files?.length) patientUploadForm?.requestSubmit();
+    };
+    root.addEventListener('click', openPatientUpload);
+    patientFileInput?.addEventListener('change', submitPatientUploadOnSelect);
     const onClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
       const anchor = target.closest('a') as HTMLAnchorElement | null;
       if (!anchor || anchor.target === '_blank' || anchor.hasAttribute('download')) return;
       const href = anchor.getAttribute('href');
+      if (href === '#patient-upload') return;
       if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
       const next = new URL(href, location.origin);
       if (next.origin !== location.origin) return;
@@ -197,7 +211,7 @@ function App() {
     };
     root.addEventListener('click', onClick);
     root.addEventListener('submit', onSubmit);
-    return () => { zone?.removeEventListener('click', openPicker); choose?.removeEventListener('click', chooseFiles); input?.removeEventListener('change', changeFiles); root.removeEventListener('click', onClick); root.removeEventListener('submit', onSubmit); };
+    return () => { zone?.removeEventListener('click', openPicker); choose?.removeEventListener('click', chooseFiles); input?.removeEventListener('change', changeFiles); root.removeEventListener('click', openPatientUpload); patientFileInput?.removeEventListener('change', submitPatientUploadOnSelect); root.removeEventListener('click', onClick); root.removeEventListener('submit', onSubmit); };
   }, [screen, navigate]);
 
   const isHome = path === '/' || path === '/app' || path.startsWith('/?');
