@@ -367,3 +367,35 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
 .app-toast-check{display:grid;place-items:center;flex:0 0 24px;width:24px;height:24px;border-radius:50%;background:#d9f5e5;color:#16834f;font-weight:900}
 @keyframes toast-in{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
 @keyframes toast-out{to{opacity:0;transform:translate(-50%,8px)}}
+
+
+/* Assistant answer: readable on narrow mobile screens without horizontal page scrolling */
+.legacy-content .assistant-answer {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.legacy-content .assistant-answer pre {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+  font-family: inherit !important;
+  font-size: 1rem;
+  line-height: 1.65;
+  color: inherit;
+  box-sizing: border-box;
+}
+.legacy-content .assistant-answer,
+.legacy-content .assistant-answer * {
+  box-sizing: border-box;
+}
+.legacy-content .assistant-answer h2 {
+  margin-bottom: 14px;
+}
