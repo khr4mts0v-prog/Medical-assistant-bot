@@ -229,8 +229,17 @@ function App() {
       if (method === 'GET') {
         if (action.pathname === '/search' && form.classList.contains('home-search')) {
           const data = new FormData(form);
-          setSmartQuery(String(data.get('q') || ''));
-          setSmartSearchOpen(true); setSmartConsent(false); setSmartError(''); setSmartResult(null);
+          const query = String(data.get('q') || '').trim();
+          const familyId = String(data.get('family_id') || new URLSearchParams(location.search).get('family_id') || '');
+          setSmartQuery(query);
+          setSmartSearchOpen(true); setSmartConsent(false); setSmartError(''); setSmartResult(null); setSmartBusy(true);
+          try {
+            const response = await fetch('/api/intelligent-search', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({query, family_id:familyId ? Number(familyId) : undefined, consent:false})});
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.detail || result.error || 'Не удалось выполнить поиск.');
+            setSmartResult(result);
+          } catch (e) { setSmartError(e instanceof Error ? e.message : 'Ошибка поиска'); }
+          finally { setSmartBusy(false); }
           return;
         }
         const params = new URLSearchParams(new FormData(form) as any);
