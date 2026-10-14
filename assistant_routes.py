@@ -1,7 +1,7 @@
 """AI-assisted archive search for the authenticated web archive.
 
 The LLM plans retrieval; all patient/family filtering and database access stay local.
-Only bounded, relevant OCR excerpts are sent to Hugging Face after explicit consent.
+Only bounded, relevant OCR excerpts are sent to the configured provider after explicit consent.
 """
 import html
 import json
@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse
 
 import database as db
 import tenancy
-from AIAnalise import answer_question
+from ai_provider import answer_archive_question, chat_completion, provider_config
 
 STOP_WORDS = {
     "что", "как", "когда", "где", "почему", "какой", "какая", "какие",
@@ -69,18 +69,10 @@ def _planner(question, token):
         "Не выдумывай данные пациента, не возвращай patient_id, SQL, команды или текст ответа. "
         "Ищи медицинские синонимы, лабораторные показатели и типы исследований."
     )
-    url = os.getenv("HF_CHAT_COMPLETIONS_URL", "https://router.huggingface.co/v1/chat/completions")
-    model = os.getenv("HF_MODEL", "Qwen/Qwen2.5-7B-Instruct")
-    response = requests.post(
-        url,
-        headers={"Authorization": "Bearer " + token},
-        json={"model": model, "temperature": 0, "max_tokens": 500,
-              "messages": [{"role": "system", "content": prompt},
-                           {"role": "user", "content": question}]},
-        timeout=45,
+    raw = chat_completion(
+        [{"role": "system", "content": prompt}, {"role": "user", "content": question}],
+        max_tokens=500, temperature=0, timeout=45,
     )
-    response.raise_for_status()
-    raw = response.json()["choices"][0]["message"]["content"].strip()
     raw = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", raw, flags=re.I)
     plan = json.loads(raw)
     if not isinstance(plan, dict):
@@ -178,7 +170,7 @@ def install_assistant_routes(app, current_user, family_guard):
             '<label>Семейный архив</label><select name="family_id" onchange="location.href=\'/assistant?family_id=\'+this.value">' + family_options + '</select>'
             '<label>Пациент</label><select name="patient" required>' + patient_options + '</select>'
             '<label>Вопрос</label><textarea name="question" rows="4" required maxlength="1200" placeholder="Например: сравни гемоглобин за последние полгода и покажи динамику"></textarea>'
-            '<label style="font-weight:400"><input type="checkbox" name="consent" value="yes" required style="width:auto"> Я разрешаю отправить текст вопроса и найденные фрагменты медицинских документов в Hugging Face для анализа.</label>'
+            '<label style="font-weight:400"><input type="checkbox" name="consent" value="yes" required style="width:auto"> Я разрешаю отправить текст вопроса и найденные фрагменты медицинских документов внешнему ИИ-провайдеру для анализа.</label>'
             '<button type="submit">Найти и проанализировать</button></form>'
             '<p class="muted">Если согласие не дано, данные не отправляются во внешнюю нейросеть. Ответ не заменяет консультацию врача.</p></div>'
         )
@@ -198,13 +190,16 @@ def install_assistant_routes(app, current_user, family_guard):
             raise HTTPException(400, "Введите вопрос")
         if consent != "yes":
             return _page("Требуется согласие", '<div class="card">Вопрос и медицинские фрагменты не отправлялись нейросети. Чтобы продолжить, вернитесь и явно подтвердите согласие.</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться</a></p>', 400)
-        token = os.getenv("HF_API_TOKEN", "").strip()
+        try:
+            provider, token, _, model, key_name = provider_config()
+        except Exception:
+            return _page("ИИ не настроен", '<div class="card">Не удалось определить провайдера. Проверьте AI_PROVIDER в .env.</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Назад</a></p>', 503)
         if not token:
-            return _page("ИИ не настроен", '<div class="card">Не задан HF_API_TOKEN. Поиск не запускался и медицинские данные не отправлялись.</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Назад</a></p>', 503)
+            return _page("ИИ не настроен", '<div class="card">Не задан ' + html.escape(key_name) + '. Поиск не запускался и медицинские данные не отправлялись.</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Назад</a></p>', 503)
         try:
             try:
                 plan = _planner(question, token)
-                planner_status = "План сформирован нейросетью"
+                planner_status = "План сформирован моделью " + model + " (" + provider + ")"
             except Exception as exc:
                 logging.warning("Assistant planner unavailable (%s); using local keyword fallback", type(exc).__name__)
                 plan = _fallback_plan(question)
@@ -213,8 +208,8 @@ def install_assistant_routes(app, current_user, family_guard):
             if not rows:
                 return _page("Результаты поиска", '<div class="card"><p>По заданным критериям документы не найдены.</p><p class="muted">' + html.escape(planner_status) + '. Попробуйте сформулировать вопрос иначе или проверить период.</p></div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Задать другой вопрос</a></p>')
             context = _context(rows)
-            answer = answer_question(question, patient, token, context=context)
-            if answer.startswith("Не удалось получить ответ ИИ") or answer.startswith("Не задан HF_API_TOKEN"):
+            answer = answer_archive_question(question, patient, context=context)
+            if answer.startswith("Не удалось получить ответ ИИ") or answer.startswith("Не задан "):
                 return _page("Ошибка анализа", '<div class="card">' + html.escape(answer) + '</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Попробовать ещё раз</a></p>', 502)
             sources = "".join(
                 '<div class="source"><strong>' + html.escape(str(r.get("name") or "Без названия")) + '</strong><br>'
