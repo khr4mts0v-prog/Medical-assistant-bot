@@ -19,7 +19,7 @@ function extractContent(documentText: string): string {
   main.querySelector('#family-settings')?.remove();
   if (!main.querySelector('.home-welcome')) {
     main.querySelectorAll('a').forEach(a => {
-      if (/^←\\s*(к архиву|назад)$/i.test((a.textContent || '').trim())) a.remove();
+      if (/^(?:←\\s*)?(?:к архиву|назад)$/i.test((a.textContent || '').trim()) || /^(?:←\\s*)?к архиву$/i.test((a.textContent || '').trim())) a.remove();
     });
     const patientHeading = main.querySelector('.patient-heading');
     if (patientHeading) patientHeading.classList.add('screen-heading');
@@ -89,8 +89,13 @@ function App() {
   useEffect(() => {
     navigate(location.pathname === '/app' ? HOME : location.pathname + location.search, false);
     const onPop = () => navigate(location.pathname + location.search, false);
+    const onArchiveRefresh = () => navigate(location.pathname + location.search, false);
     window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
+    window.addEventListener('medical-archive-refresh', onArchiveRefresh);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('medical-archive-refresh', onArchiveRefresh);
+    };
   // Initial load only; popstate is managed by the listener.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -141,6 +146,11 @@ function App() {
     const changeFiles = () => {
       const files = Array.from(input?.files || []);
       if (input) input.value = '';
+      let pendingRequests = files.length;
+      const finishRequest = () => {
+        pendingRequests -= 1;
+        if (pendingRequests === 0) window.setTimeout(() => window.dispatchEvent(new Event('medical-archive-refresh')), 350);
+      };
       files.forEach(file => {
         const item = document.createElement('div');
         item.className = 'upload-item';
@@ -151,8 +161,8 @@ function App() {
         data.append('files', file, file.name);
         const xhr = new XMLHttpRequest();
         xhr.open('POST', '/upload');
-        xhr.onload = () => { item.textContent = file.name + (xhr.status >= 200 && xhr.status < 300 ? ' · Передан серверу' : ' · Ошибка HTTP ' + xhr.status); };
-        xhr.onerror = () => { item.textContent = file.name + ' · Ошибка сети'; };
+        xhr.onload = () => { item.textContent = file.name + (xhr.status >= 200 && xhr.status < 300 ? ' · Передан серверу' : ' · Ошибка HTTP ' + xhr.status); finishRequest(); };
+        xhr.onerror = () => { item.textContent = file.name + ' · Ошибка сети'; finishRequest(); };
         xhr.send(data);
       });
     };
