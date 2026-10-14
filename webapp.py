@@ -175,7 +175,8 @@ def home(family_id:int|None=None,uid:int=Depends(current_user)):
         pending_for_actions = len(db.pending_documents(selected_for_actions))
         patient_count = len(db.patients(selected_for_actions))
         b.append('<nav class="home-actions" aria-label="Основные действия"><button class="home-action primary" type="button" id="home-upload-trigger">＋ Загрузить документы</button><a class="home-action" href="/families/' + str(selected_for_actions) + '/inbox">Входящие · на проверку (' + str(pending_for_actions) + ')</a><a class="home-action" href="#patients">История пациентов (' + str(patient_count) + ')</a><a class="home-action" href="#family-settings">Настройки архива</a></nav>')
-        b.append('<form class="card row" method="get" action="/search"><input type="hidden" name="family_id" value="' + str(selected_for_actions) + '"><label for="archive-search">Поиск по архиву</label><input id="archive-search" type="search" name="q" placeholder="Например: Саша анализы" required><button type="submit">Найти документы</button></form>')
+        b.append('<section class="home-welcome"><h1>Добро пожаловать!</h1><p>Ваш семейный медицинский архив</p></section>')
+        b.append('<form class="card row home-search" method="get" action="/search"><input type="hidden" name="family_id" value="' + str(selected_for_actions) + '"><label for="archive-search">⌕</label><input id="archive-search" type="search" name="q" placeholder="Найти документ, анализ, обследование…" required><button type="submit">Найти</button></form>')
     # Inbox-first workflow: files can be uploaded before opening a patient record.
     if fs:
         selected_fid = f["id"] if f else fs[0]["id"]
