@@ -71,6 +71,7 @@ function App() {
   const [modal, setModal] = useState<Screen | null>(null);
   const [modalError, setModalError] = useState('');
   const [modalBusy, setModalBusy] = useState(false);
+  const [toast, setToast] = useState('');
   const contentRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<string[]>([]);
 
@@ -218,9 +219,26 @@ function App() {
       setLoading(true); setError('');
       try {
         const data = new FormData(form);
+        const isBulkAssignment = action.pathname.endsWith('/inbox/assign-selected');
         const response = await fetch(action.pathname + action.search, { method, body: data, credentials: 'same-origin', redirect: 'follow' });
         const html = await response.text();
         if (!response.ok) throw new Error('Не удалось сохранить данные (' + response.status + ').');
+        if (isBulkAssignment) {
+          const parsedResult = new DOMParser().parseFromString(html, 'text/html');
+          const resultText = (parsedResult.body.textContent || '').toLowerCase();
+          if (/ошибка|не удалось|не назначен/.test(resultText)) {
+            setError('Не все документы удалось назначить. Проверьте результат и повторите для оставшихся.');
+          } else {
+            setToast('Документы назначены пациенту');
+            window.setTimeout(() => setToast(''), 3200);
+          }
+          const inboxLink = contentRef.current?.querySelector<HTMLAnchorElement>('a[href*="/inbox"]')?.getAttribute('href');
+          const next = await fetchScreen(inboxLink || action.pathname.replace('/assign-selected',''));
+          const nextUrl = next.url;
+          window.history.replaceState({ medicalArchive: true }, '', nextUrl);
+          setPath(nextUrl); setScreen(next); window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+          return;
+        }
         const finalUrl = new URL(response.url);
         const next: Screen = { url: finalUrl.pathname + finalUrl.search, html: extractContent(html), title: new DOMParser().parseFromString(html, 'text/html').title || 'Медицинский архив' };
         window.history.pushState({ medicalArchive: true }, '', next.url);
@@ -240,6 +258,7 @@ function App() {
   };
 
   return <div className="app-frame">
+    {toast && <div className="app-toast" role="status" aria-live="polite"><span className="app-toast-check">✓</span><span>{toast}</span></div>}
     {modal && <div className="modal-scrim" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !modalBusy) setModal(null); }}>
       <section className="app-modal" role="dialog" aria-modal="true" aria-label="Добавить члена семьи">
         <header className="app-modal-header"><div><span className="modal-eyebrow">СЕМЕЙНЫЙ АРХИВ</span><h2>Добавить члена семьи</h2></div><button type="button" className="icon-button" aria-label="Закрыть окно" onClick={() => setModal(null)}><X size={20}/></button></header>
