@@ -919,3 +919,7 @@ def yandex_callback(code:str="",state:str="",error:str=""):
     except Exception as e:
         logging.exception("OAuth callback failed (%s)",type(e).__name__)
         return page("Ошибка","<p>Не удалось подключить Яндекс Диск.</p>",502)
+
+# AI-assisted retrieval routes are isolated from Telegram bot handlers.
+from assistant_routes import install_assistant_routes
+install_assistant_routes(app, current_user, family)

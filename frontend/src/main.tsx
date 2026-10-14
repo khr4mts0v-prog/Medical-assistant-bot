@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowLeft, ChevronRight, ClipboardCheck, FilePlus2, Home, Menu, Search,
-  Settings, Users, X, HeartPulse, Cloud, ShieldCheck, PanelLeftClose
+  Settings, Users, X, HeartPulse, Cloud, ShieldCheck, PanelLeftClose, BrainCircuit
 } from 'lucide-react';
 import './style.css';
 
@@ -295,6 +295,7 @@ function App() {
       <button className={'nav-item ' + (isHome ? 'active' : '')} onClick={() => navigate(HOME)}><Home size={19}/>Главная</button>
       <button className="nav-item" onClick={() => { const link = document.querySelector<HTMLAnchorElement>('.app-content a[href*="/inbox"]'); navigate(link?.getAttribute('href') || '/search'); }}><ClipboardCheck size={19}/>Требуют проверки</button>
       <button className="nav-item" onClick={() => navigate('/search')}><Search size={19}/>Поиск</button>
+      <button className="nav-item" onClick={() => navigate('/assistant')}><BrainCircuit size={19}/>Ассистент</button>
       <div className="sidebar-spacer"/>
       <button className={'nav-item ' + (settingsOpen ? 'active' : '')} onClick={() => navigate('/settings' + (location.search || ''))}><Settings size={19}/>Настройки архива</button>
       <div className="sidebar-foot"><ShieldCheck size={16}/> Данные хранятся на вашем сервере</div>
