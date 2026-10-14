@@ -237,3 +237,40 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
  .legacy-content #patients-section>h2{font-size:23px}
 }
 @media(prefers-reduced-motion:reduce){.sidebar,.scrim{transition:none!important}}
+
+/* Consistent app-style layout for every screen, not only the home page */
+.main-area{min-height:100dvh}
+.topbar{position:sticky;top:0;z-index:30;isolation:isolate}
+.page-content{min-height:calc(100dvh - 76px)}
+.legacy-content{padding-bottom:calc(26px + env(safe-area-inset-bottom))}
+.legacy-content>p:first-child:has(a[href^="/?family_id"]),.legacy-content>p:first-child:has(a[href*="/families/"]){margin:0 0 8px}
+.legacy-content .screen-heading,.legacy-content .patient-heading{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px;margin:4px 0 20px}
+.legacy-content .screen-heading h1,.legacy-content .patient-heading h1,.legacy-content .patient-heading h2{margin:0;color:#1e304b;font-size:clamp(26px,5vw,34px);line-height:1.15;letter-spacing:-.05em}
+.legacy-content .screen-heading p,.legacy-content .patient-heading p{margin:7px 0 0;color:#718099;font-size:15px}
+.legacy-content .patient-heading>div:last-child,.legacy-content .screen-heading>div:last-child{display:flex;flex-wrap:wrap;gap:8px;width:100%}
+.legacy-content .button-link,.legacy-content a.button-link,.legacy-content .patient-heading a,.legacy-content .screen-heading a{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:43px;padding:10px 13px;border:1px solid #dfe7f2;border-radius:12px;background:#fff;color:#315b98;text-decoration:none;font-size:14px;font-weight:650;box-shadow:none}
+.legacy-content .patient-heading a[href*="/edit"]{background:#f3f6fb;color:#345780}
+.legacy-content .patient-heading a[href*="patient-upload"],.legacy-content .patient-heading a[href*="#patient-upload"]{background:#2868d7;color:#fff;border-color:#2868d7}
+.legacy-content .card,.legacy-content form.card,.legacy-content .app-form-card{margin:12px 0;padding:17px;border:1px solid #e4eaf2;border-radius:18px;background:#fff;box-shadow:none}
+.legacy-content .card h2,.legacy-content .app-form-card h2{margin:0 0 13px;font-size:19px;letter-spacing:-.025em}
+.legacy-content .card label,.legacy-content .app-form-card label{display:block;margin:8px 0 6px;color:#42536c;font-size:14px;font-weight:600}
+.legacy-content input:not([type=checkbox]):not([type=radio]):not([type=file]),.legacy-content select,.legacy-content textarea{width:100%;min-height:46px;padding:11px 12px;border:1px solid #dfe6f0;border-radius:12px;background:#f9fbfe;color:#21324b}
+.legacy-content input[type=file]{display:block;width:100%;max-width:100%;margin:9px 0;padding:10px;border:1px solid #e2e8f1;border-radius:12px;background:#f8fafd;color:#34445d;font-size:14px}
+.legacy-content button,.legacy-content button[type=submit],.legacy-content input[type=submit]{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:10px 16px;border:1px solid #2868d7;border-radius:12px;background:#2868d7;color:#fff;font-size:15px;font-weight:700;box-shadow:none}
+.legacy-content button.secondary,.legacy-content .app-form-card button.secondary{background:#f3f6fb;border-color:#e0e7f1;color:#365273}
+.legacy-content .app-tabs,.legacy-content .tabs{display:flex;gap:7px;flex-wrap:wrap;margin:18px 0 10px;border-bottom:1px solid #e4eaf2}
+.legacy-content .app-tabs a,.legacy-content .tabs a,.legacy-content .tab{display:inline-flex;align-items:center;min-height:43px;padding:10px 12px;border-radius:10px 10px 0 0;background:transparent;color:#64758d;text-decoration:none}
+.legacy-content .app-tabs .active,.legacy-content .tabs .active,.legacy-content .tab.active{border-bottom:2px solid #2868d7;color:#245dbb;font-weight:700}
+.legacy-content details{margin:12px 0;padding:12px;border:1px solid #e4eaf2;border-radius:12px;background:#f9fbfe}
+.legacy-content pre{max-width:100%;overflow:auto;font-size:13px}
+.legacy-content table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}
+.legacy-content th,.legacy-content td{padding:10px;border-bottom:1px solid #e7ecf3;text-align:left}
+.legacy-content a:not(.button-link):not(.patient-card){color:#2864c4}
+@media(max-width:480px){
+ .main-area{padding:0 15px calc(24px + env(safe-area-inset-bottom))}
+ .topbar{margin:0 -15px 19px;padding-left:15px;padding-right:15px}
+ .legacy-content .patient-heading>div:last-child{display:grid;grid-template-columns:1fr 1fr}
+ .legacy-content .patient-heading>div:last-child a{width:100%;padding:9px 8px;font-size:13px}
+ .legacy-content .card,.legacy-content form.card,.legacy-content .app-form-card{padding:14px;border-radius:16px}
+ .legacy-content button,.legacy-content button[type=submit],.legacy-content input[type=submit]{max-width:100%;font-size:14px}
+}
