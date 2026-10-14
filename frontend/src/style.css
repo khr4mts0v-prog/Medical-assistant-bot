@@ -399,3 +399,43 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
 .legacy-content .assistant-answer h2 {
   margin-bottom: 14px;
 }
+
+
+/* Family-wide intelligent search modal */
+.smart-search-scrim{z-index:100;align-items:center;padding:14px}
+.smart-search-modal{width:min(760px,100%);max-height:min(90dvh,900px);display:flex;flex-direction:column;overflow:hidden}
+.smart-search-modal .app-modal-header{flex:0 0 auto}
+.smart-search-subtitle{margin:5px 0 0;color:var(--muted);font-size:13px;font-weight:450;line-height:1.45}
+.smart-search-body{min-height:0;overflow-y:auto;padding:0 22px 22px;overscroll-behavior:contain}
+.smart-search-form{display:grid;gap:9px;padding:14px;margin:0 0 16px;border:1px solid var(--line);border-radius:16px;background:#f8fbff}
+.smart-search-form label{font-size:13px;font-weight:750}
+.smart-search-form textarea{width:100%;min-height:70px;resize:vertical;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--fg);line-height:1.5}
+.smart-search-form button{justify-self:end;min-height:44px;padding:10px 17px;border:1px solid var(--blue);border-radius:12px;background:var(--blue);color:#fff;font-weight:750}
+.smart-search-form button:disabled{opacity:.6;cursor:wait}
+.smart-search-form .smart-consent{display:flex;gap:9px;align-items:flex-start;font-size:12px;font-weight:500;line-height:1.5;color:#475d7b}
+.smart-search-form .smart-consent input{flex:0 0 18px;width:18px;min-height:18px;margin-top:2px;accent-color:var(--blue)}
+.smart-consent-note{padding:12px;border-radius:12px;background:#fff8e8;color:#79520a;font-size:13px}
+.smart-answer{margin:14px 0;padding:16px;border:1px solid var(--line);border-radius:15px;background:#fff}
+.smart-answer h3{margin:0 0 10px;font-size:16px}
+.smart-answer pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;font:inherit;line-height:1.65;color:var(--fg)}
+.smart-documents{margin:16px 0}
+.smart-documents>h3{display:flex;align-items:center;gap:9px;margin:0 0 10px;font-size:16px}
+.smart-documents>h3 span{display:inline-grid;place-items:center;min-width:25px;height:25px;padding:0 7px;border-radius:20px;background:var(--blue-soft);color:var(--blue-dark);font-size:12px}
+.smart-document{display:flex;flex-direction:column;gap:4px;margin:8px 0;padding:13px;border:1px solid var(--line);border-radius:13px;background:#fff;text-decoration:none!important;color:var(--fg)!important}
+.smart-document:hover{border-color:#a9c9fa;background:#fbfdff}
+.smart-document-date{color:var(--blue-dark);font-size:12px;font-weight:800}
+.smart-document strong{font-size:14px;line-height:1.4;overflow-wrap:anywhere}
+.smart-document>span:not(.smart-document-date):not(.smart-document-open){color:var(--muted);font-size:12px}
+.smart-document-open{display:flex;align-items:center;gap:3px;align-self:flex-end;color:var(--blue-dark);font-size:12px;font-weight:750}
+.smart-search-loading{display:flex;align-items:center;gap:10px;padding:16px;color:var(--muted);font-size:13px}
+.smart-spinner{width:18px;height:18px;border:2px solid #d9e6fb;border-top-color:var(--blue);border-radius:50%;animation:smart-spin .8s linear infinite}
+.smart-search-footnote{margin:16px 2px 0;color:var(--muted);font-size:11px;line-height:1.5}
+@keyframes smart-spin{to{transform:rotate(360deg)}}
+@media(max-width:600px){
+  .smart-search-scrim{padding:0;align-items:flex-end}
+  .smart-search-modal{width:100%;max-height:94dvh;border-radius:22px 22px 0 0}
+  .smart-search-modal .app-modal-header{padding:17px 16px 13px}
+  .smart-search-body{padding:0 14px calc(18px + env(safe-area-inset-bottom))}
+  .smart-search-form{padding:12px}
+  .smart-search-form button{width:100%;justify-self:stretch}
+}
