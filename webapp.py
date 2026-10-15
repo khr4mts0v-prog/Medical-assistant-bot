@@ -42,9 +42,8 @@ def pwa_service_worker():
 security=HTTPBasic()
 WEB_USERNAME=os.getenv("WEB_USERNAME","").strip()
 WEB_PASSWORD=os.getenv("WEB_PASSWORD","")
-# Demo access is opt-in. Never ship a shared default credential to a public endpoint.
-# Keep the shared demo account available during the private MVP testing phase.
-# Before public launch, replace these defaults with unique environment credentials.
+# Temporary shared demo credentials are retained for the private MVP testing phase.
+# Before public launch, set unique DEMO_USERNAME and DEMO_PASSWORD values in .env.
 DEMO_USERNAME=os.getenv("DEMO_USERNAME", "test").strip()
 DEMO_PASSWORD=os.getenv("DEMO_PASSWORD", "test")
 # Real web users occupy the negative 48-bit hash range; demo tenant identities
