@@ -37,6 +37,36 @@ def chat_completion(messages, max_tokens=1200, temperature=0.1, timeout=90):
     return content.strip()
 
 
+def classify_medical_intent(query):
+    """Classify intent using the configured model; return unknown safely on any failure."""
+    system = (
+        "Классификатор тематики запросов для семейного медицинского архива. "
+        "Верни только один JSON-объект вида {\\"category\\":\\"medical_general|medical_patient|non_medical|ambiguous\\"}. "
+        "medical_general: медицинские знания, симптомы, лекарства, профилактика, здоровье, общие медицинские вопросы. "
+        "medical_patient: вопросы о конкретном пациенте, его документах, анализах, лечении или медицинской истории. "
+        "non_medical: явно посторонние запросы о политике без медицинского контекста, погоде, развлечениях, программировании, покупках и т.п. "
+        "ambiguous: контекста недостаточно или тема смешанная. "
+        "Классифицируй по смыслу, а не только по ключевым словам. Вакцины, эпидемии, общественное здоровье и медицинская политика "
+        "относятся к медицинским темам, если запрос о медицинской стороне. Не отвечай на сам вопрос; только классифицируй."
+    )
+    try:
+        result = chat_completion([
+            {"role": "system", "content": system},
+            {"role": "user", "content": str(query or "")[:1200]},
+        ], max_tokens=80, temperature=0, timeout=20)
+        import json
+        import re
+        match = re.search(r"\\{.*?\\}", result, re.S)
+        if not match:
+            return "unknown"
+        category = json.loads(match.group(0)).get("category")
+        if category in {"medical_general", "medical_patient", "non_medical", "ambiguous"}:
+            return category
+    except Exception:
+        pass
+    return "unknown"
+
+
 def answer_archive_question(query, patient, context=""):
     """Answer archive-grounded questions or general medical education without inventing patient facts."""
     has_sources = bool(str(context or "").strip())
