@@ -6,6 +6,7 @@ snapshot of structured information already extracted from documents and preserve
 import hashlib
 import hmac
 import json
+import secrets
 import logging
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -28,6 +29,16 @@ CREATE TABLE IF NOT EXISTS patient_memory_snapshots (
 );
 CREATE INDEX IF NOT EXISTS patient_memory_family_updated
     ON patient_memory_snapshots(family_id, updated_at);
+CREATE TABLE IF NOT EXISTS patient_memory_edits (
+    family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
+    patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    fact_key TEXT NOT NULL,
+    payload_enc BLOB NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (family_id, patient_id, fact_key)
+);
+CREATE INDEX IF NOT EXISTS patient_memory_edits_patient
+    ON patient_memory_edits(family_id, patient_id);
 """
 
 def init() -> None:
@@ -57,6 +68,20 @@ def _source_ref(row: dict) -> dict:
         "date": _clean_text(row.get("date"), 40) or None,
         "kind": _clean_text(row.get("kind") or "не определён", 100),
     }
+
+def _fact_key(category: str, item: dict) -> str:
+    source = item.get("source") or {}
+    identity = {
+        "category": category,
+        "document_id": source.get("document_id"),
+        "page": item.get("page"),
+        "text": item.get("text"),
+        "name": item.get("name"),
+        "value": item.get("value"),
+        "unit": item.get("unit"),
+    }
+    raw = json.dumps(identity, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    return hmac.new(tenancy.FERNET_KEY.encode("utf-8"), raw, hashlib.sha256).hexdigest()
 
 def _numeric_value(value: Any):
     text = str(value or "").strip().replace(" ", "").replace(",", ".")
@@ -136,10 +161,12 @@ def _build_snapshot(fid: int, patient: str, rows: list[dict], profile: dict | No
             if key in seen:
                 continue
             seen.add(key)
-            diagnoses.append({
+            fact = {
                 "text": text, "date": source["date"], "source": source,
                 "page": item.get("page"), "evidence_type": "mentioned_in_document",
-            })
+            }
+            fact["fact_key"] = _fact_key("diagnosis", fact)
+            diagnoses.append(fact)
         for item in (analysis.get("medications") or [])[:100]:
             text = _clean_text(item.get("text"), 500)
             if not text:
@@ -148,10 +175,12 @@ def _build_snapshot(fid: int, patient: str, rows: list[dict], profile: dict | No
             if key in seen:
                 continue
             seen.add(key)
-            medications.append({
+            fact = {
                 "text": text, "date": source["date"], "source": source,
                 "page": item.get("page"), "evidence_type": "mentioned_in_document",
-            })
+            }
+            fact["fact_key"] = _fact_key("medication", fact)
+            medications.append(fact)
         for item in (analysis.get("lab_results") or [])[:250]:
             name = _clean_text(item.get("name"), 160)
             value = _clean_text(item.get("value"), 100)
@@ -162,12 +191,14 @@ def _build_snapshot(fid: int, patient: str, rows: list[dict], profile: dict | No
             if key in seen:
                 continue
             seen.add(key)
-            lab_results.append({
+            fact = {
                 "name": name, "value": value, "unit": unit or None,
                 "date": source["date"], "source": source,
                 "page": item.get("page"), "source_line": _clean_text(item.get("source"), 350),
                 "evidence_type": "extracted_result_needs_original_verification",
-            })
+            }
+            fact["fact_key"] = _fact_key("lab_result", fact)
+            lab_results.append(fact)
 
     records.sort(key=lambda x: (_date_key(x.get("date")), x["document_id"]), reverse=True)
     diagnoses.sort(key=lambda x: (_date_key(x.get("date")), x["source"]["document_id"]), reverse=True)
@@ -262,9 +293,109 @@ def refresh(fid: int, patient: str) -> dict:
         )
     return snapshot
 
+def _load_edits(fid: int, pid: int) -> dict:
+    with tenancy.connect() as conn:
+        rows = conn.execute(
+            "SELECT fact_key,payload_enc FROM patient_memory_edits WHERE family_id=? AND patient_id=?",
+            (int(fid), int(pid)),
+        ).fetchall()
+    edits = {}
+    crypt = tenancy.cipher()
+    for row in rows:
+        try:
+            edits[row["fact_key"]] = json.loads(crypt.decrypt(row["payload_enc"]).decode("utf-8"))
+        except Exception:
+            logging.exception("Cannot decrypt patient memory correction")
+    return edits
+
+def _apply_edits(snapshot: dict, edits: dict) -> dict:
+    result = dict(snapshot)
+    for key, category in (
+        ("diagnoses_mentioned", "diagnosis"),
+        ("medications_mentioned", "medication"),
+        ("lab_results", "lab_result"),
+    ):
+        visible = []
+        for original in snapshot.get(key, []):
+            item = dict(original)
+            edit = edits.get(item.get("fact_key"))
+            if edit and edit.get("action") == "ignore":
+                continue
+            if edit and edit.get("action") == "correct":
+                if category in {"diagnosis", "medication"} and edit.get("replacement"):
+                    item["original_text"] = item.get("text")
+                    item["text"] = edit["replacement"]
+                if category == "lab_result":
+                    if edit.get("replacement"):
+                        item["original_value"] = item.get("value")
+                        item["value"] = edit["replacement"]
+                    if "unit" in edit:
+                        item["original_unit"] = item.get("unit")
+                        item["unit"] = edit.get("unit") or None
+                item["user_corrected"] = True
+                item["correction_note"] = edit.get("note") or ""
+            visible.append(item)
+        result[key] = visible
+    # Trends must be recalculated from corrected/visible results, not stale extracted values.
+    result["lab_trends"] = _build_lab_trends(result.get("lab_results", []))
+    return result
+
 def get_snapshot(fid: int, patient: str) -> dict:
-    """Refresh from the source archive before returning the current memory snapshot."""
-    return refresh(fid, patient)
+    """Refresh from source documents and overlay family-scoped, encrypted user corrections."""
+    snapshot = refresh(fid, patient)
+    pid = db.patient_id(int(fid), patient)
+    if pid is None:
+        raise ValueError("Пациент не найден в этом семейном архиве")
+    return _apply_edits(snapshot, _load_edits(fid, pid))
+
+def save_edit(fid: int, patient: str, fact_key: str, action: str,
+              replacement: str = "", unit: str = "", note: str = "") -> None:
+    """Save a correction/ignore decision only for a fact currently present for this patient."""
+    if action not in {"correct", "ignore", "restore"}:
+        raise ValueError("Неизвестное действие с записью")
+    snapshot = refresh(fid, patient)
+    pid = db.patient_id(int(fid), patient)
+    if pid is None:
+        raise ValueError("Пациент не найден в этом семейном архиве")
+    fact = None
+    category = None
+    for list_key, candidate_category in (
+        ("diagnoses_mentioned", "diagnosis"),
+        ("medications_mentioned", "medication"),
+        ("lab_results", "lab_result"),
+    ):
+        fact = next((item for item in snapshot.get(list_key, []) if hmac.compare_digest(str(item.get("fact_key") or ""), str(fact_key))), None)
+        if fact:
+            category = candidate_category
+            break
+    if not fact:
+        raise ValueError("Запись памяти не найдена или уже изменилась; обновите страницу")
+    if action == "restore":
+        with tenancy.connect() as conn:
+            conn.execute(
+                "DELETE FROM patient_memory_edits WHERE family_id=? AND patient_id=? AND fact_key=?",
+                (int(fid), int(pid), fact_key),
+            )
+        return
+    payload = {"action": action, "note": _clean_text(note, 500)}
+    if action == "correct":
+        replacement = _clean_text(replacement, 500)
+        if not replacement:
+            raise ValueError("Введите исправленное значение")
+        payload["replacement"] = replacement
+        if category == "lab_result":
+            payload["unit"] = _clean_text(unit, 80)
+    crypt = tenancy.cipher()
+    encrypted = crypt.encrypt(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    with tenancy.connect() as conn:
+        conn.execute(
+            """INSERT INTO patient_memory_edits(family_id,patient_id,fact_key,payload_enc,updated_at)
+               VALUES(?,?,?,?,?)
+               ON CONFLICT(family_id,patient_id,fact_key) DO UPDATE SET
+                 payload_enc=excluded.payload_enc, updated_at=excluded.updated_at""",
+            (int(fid), int(pid), fact_key, encrypted, now),
+        )
 
 def to_context(snapshot: dict, max_chars: int = 8500) -> str:
     """Format memory for a consented model request, retaining source IDs for citations."""
