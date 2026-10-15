@@ -72,7 +72,7 @@ def _build_lab_trends(lab_results: list[dict]) -> list[dict]:
     """Compare only numeric results with the same normalized marker and explicit unit."""
     groups: dict[tuple[str, str], list[dict]] = {}
     for item in lab_results:
-        name = _norm_lab_name = " ".join(re.sub(r"[^0-9a-zа-яё]+", " ", str(item.get("name") or "").casefold().replace("ё", "е")).split())
+        name = " ".join(re.sub(r"[^0-9a-zа-яё]+", " ", str(item.get("name") or "").casefold().replace("ё", "е")).split())
         unit = " ".join(str(item.get("unit") or "").casefold().split())
         value = _numeric_value(item.get("value"))
         if not name or not unit or value is None or _date_key(item.get("date")) == date.min:
@@ -89,6 +89,7 @@ def _build_lab_trends(lab_results: list[dict]) -> list[dict]:
                 "date": item.get("date"),
                 "value": str(item.get("value")),
                 "numeric": item["_numeric"],
+                "marker_name": item.get("name"),
                 "source": item.get("source") or {},
             }
             if day in by_date and by_date[day]["numeric"] != entry["numeric"]:
@@ -105,8 +106,8 @@ def _build_lab_trends(lab_results: list[dict]) -> list[dict]:
         delta = latest["numeric"] - previous["numeric"]
         direction = "increase" if delta > 0 else "decrease" if delta < 0 else "unchanged"
         trends.append({
-            "name": latest["source"].get("name") or name_key,
-            "unit": latest["source"].get("unit") or unit_key,
+            "name": latest.get("marker_name") or name_key,
+            "unit": unit_key,
             "latest": {k: latest[k] for k in ("date", "value", "source")},
             "previous": {k: previous[k] for k in ("date", "value", "source")},
             "absolute_change": format(delta.normalize(), "f"),
