@@ -4,6 +4,7 @@ from fastapi.security import HTTPBasicCredentials
 
 os.environ["WEB_USERNAME"] = "test-admin"
 os.environ["WEB_PASSWORD"] = "test-password-for-unit-tests"
+os.environ["WEB_SESSION_SECRET"] = "unit-test-session-secret-with-more-than-32-chars"
 # Demo credentials default to test/test for the current MVP test phase.
 os.environ["DEMO_USERNAME"] = "test"
 os.environ["DEMO_PASSWORD"] = "test"
@@ -92,6 +93,69 @@ class WebAuthTests(unittest.TestCase):
         response = webapp.page("<script>alert(1)</script>", "safe body")
         self.assertNotIn("<title><script>", response.body.decode())
         self.assertIn("&lt;script&gt;", response.body.decode())
+
+    def test_login_creates_secure_session_and_restores_authentication(self):
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch
+        with patch.object(webapp.tenancy, "ensure_demo_family"), patch.object(webapp.tenancy, "families_for_user", return_value=[]):
+            client = TestClient(webapp.app, base_url="https://archive.example")
+            response = client.post("/auth/login", data={"username": "test", "password": "test", "next": "/app"}, follow_redirects=False)
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers.get("location"), "/app")
+            cookie = client.cookies.get(webapp.SESSION_COOKIE_NAME)
+            self.assertTrue(cookie)
+            cookie_header = response.headers.get("set-cookie", "")
+            self.assertIn("HttpOnly", cookie_header)
+            self.assertIn("Secure", cookie_header)
+            self.assertIn("SameSite=lax", cookie_header)
+            status = client.get("/auth/status")
+            self.assertEqual(status.status_code, 200)
+            self.assertIn('"authenticated":true', status.text)
+
+    def test_missing_or_expired_session_returns_401_without_basic_challenge(self):
+        from fastapi.testclient import TestClient
+        import time
+        from unittest.mock import patch
+        with patch.object(webapp.tenancy, "ensure_demo_family"):
+            client = TestClient(webapp.app, base_url="https://archive.example")
+            response = client.get("/auth/status")
+            self.assertEqual(response.status_code, 401)
+            self.assertNotIn("WWW-Authenticate", response.headers)
+            expired = webapp._make_session(webapp.DEMO_UID, expires_at=int(time.time()) - 1)
+            client.cookies.set(webapp.SESSION_COOKIE_NAME, expired, domain="archive.example", path="/")
+            expired_response = client.get("/auth/status")
+            self.assertEqual(expired_response.status_code, 401)
+
+    def test_logout_clears_session_and_demo_cookies(self):
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch
+        with patch.object(webapp.tenancy, "ensure_demo_family"), patch.object(webapp.tenancy, "families_for_user", return_value=[]):
+            client = TestClient(webapp.app, base_url="https://archive.example")
+            login = client.post("/auth/login", data={"username": "test", "password": "test"}, follow_redirects=False)
+            self.assertEqual(login.status_code, 303)
+            self.assertTrue(client.cookies.get(webapp.SESSION_COOKIE_NAME))
+            logout = client.post("/auth/logout", follow_redirects=False)
+            self.assertEqual(logout.status_code, 303)
+            self.assertEqual(logout.headers.get("location"), "/login")
+            self.assertFalse(client.cookies.get(webapp.SESSION_COOKIE_NAME))
+            status = client.get("/auth/status")
+            self.assertEqual(status.status_code, 401)
+
+    def test_login_rejects_invalid_credentials(self):
+        from fastapi.testclient import TestClient
+        client = TestClient(webapp.app, base_url="https://archive.example")
+        response = client.post("/auth/login", data={"username": "test", "password": "wrong"}, follow_redirects=False)
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("Неверный логин или пароль", response.text)
+        self.assertFalse(client.cookies.get(webapp.SESSION_COOKIE_NAME))
+
+    def test_legacy_basic_auth_remains_supported(self):
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch
+        client = TestClient(webapp.app, base_url="https://archive.example")
+        response = client.get("/auth/status", auth=("test-admin", "test-password-for-unit-tests"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"authenticated":true', response.text)
 
 if __name__ == "__main__":
     unittest.main()
