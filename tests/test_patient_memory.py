@@ -50,6 +50,7 @@ class PatientMemoryTests(unittest.TestCase):
     def test_memory_is_persisted_encrypted_and_source_linked(self):
         snapshot = patient_memory.refresh(self.family, self.patient)
         self.assertEqual(snapshot["document_count"], 1)
+        self.assertEqual(snapshot["profile"]["birth_date"], "2020-01-01")
         self.assertEqual(snapshot["lab_results"][0]["value"], "115")
         self.assertEqual(snapshot["lab_results"][0]["source"]["document_id"], self.doc_id)
         self.assertEqual(snapshot["diagnoses_mentioned"][0]["evidence_type"], "mentioned_in_document")
