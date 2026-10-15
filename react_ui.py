@@ -18,5 +18,3 @@ def install_react_ui(app: FastAPI) -> None:
         if not index.is_file():
             return FileResponse(Path(__file__).resolve().parent / "frontend" / "index.html", media_type="text/html")
         return FileResponse(index, media_type="text/html", headers={"Cache-Control": "no-cache"})
-
-[executed on device: marss1k.fvds.ru (ecc850ae-e012-4a56-b726-1ade67f14bec)]

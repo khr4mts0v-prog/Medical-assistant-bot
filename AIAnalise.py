@@ -718,5 +718,3 @@ def classify_with_ai(text, analysis):
         analysis["review_required"] = True
         analysis["classification_source"] = "rules+ai"
     return analysis
-
-[executed on device: marss1k.fvds.ru (ecc850ae-e012-4a56-b726-1ade67f14bec)]

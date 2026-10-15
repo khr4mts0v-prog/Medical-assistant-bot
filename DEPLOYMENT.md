@@ -25,5 +25,3 @@ Target: Ubuntu 24.04, Docker Compose, Nginx + HTTPS. The current low-cost test V
 ## Tests
 
 Run `python -m compileall -q .` and `python -m unittest discover -s tests -v`. Test family isolation, login failures, local upload/download, backups and restoration before considering production use.
-
-[executed on device: marss1k.fvds.ru (ecc850ae-e012-4a56-b726-1ade67f14bec)]
