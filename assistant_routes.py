@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 import requests
 from fastapi import Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 import database as db
 import tenancy
@@ -241,17 +241,45 @@ def install_assistant_routes(app, current_user, family_guard):
                 return ""
             return ' · <a href="/families/' + str(fid) + '/documents/' + str(int(doc_id)) + '/edit">Источник: ' + html.escape(str(source.get("name") or "документ")) + '</a>'
 
+        def fact_editor(item, category):
+            key = str(item.get("fact_key") or "")
+            if not key:
+                return ""
+            lab = category == "lab_result"
+            current = str((item.get("value") if lab else item.get("text")) or "")
+            unit = str(item.get("unit") or "") if lab else ""
+            corrected = bool(item.get("user_corrected"))
+            details = '<details class="memory-edit"><summary>' + ("Изменить / скрыть запись" if not corrected else "Запись исправлена · изменить или вернуть исходную") + '</summary>'
+            details += '<form method="post" action="/patient-memory/edit">'
+            details += '<input type="hidden" name="family_id" value="' + str(fid) + '">'
+            details += '<input type="hidden" name="patient" value="' + html.escape(patient, quote=True) + '">'
+            details += '<input type="hidden" name="fact_key" value="' + html.escape(key, quote=True) + '">'
+            details += '<label>Действие</label><select name="action"><option value="correct">Исправить запись</option><option value="ignore">Исключить из памяти</option><option value="restore">Вернуть исходную запись</option></select>'
+            if lab:
+                details += '<label>Значение</label><input name="replacement" maxlength="500" value="' + html.escape(current, quote=True) + '">'
+                details += '<label>Единица измерения</label><input name="unit" maxlength="80" value="' + html.escape(unit, quote=True) + '">'
+            else:
+                details += '<label>Текст записи</label><textarea name="replacement" rows="2" maxlength="500">' + html.escape(current) + '</textarea>'
+            details += '<label>Комментарий к исправлению (необязательно)</label><input name="note" maxlength="500" value="' + html.escape(str(item.get("correction_note") or ""), quote=True) + '">'
+            if corrected and item.get("original_text"):
+                details += '<p class="muted">Исходное извлечение: ' + html.escape(str(item.get("original_text"))) + '</p>'
+            if corrected and item.get("original_value") is not None:
+                details += '<p class="muted">Исходное значение: ' + html.escape(str(item.get("original_value"))) + ' ' + html.escape(str(item.get("original_unit") or "")) + '</p>'
+            details += '<button type="submit">Сохранить</button></form></details>'
+            return details
+
+        def render_fact(item, category, content):
+            marker = '<p class="muted">Исправлено пользователем; исходный документ не изменён.</p>' if item.get("user_corrected") else ""
+            return '<li><strong>' + html.escape(str(item.get("date") or "Дата не указана")) + '</strong> — ' + content + marker + source_link(item.get("source")) + fact_editor(item, category) + '</li>'
+
         diagnosis_html = section("Упомянутые диагнозы и состояния", snapshot["diagnoses_mentioned"][:100],
-            lambda item: '<li><strong>' + html.escape(str(item.get("date") or "Дата не указана")) + '</strong> — '
-            + html.escape(str(item.get("text") or "")) + source_link(item.get("source")) + '</li>')
+            lambda item: render_fact(item, "diagnosis", html.escape(str(item.get("text") or ""))))
         medication_html = section("Упомянутые лекарства и назначения", snapshot["medications_mentioned"][:100],
-            lambda item: '<li><strong>' + html.escape(str(item.get("date") or "Дата не указана")) + '</strong> — '
-            + html.escape(str(item.get("text") or "")) + source_link(item.get("source")) + '</li>')
+            lambda item: render_fact(item, "medication", html.escape(str(item.get("text") or ""))))
         lab_html = section("Лабораторные показатели", snapshot["lab_results"][:150],
-            lambda item: '<li><strong>' + html.escape(str(item.get("date") or "Дата не указана")) + '</strong> — '
-            + html.escape(str(item.get("name") or "")) + ': ' + html.escape(str(item.get("value") or ""))
-            + (' ' + html.escape(str(item.get("unit"))) if item.get("unit") else "")
-            + source_link(item.get("source")) + '</li>')
+            lambda item: render_fact(item, "lab_result",
+                html.escape(str(item.get("name") or "")) + ': ' + html.escape(str(item.get("value") or ""))
+                + (' ' + html.escape(str(item.get("unit"))) if item.get("unit") else "")))
         def render_trend(item):
             previous = item.get("previous") or {}
             latest = item.get("latest") or {}
@@ -278,13 +306,39 @@ def install_assistant_routes(app, current_user, family_guard):
             '<div class="card"><p><strong>Пациент:</strong> ' + html.escape(patient) + '</p>'
             '<p><strong>Дата рождения:</strong> ' + html.escape(str((snapshot.get("profile") or {}).get("birth_date") or "не указана")) + '</p>'
             '<p><strong>Документов учтено:</strong> ' + str(snapshot["document_count"]) + '</p>'
-            '<p>Память формируется локально из структурированных результатов распознавания и обновляется при открытии. '
-            'Каждая запись ведёт к исходному документу.</p>'
+            '<p>Память автоматически обновляется после добавления документа и изменения его типа или даты. '
+            'Исправления пользователя сохраняются отдельно от исходного документа и применяются к последующим ответам ассистента.</p>'
             '<p><a href="/assistant?family_id=' + str(fid) + '&patient=' + quote(patient, safe="") + '">Задать вопрос ассистенту по этому пациенту</a></p></div>'
             + diagnosis_html + medication_html + lab_html + trend_html + docs_html
             + '<section class="card"><h2>Ограничения памяти</h2><ul>' + caveats + '</ul></section>'
         )
         return _page("Память пациента", body)
+
+    @app.post("/patient-memory/edit", response_class=HTMLResponse)
+    def edit_patient_memory(
+        family_id: int = Form(...),
+        patient: str = Form(...),
+        fact_key: str = Form(...),
+        action: str = Form(...),
+        replacement: str = Form(""),
+        unit: str = Form(""),
+        note: str = Form(""),
+        uid: int = __import__("fastapi").Depends(current_user),
+    ):
+        families = tenancy.families_for_user(uid)
+        if int(family_id) not in {int(f["id"]) for f in families}:
+            raise HTTPException(403, "Нет доступа к этому семейному архиву")
+        family_guard(family_id, uid)
+        if patient not in db.patients(family_id):
+            raise HTTPException(400, "Выбранный пациент не найден в этом архиве")
+        try:
+            patient_memory.save_edit(family_id, patient, fact_key, action, replacement, unit, note)
+        except ValueError as exc:
+            return _page("Не удалось изменить память пациента", '<div class="card"><p>' + html.escape(str(exc)) + '</p><p><a href="/patient-memory?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться к памяти</a></p></div>', 400)
+        return RedirectResponse(
+            "/patient-memory?family_id=" + str(family_id) + "&patient=" + quote(patient, safe=""),
+            status_code=303,
+        )
 
     @app.get("/api/patient-memory")
     def patient_memory_api(family_id: int, patient: str,
