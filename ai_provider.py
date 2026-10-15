@@ -56,7 +56,7 @@ def classify_medical_intent(query):
         ], max_tokens=80, temperature=0, timeout=20)
         import json
         import re
-        match = re.search(r"\\{.*?\\}", result, re.S)
+        match = re.search(r"\{.*?\}", result, re.S)
         if not match:
             return "unknown"
         category = json.loads(match.group(0)).get("category")
