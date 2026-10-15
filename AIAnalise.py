@@ -381,7 +381,7 @@ def _classify_segment(text):
         "эндоскопическое заключение", "патоморфологическое заключение",
     }
     # An explicit referral heading should outrank incidental mentions of a requested study.
-    if re.match(r"^\s*(?:медицинское\s+)?направлени[ея]\b", title_text) and "направление" in scores:
+    if re.match(r"^\s*(?:медицинское\s+)?направлени[ея]\b", title_text):
         detected_title = "направление"
         detected_title_pattern = None
     if detected_title in report_title_labels and negative_report_context:
