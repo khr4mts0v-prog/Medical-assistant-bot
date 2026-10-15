@@ -728,7 +728,8 @@ def install_assistant_routes(app, current_user, family_guard):
             rows = rows[:20]
             # General medical questions may be answered without archive matches.
 
-            context = patient_memory.to_context(snapshot) + "\\n\\nРЕЛЕВАНТНЫЕ ДОКУМЕНТЫ ПО ЗАПРОСУ И ЯВНЫМ ССЫЛКАМ:\\n" + _context(rows)
+            has_patient_context = bool(rows or snapshot.get("document_count") or snapshot.get("manual_facts") or snapshot.get("diagnoses_mentioned") or snapshot.get("medications_mentioned") or snapshot.get("lab_results") or snapshot.get("profile", {}).get("birth_date"))
+            context = (patient_memory.to_context(snapshot) + "\\n\\nРЕЛЕВАНТНЫЕ ДОКУМЕНТЫ ПО ЗАПРОСУ И ЯВНЫМ ССЫЛКАМ:\\n" + _context(rows)) if has_patient_context else ""
             if references["missing_required"]:
                 missing_context = [
                     "- " + item["target"] + " (упомянуто в источнике ID "
