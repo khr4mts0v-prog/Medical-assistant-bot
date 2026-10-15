@@ -30,7 +30,8 @@ STOP_WORDS = {
     "по", "об", "о", "в", "во", "и", "на", "с", "со", "у", "к", "ко", "от", "до",
     "за", "под", "над", "между", "при", "для", "из", "или", "же", "ли", "бы", "там",
     "тут", "медицинский", "медицинские", "исследование", "исследования", "обследование",
-    "обследования", "заключение", "заключения", "результат", "результаты", "сводка", "сводку",
+    "обследования", "заключению", "исследованию", "исследованием", "исследований", "обследованию",
+    "обследованием", "заключение", "заключения", "результат", "результаты", "сводка", "сводку",
     "пожалуйста", "расскажи", "покажи", "найди", "сделай", "дай", "краткую", "краткий",
 }
 
@@ -82,6 +83,7 @@ def _explicit_full_history(question):
         r"\bвесь\s+(?:медицинский\s+)?архив\b",
         r"\bвсю\s+истори\w*(?:\s+здоров\w*)?\b",
         r"\bвся\s+истори\w*(?:\s+здоров\w*)?\b",
+        r"\bвсей\s+истори\w*(?:\s+здоров\w*)?\b",
         r"\bполную\s+истори\w*(?:\s+здоров\w*)?\b",
         r"\bполная\s+истори\w*(?:\s+здоров\w*)?\b",
         r"\bистори\w*\s+целиком\b",
@@ -517,9 +519,6 @@ def install_assistant_routes(app, current_user, family_guard):
         family_guard(fid, uid)
         if not query:
             raise HTTPException(400, "Введите запрос")
-        if not _is_archive_related(query):
-            return JSONResponse({"error": _off_topic_response(), "mode": "off_topic"}, status_code=400)
-
         people = db.patients(fid)
         patient_records = db.patient_records(fid)
         history_raw = payload.get("history", [])
@@ -584,7 +583,7 @@ def install_assistant_routes(app, current_user, family_guard):
                 for gap in answer_data["missing_documents"][:4]:
                     gkey = gap["name"].casefold()
                     found_ref_ids = matched_refs.get(gkey, set())
-                    gap["status"] = "candidate_found" if found_ref_ids else "not_found"
+                    gap["status"] = ("candidate_found" if found_ref_ids else "not_found") if gkey in matched_refs else "not_checked"
                     final_gaps.append(gap)
                 limitations = list(answer_data.get("limitations") or [])
                 if len(rows_by_id) >= 15:
