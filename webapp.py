@@ -21,7 +21,7 @@ install_react_ui(app)
 @app.get("/manifest.webmanifest")
 def pwa_manifest():
     return Response(
-        '{"name":"Медицинский архив","short_name":"Медархив","description":"Личный семейный архив медицинских документов","lang":"ru","start_url":"/","scope":"/","display":"standalone","background_color":"#f4f7f5","theme_color":"#16794b","icons":[{"src":"/app-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}',
+        '{"name":"Медицинский архив","short_name":"Медархив","description":"Личный семейный архив медицинских документов","lang":"ru","start_url":"/","scope":"/","display":"standalone","background_color":"#f4f7f5","theme_color":"#16794b","icons":[{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png","purpose":"any"},{"src":"/app-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}',
         media_type="application/manifest+json",
         headers={"Cache-Control":"no-cache"},
     )
@@ -33,6 +33,13 @@ def pwa_icon():
         media_type="image/svg+xml",
         headers={"Cache-Control":"public, max-age=86400"},
     )
+
+@app.get("/apple-touch-icon.png")
+def pwa_apple_touch_icon():
+    # PNG is required for reliable iOS Home Screen icons; it contains no user data.
+    image = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAABn0lEQVR42u3dUQ2AIBRAUXFmwFBaCAOYyFKm0AyCE3DnFMC93b35BSGm5RrgJ0YjQNAgaBA0CBpBg6BB0CBoEDSCBkGDoEHQIGgEDYIGQYOgQdAIGgQNggZBg6ARNAgaBA2CBkEjaBA0CBpyTUbwzLkfn585b6vB29AIGgQNggZBg6ARNAgaBA2CBkEjaBA0CBoEDYJG0CBoEDQIGgSNoEHQIGgQNAgaQYOgQdAgaAQNggZBg6BB0AgaBA2CBkGDoBE09CzEtFwtfEiNF1p5Vwsv3trQ+OUAQYOgQdAIGgQNggZBg6ARNAgaBA2CBkEjaBA0CBoEDYJG0CBoEDQIGgSNoEHQIGgo1cxljb2ocalkC5cg2tAgaBA0CBpBg6BB0CBoEDSCBkGDoEHQCBoEDYIGQYOgETQIGgQNggZBI2gQNAgaBA2CRtAgaBA0CBoEjaBB0CBoEDQIGkGDoEHQUMBLstjQIGgQNAgaQYOgQdAgaBA0ggZBg6BB0CBoBA2CBkGDoEHQCBoEDYIGQYOgETQIGgQNggZBI2gQNAgast0qbRHLtcavEQAAAABJRU5ErkJggg==")
+    return Response(image, media_type="image/png", headers={"Cache-Control": "public, max-age=604800"})
+
 
 @app.get("/sw.js")
 def pwa_service_worker():
