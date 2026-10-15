@@ -5,7 +5,7 @@ Target: Ubuntu 24.04, Docker Compose, Nginx + HTTPS. The current low-cost test V
 ## Configure
 
 1. Keep .env mode 600. Set FERNET_KEY, WEB_USERNAME and a long unique WEB_PASSWORD. Never commit .env.
-2. Demo login is disabled unless both `DEMO_USERNAME` and `DEMO_PASSWORD` are explicitly set. Do not configure shared `test/test` credentials on a public endpoint; if demo access is needed, use unique credentials and synthetic data only.
+2. During the current private MVP testing phase, demo login defaults to `test/test`. Keep the endpoint restricted to HTTPS and trusted testers; before any public launch, set unique `DEMO_USERNAME` and `DEMO_PASSWORD` values in `.env`.
 2. Set `DOCUMENT_STORAGE_BACKEND=local` to store web uploads on the VPS. This is the default.
 3. The web service and Telegram bot share `./data:/app/data`. Local originals and OCR sidecars are stored at `./data/documents/family_<id>/<patient>/`; SQLite remains `./data/archive.sqlite3`.
 4. Run `docker compose config --quiet` and `docker compose up -d --build`.
