@@ -5,6 +5,7 @@ import base64
 import json
 import re
 import sys
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
@@ -27,19 +28,34 @@ def read_env(path):
     return values
 
 
-def request(url, auth=None, timeout=10):
+def request(url, auth=None, timeout=10, attempts=12, retry_delay=2):
+    """Retry transient connection failures while a freshly started server becomes ready."""
     headers = {"Cache-Control": "no-cache", "User-Agent": "medical-archive-release-smoke/1.0"}
     if auth:
         token = base64.b64encode((auth[0] + ":" + auth[1]).encode()).decode()
         headers["Authorization"] = "Basic " + token
-    req = Request(url, headers=headers)
-    try:
-        with urlopen(req, timeout=timeout) as response:
-            return response.status, response.headers, response.read()
-    except HTTPError as exc:
-        return exc.code, exc.headers, exc.read()
-    except URLError as exc:
-        raise RuntimeError(f"Не удалось подключиться к {url}: {exc.reason}") from exc
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        req = Request(url, headers=headers)
+        try:
+            with urlopen(req, timeout=timeout) as response:
+                return response.status, response.headers, response.read()
+        except HTTPError as exc:
+            # HTTP responses (including auth and missing-resource errors) are real
+            # application responses, not startup connection failures.
+            return exc.code, exc.headers, exc.read()
+        except (URLError, ConnectionError, TimeoutError, OSError) as exc:
+            last_error = getattr(exc, "reason", None) or str(exc)
+            if attempt < attempts:
+                print(
+                    f"Temporary connection failure for {url} "
+                    f"(attempt {attempt}/{attempts}); retrying in {retry_delay}s.",
+                    file=sys.stderr,
+                )
+                time.sleep(retry_delay)
+    raise RuntimeError(
+        f"Не удалось подключиться к {url} после {attempts} попыток: {last_error}"
+    )
 
 
 def require(condition, message):
