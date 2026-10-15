@@ -1,7 +1,7 @@
 {
-  "name": "Семейный медицинский архив",
+  "name": "Медицинский архив",
   "short_name": "Медархив",
-  "description": "Семейный медицинский архив",
+  "description": "Личный семейный архив медицинских документов",
   "lang": "ru",
   "start_url": "/app",
   "scope": "/",
@@ -11,19 +11,19 @@
     "minimal-ui"
   ],
   "background_color": "#f2f6ff",
-  "theme_color": "#f2f6ff",
+  "theme_color": "#0755e8",
   "icons": [
     {
-      "src": "/app-icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
       "purpose": "any"
     },
     {
       "src": "/app-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "maskable"
+      "purpose": "any maskable"
     }
   ]
 }
