@@ -159,6 +159,19 @@ class PatientMemoryTests(unittest.TestCase):
             item["text"],
         )
 
+    def test_deleting_source_document_removes_its_memory_correction(self):
+        snapshot = patient_memory.get_snapshot(self.family, self.patient)
+        item = snapshot["diagnoses_mentioned"][0]
+        patient_memory.save_edit(self.family, self.patient, item["fact_key"], "correct", "Исправленный факт")
+        self.assertTrue(db.delete_doc(self.family, self.doc_id))
+        with tenancy.connect() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) AS n FROM patient_memory_edits WHERE family_id=?",
+                (self.family,),
+            ).fetchone()["n"]
+        self.assertEqual(count, 0)
+        self.assertEqual(patient_memory.get_snapshot(self.family, self.patient)["document_count"], 0)
+
     def test_memory_edit_cannot_target_another_patient_fact(self):
         snapshot = patient_memory.get_snapshot(self.family, self.patient)
         fact_key = snapshot["diagnoses_mentioned"][0]["fact_key"]
