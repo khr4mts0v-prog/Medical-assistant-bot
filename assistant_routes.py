@@ -69,12 +69,27 @@ OFF_TOPIC_TERMS = re.compile(
     r"ресторан\w*|кулинар\w*|рецепт\s+(?:борщ\w*|пицц\w*|блюд\w*|торт\w*)|автомобил\w*|машин\w*)\b", re.I)
 
 def _is_archive_related(question):
-    """No provider call is made for clearly unrelated or programming/politics requests."""
+    """Reject clearly off-topic requests while allowing genuine medical questions."""
     q = " ".join(str(question or "").casefold().replace("ё", "е").split())
     if not q or len(q) > 1200:
         return False
-    # Medical intent takes precedence when a question also contains a generic
-    # word that happens to overlap with the off-topic filter.
+
+    # A strong non-medical domain takes precedence over incidental medical words:
+    # e.g. "write code for blood analysis", "company shares and blood test",
+    # or "where can I eat pizza?". Keep generic politics separate because
+    # public-health/vaccine-policy questions can be genuinely medical.
+    clearly_off_topic = re.compile(
+        r"\\b(programmирован\\w*|программ\\w+ на|programming|python|javascript|typescript|java|c\\+\\+|"
+        r"code|script|код|скрипт|компилятор|html|css|api|git|linux|windows|сервер|"
+        r"погод\\w*|weather|анекдот\\w*|joke|мем\\w*|фильм\\w*|movie|сериал\\w*|игр\\w*|game|"
+        r"word|excel|powerpoint|zip|rar|winrar|news|sport\\w*|футбол|баскетбол|теннис|travel|"
+        r"путешеств\\w*|туризм|отел\\w*|доллар\\w*|евро|валют\\w*|финанс\\w*|акци\\w*|"
+        r"бирж\\w*|bitcoin|crypto|shopping|купить|покупк\\w*|price|цен\\w*|скидк\\w*|"
+        r"ресторан\\w*|кулинар\\w*|рецепт\\s+(?:борщ\\w*|пицц\\w*|блюд\\w*|торт\\w*)|"
+        r"автомобил\\w*|машин\\w*)\\b", re.I)
+    if clearly_off_topic.search(q):
+        return False
+
     if ARCHIVE_INTENT_TERMS.search(q):
         return True
     return not bool(OFF_TOPIC_TERMS.search(q))
