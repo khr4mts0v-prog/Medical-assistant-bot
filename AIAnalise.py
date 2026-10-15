@@ -368,6 +368,9 @@ def _classify_segment(text):
         for label in imaging_labels:
             scores.pop(label, None)
             evidence.pop(label, None)
+        if normalized == "анализ крови":
+            scores.pop("лабораторный отчёт", None)
+            evidence.pop("лабораторный отчёт", None)
 
     # A clear form/document title in the beginning outranks cross-references
     # embedded in long forms (e.g. X-ray or lab fields inside form 025/у).
