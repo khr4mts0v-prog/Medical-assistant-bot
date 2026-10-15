@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 import database as db
 import tenancy
+import ai_consent
 from ai_provider import answer_archive_question, chat_completion, provider_config
 import patient_memory
 from document_references import discover_referenced_documents
@@ -673,6 +674,20 @@ def install_assistant_routes(app, current_user, family_guard):
             raise HTTPException(400, "Выбранный пациент не найден в этом архиве")
         return JSONResponse(patient_memory.get_snapshot(family_id, patient))
 
+    @app.get("/api/ai-consent")
+    def get_ai_consent(uid: int = __import__("fastapi").Depends(current_user)):
+        return JSONResponse(ai_consent.get(uid))
+
+    @app.post("/api/ai-consent")
+    async def update_ai_consent(request: Request, uid: int = __import__("fastapi").Depends(current_user)):
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(400, "Некорректный запрос")
+        if not isinstance(payload, dict) or type(payload.get("granted")) is not bool:
+            raise HTTPException(400, "Ожидается явное булево значение granted")
+        return JSONResponse(ai_consent.set_consent(uid, payload["granted"]))
+
     @app.get("/assistant", response_class=HTMLResponse)
     def assistant_page(family_id: int | None = None, patient: str = "", uid: int = __import__("fastapi").Depends(current_user)):
         families = tenancy.families_for_user(uid)
@@ -688,6 +703,17 @@ def install_assistant_routes(app, current_user, family_guard):
             patient = patients[0] if len(patients) == 1 else ""
         family_options = "".join('<option value="' + str(f["id"]) + '"' + (" selected" if int(f["id"]) == fid else "") + ">" + html.escape(f["name"]) + "</option>" for f in families)
         patient_options = '<option value="">Выберите пациента</option>' + "".join('<option' + (" selected" if p == patient else "") + '>' + html.escape(p) + '</option>' for p in patients)
+        consent_state = ai_consent.get(uid)
+        consent_html = "" if consent_state["granted"] else (
+            '<label style="font-weight:400"><input type="checkbox" name="consent" value="yes" required style="width:auto"> '
+            'Я разрешаю передавать внешнему ИИ-провайдеру текст вопроса и только релевантные фрагменты документов выбранного пациента. '
+            'Согласие можно отозвать в настройках.</label>'
+        )
+        consent_note = (
+            '<p class="muted">' + ("Разрешение на внешний ИИ-анализ сохранено для этой учётной записи; его можно отозвать в настройках. "
+            if consent_state["granted"] else "Без явного согласия данные внешнему ИИ не передаются. ") +
+            'Ответ не заменяет консультацию врача.</p>'
+        )
         body = (
             '<div class="card"><p>Ассистент сначала планирует поиск, затем ищет только в архиве выбранного пациента и анализирует найденные источники.</p>'
             '<form method="post" action="/assistant">'
@@ -695,9 +721,9 @@ def install_assistant_routes(app, current_user, family_guard):
             '<label>Пациент</label><select name="patient" required>' + patient_options + '</select>'
             '<p><a href="/patient-memory?family_id=' + str(fid) + '&patient=' + quote(patient, safe="") + '">Открыть память пациента и историю показателей</a></p>'
             '<label>Вопрос</label><textarea name="question" rows="4" required maxlength="1200" placeholder="Например: сравни гемоглобин за последние полгода и покажи динамику"></textarea>'
-            '<label style="font-weight:400"><input type="checkbox" name="consent" value="yes" required style="width:auto"> Я разрешаю отправить текст вопроса и найденные фрагменты медицинских документов внешнему ИИ-провайдеру для анализа.</label>'
+            ' + consent_html + '
             '<button type="submit">Найти и проанализировать</button></form>'
-            '<p class="muted">Если согласие не дано, данные не отправляются во внешнюю нейросеть. Ответ не заменяет консультацию врача.</p></div>'
+            ' + consent_note + '</div>'
         )
         return _page("Медицинский ассистент", body)
 
@@ -713,8 +739,10 @@ def install_assistant_routes(app, current_user, family_guard):
         question = " ".join((question or "").split())[:1200]
         if not question:
             raise HTTPException(400, "Введите вопрос")
-        if consent != "yes":
-            return _page("Требуется согласие", '<div class="card">Вопрос и медицинские фрагменты не отправлялись нейросети. Чтобы продолжить, вернитесь и явно подтвердите согласие.</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться</a></p>', 400)
+        if consent == "yes":
+            ai_consent.set_consent(uid, True)
+        elif not ai_consent.get(uid)["granted"]:
+            return _page("Требуется согласие", '<div class="card">Вопрос и медицинские фрагменты не отправлялись нейросети. Чтобы продолжить, явно подтвердите согласие. После подтверждения оно сохранится для следующих вопросов; его можно отозвать в настройках.</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться</a></p>', 400)
         # Classify only after explicit consent; never send the question to an external model before this check.
         try:
             from ai_provider import classify_medical_intent
@@ -847,7 +875,11 @@ def install_assistant_routes(app, current_user, family_guard):
         if followup and history:
             needs_analysis = True
         consent = payload.get("consent") is True or str(payload.get("consent") or "").casefold() in {"yes", "true", "1", "on"}
-        if needs_analysis and not consent:
+        if needs_analysis and consent:
+            # This write follows an explicit affirmative user action; login alone never grants consent.
+            ai_consent.set_consent(uid, True)
+        consent_granted = ai_consent.get(uid)["granted"]
+        if needs_analysis and not consent_granted:
             return JSONResponse({"mode": "analysis", "needs_consent": True,
                 "message": "Для ответа ИИ отправит во внешний сервис ваш вопрос и фрагменты документов, выбранных локальным поиском. Проверьте согласие, чтобы продолжить."})
 
