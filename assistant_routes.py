@@ -170,6 +170,19 @@ def _mentioned_people(records, question):
                 continue
             variants.add(alias)
             last = alias.split()[-1]
+            # Common nickname forms, only when the registered name makes the match plausible.
+            nickname_forms = {
+                "александр": ("саша", "саши", "саня", "сани"),
+                "александра": ("саша", "саши"),
+                "мария": ("маша", "маши"),
+                "дмитрий": ("дима", "дими", "митя"),
+                "михаил": ("миша", "миши"),
+                "екатерина": ("катя", "кати"),
+                "анастасия": ("настя", "насти"),
+                "наталья": ("наташа", "наташи"),
+            }
+            if alias in nickname_forms:
+                variants.update(nickname_forms[alias])
             # Common Russian name inflections ("Саша" → "Саши", "Маша" → "Маши").
             if len(last) >= 3 and last.endswith(("а", "я")):
                 variants.add(alias[:-1] + "и")
@@ -524,7 +537,11 @@ def install_assistant_routes(app, current_user, family_guard):
         history_raw = payload.get("history", [])
         history = [str(x).strip()[:350] for x in history_raw if isinstance(x, str) and str(x).strip()][-5:] if isinstance(history_raw, list) else []
         qfold = query.casefold().replace("ё", "е")
-        followup = bool(re.match(r"^(?:а\s+)?(?:что|какие|когда|почему|зачем|и\s+что|а\s+ещ[её]|подробнее|продолжи|поясни\s+это|расскажи\s+подробнее)\b", qfold))
+        followup = len(qfold.split()) <= 10 and bool(re.match(
+            r"^(?:(?:а|и|но|теперь)\s+)?(?:что|какие|когда|почему|зачем|сравни(?:\s+его|\s+это|\s+с\s+предыдущим)?|"
+            r"а\s+ещ[её]|подробнее|продолжи|поясни|расскажи|его|ее|её|этот|это|эта|такой|дальше|сравнение)\b",
+            qfold,
+        ))
         search_question = query
         if history and followup:
             search_question += "\nКонтекст предыдущего вопроса: " + " | ".join(history[-3:])
