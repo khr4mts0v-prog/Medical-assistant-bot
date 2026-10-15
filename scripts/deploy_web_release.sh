@@ -160,6 +160,15 @@ if python3 "$DEPLOY_WORKTREE/scripts/smoke_test_web.py" --env-file "$DEPLOY_WORK
     echo "Previous container retained (stopped) as $RENAMED_CONTAINER."
   fi
 else
+  echo "Smoke test failed; collecting new web container diagnostics before rollback." >&2
+  if docker inspect "$SERVICE" >/dev/null 2>&1; then
+    echo "=== Failed web container state ===" >&2
+    docker inspect -f 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' "$SERVICE" >&2 || true
+    echo "=== Failed web container logs (last 160 lines) ===" >&2
+    docker logs --tail 160 "$SERVICE" 2>&1 || true
+  else
+    echo "Failed web container no longer exists; container logs unavailable." >&2
+  fi
   echo "Smoke test failed; attempting rollback." >&2
   if [[ -n "$RENAMED_CONTAINER" ]]; then
     restore_preserved_container || true
