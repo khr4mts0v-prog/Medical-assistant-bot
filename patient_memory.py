@@ -55,7 +55,7 @@ def _source_ref(row: dict) -> dict:
         "kind": _clean_text(row.get("kind") or "не определён", 100),
     }
 
-def _build_snapshot(fid: int, patient: str, rows: list[dict]) -> dict:
+def _build_snapshot(fid: int, patient: str, rows: list[dict], profile: dict | None = None) -> dict:
     records = []
     diagnoses = []
     medications = []
@@ -117,6 +117,10 @@ def _build_snapshot(fid: int, patient: str, rows: list[dict]) -> dict:
         "schema_version": 1,
         "family_id": int(fid),
         "patient": patient,
+        "profile": {
+            "name": patient,
+            "birth_date": _clean_text((profile or {}).get("birth_date"), 40) or None,
+        },
         "generated_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
         "document_count": len(records),
         "documents": records[:500],
@@ -132,6 +136,7 @@ def _build_snapshot(fid: int, patient: str, rows: list[dict]) -> dict:
     }
     fingerprint_payload = {
         "patient": patient,
+        "profile": {"birth_date": _clean_text((profile or {}).get("birth_date"), 40) or None},
         "records": [
             {
                 "id": int(row["id"]), "name": row.get("name"), "date": row.get("date"),
@@ -155,23 +160,21 @@ def refresh(fid: int, patient: str) -> dict:
     if pid is None:
         raise ValueError("Пациент не найден в этом семейном архиве")
     rows = db.search(fid, patient, "", limit=1000)
-    snapshot, source_ids, fingerprint = _build_snapshot(fid, patient, rows)
+    profile = next(
+        (record for record in db.patient_records(fid) if record["name"].casefold() == patient.casefold()),
+        {},
+    )
+    snapshot, source_ids, fingerprint = _build_snapshot(fid, patient, rows, profile)
     now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     crypt = tenancy.cipher()
     with tenancy.connect() as conn:
         existing = conn.execute(
-            "SELECT source_fingerprint FROM patient_memory_snapshots WHERE family_id=? AND patient_id=?",
+            "SELECT source_fingerprint,snapshot_enc FROM patient_memory_snapshots WHERE family_id=? AND patient_id=?",
             (fid, int(pid)),
         ).fetchone()
         if existing and existing["source_fingerprint"] == fingerprint:
-            stored = conn.execute(
-                "SELECT snapshot_enc,source_ids_enc FROM patient_memory_snapshots WHERE family_id=? AND patient_id=?",
-                (fid, int(pid)),
-            ).fetchone()
             try:
-                previous = json.loads(crypt.decrypt(stored["snapshot_enc"]).decode("utf-8"))
-                previous["generated_at"] = snapshot["generated_at"]
-                snapshot = previous
+                return json.loads(crypt.decrypt(existing["snapshot_enc"]).decode("utf-8"))
             except Exception:
                 logging.warning("Patient memory snapshot could not be decrypted; rebuilding it")
         conn.execute(
@@ -199,6 +202,7 @@ def to_context(snapshot: dict, max_chars: int = 8500) -> str:
     lines = [
         "СТРУКТУРИРОВАННАЯ ПАМЯТЬ ПАЦИЕНТА (производная от документов; не считать диагнозы независимо подтверждёнными):",
         "Пациент: " + str(snapshot.get("patient") or "не указан"),
+        "Дата рождения в карточке: " + str((snapshot.get("profile") or {}).get("birth_date") or "не указана"),
         "Документов в архиве: " + str(snapshot.get("document_count", 0)),
         "Упомянутые диагнозы/состояния (сначала сверить источник):",
     ]
