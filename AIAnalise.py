@@ -350,7 +350,7 @@ def _classify_segment(text):
         if lab_marker_count < 2:
             scores.pop("лабораторный отчёт", None)
             evidence.pop("лабораторный отчёт", None)
-    if negative_report_context or (mention_context and not specific_report_context):
+    if negative_report_context or pending_report_context or (mention_context and not specific_report_context):
         for label in imaging_labels:
             scores.pop(label, None)
             evidence.pop(label, None)
@@ -359,7 +359,7 @@ def _classify_segment(text):
             if label != "направление":
                 scores.pop(label, None)
                 evidence.pop(label, None)
-    if re.fullmatch(r"(?:узи|экг|мрт|кт|фгдс|рентген)", normalized):
+    if re.fullmatch(r"(?:узи|экг|мрт|кт|фгдс|рентген|анализ\\s+крови)", normalized):
         for label in imaging_labels:
             scores.pop(label, None)
             evidence.pop(label, None)
