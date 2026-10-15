@@ -357,13 +357,15 @@ function App() {
                 setSmartConversation((previous:any[]) => [...previous,{question:submittedQuestion,result}].slice(-20));
                 setSmartResult(null);
                 setSmartQuery('');
+                // Consent applies to one external-AI request, including patient-memory context.
+                setSmartConsent(false);
               }
             } catch (e) {setSmartError(e instanceof Error ? e.message : 'Не удалось выполнить запрос');}
             finally {setSmartBusy(false);}
           }}>
             <label htmlFor="smart-search-query">Что хочешь узнать?</label>
             <textarea id="smart-search-query" rows={2} maxLength={1200} value={smartQuery} onChange={e => setSmartQuery(e.target.value)} placeholder="Например: Дай краткую сводку по УЗИ Саши" required />
-            {smartResult?.needs_consent && <label className="smart-consent"><input type="checkbox" checked={smartConsent} onChange={e => setSmartConsent(e.target.checked)} /> Я разрешаю отправить вопрос и найденные фрагменты медицинских документов внешнему ИИ-провайдеру для анализа.</label>}
+            {smartResult?.needs_consent && <label className="smart-consent"><input type="checkbox" checked={smartConsent} onChange={e => setSmartConsent(e.target.checked)} /> Я разрешаю отправить внешней модели мой вопрос, найденные фрагменты документов и относящиеся к вопросу сведения из памяти пациента.</label>}
             <button type="submit" disabled={smartBusy || !smartQuery.trim()}>{smartBusy ? 'Готовлю ответ…' : smartResult?.needs_consent ? 'Продолжить анализ' : 'Отправить'}</button>
           </form>
           <p className="smart-search-footnote">Медицинские фрагменты передаются внешней модели только после явного согласия. ИИ может ошибаться; источники всегда доступны для проверки.</p>
