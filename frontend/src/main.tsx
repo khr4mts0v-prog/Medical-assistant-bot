@@ -319,10 +319,10 @@ function App() {
               </div>}
               {turn.result?.missing_documents?.length > 0 && <section className="smart-gaps">
                 <h3><FilePlus2 size={17}/> Что может не хватать</h3>
-                <p className="smart-gap-intro">Я проверил архив по названиям документов из найденных заключений. Если нужного файла здесь нет, загружать его необязательно — сводка выше уже составлена по доступным источникам.</p>
+                <p className="smart-gap-intro">Я дополнительно проверил архив по названиям и ключевым словам из найденных заключений. Если нужного файла здесь нет, загружать его необязательно — сводка выше уже составлена по доступным источникам.</p>
                 {turn.result.missing_documents.map((gap:any, gapIndex:number) => <div className="smart-gap-card" key={gapIndex}>
                   <strong>{gap.name}</strong><p>{gap.reason}</p>
-                  {gap.status === 'candidate_found' ? <small className="smart-gap-status">Есть совпадение по поисковым словам среди архивных документов; проверьте, что это именно нужный источник.</small> : <small className="smart-gap-status">Не найден по названию в доступном архиве. Возможно, он сохранён под другим именем.</small>}
+                  {gap.status === 'candidate_found' ? <small className="smart-gap-status">Есть совпадение по поисковым словам среди архивных документов; проверьте, что это именно нужный источник.</small> : gap.status === 'not_found' ? <small className="smart-gap-status">Не найден по названию и ключевым словам в доступном архиве. Возможно, он сохранён под другим именем.</small> : <small className="smart-gap-status">Автоматически проверить этот документ не удалось. Можно выполнить поиск вручную.</small>}
                   <div className="smart-gap-actions">
                     <button type="button" onClick={() => {setSmartQuery('Найди документы: ' + gap.name + (turn.result.documents?.[0]?.patient ? ' для ' + turn.result.documents[0].patient : ''));setSmartResult(null);}}>Проверить в архиве</button>
                     <button type="button" onClick={() => {setSmartSearchOpen(false);navigate('/');}}>Загрузить, если файл есть</button>
