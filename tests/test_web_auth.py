@@ -29,7 +29,8 @@ class WebAuthTests(unittest.TestCase):
 
     def test_demo_credentials_are_a_separate_identity(self):
         from unittest.mock import patch
-        with patch.object(webapp.tenancy, "ensure_demo_family") as ensure:
+        with patch.object(webapp, "DEMO_USERNAME", "test"), patch.object(webapp, "DEMO_PASSWORD", "test"), \
+             patch.object(webapp.tenancy, "ensure_demo_family") as ensure:
             demo_uid = webapp.current_user(None, HTTPBasicCredentials(username="test", password="test"))
         self.assertEqual(demo_uid, webapp.DEMO_UID)
         self.assertNotEqual(demo_uid, -(int(__import__("hashlib").sha256(b"test-admin").hexdigest()[:12], 16) or 1))
@@ -46,7 +47,8 @@ class WebAuthTests(unittest.TestCase):
             return Request({"type":"http","asgi":{"version":"3.0"},"http_version":"1.1",
                 "method":"GET","scheme":"https","path":"/","raw_path":b"/","query_string":b"",
                 "headers":headers,"client":("203.0.113.4",1234),"server":("archive.example",443)})
-        with patch.object(webapp.tenancy, "ensure_demo_family"):
+        with patch.object(webapp, "DEMO_USERNAME", "test"), patch.object(webapp, "DEMO_PASSWORD", "test"), \
+             patch.object(webapp.tenancy, "ensure_demo_family"):
             uid_a = webapp.current_user(request("browser-a-session"), HTTPBasicCredentials(username="test",password="test"))
             uid_b = webapp.current_user(request("browser-b-session"), HTTPBasicCredentials(username="test",password="test"))
             self.assertNotEqual(uid_a, uid_b)
@@ -57,7 +59,8 @@ class WebAuthTests(unittest.TestCase):
     def test_http_middleware_sets_secure_per_browser_cookie(self):
         from fastapi.testclient import TestClient
         from unittest.mock import patch
-        with patch.object(webapp.tenancy, "ensure_demo_family"), patch.object(webapp.tenancy, "families_for_user", return_value=[]):
+        with patch.object(webapp, "DEMO_USERNAME", "test"), patch.object(webapp, "DEMO_PASSWORD", "test"), \
+             patch.object(webapp.tenancy, "ensure_demo_family"), patch.object(webapp.tenancy, "families_for_user", return_value=[]):
             client_a = TestClient(webapp.app, base_url="https://archive.example")
             client_b = TestClient(webapp.app, base_url="https://archive.example")
             first = client_a.get("/", auth=("test", "test"))
