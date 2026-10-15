@@ -41,7 +41,7 @@ def classify_medical_intent(query):
     """Classify intent using the configured model; return unknown safely on any failure."""
     system = (
         "Классификатор тематики запросов для семейного медицинского архива. "
-        "Верни только один JSON-объект вида {\\"category\\":\\"medical_general|medical_patient|non_medical|ambiguous\\"}. "
+        'Верни только один JSON-объект вида {"category":"medical_general|medical_patient|non_medical|ambiguous"}. '
         "medical_general: медицинские знания, симптомы, лекарства, профилактика, здоровье, общие медицинские вопросы. "
         "medical_patient: вопросы о конкретном пациенте, его документах, анализах, лечении или медицинской истории. "
         "non_medical: явно посторонние запросы о политике без медицинского контекста, погоде, развлечениях, программировании, покупках и т.п. "
