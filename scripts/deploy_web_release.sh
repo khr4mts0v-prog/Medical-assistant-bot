@@ -1,12 +1,24 @@
 #!/usr/bin/env bash
-# Deploy only the web service from origin/release/web-2026-10.
-# Run as root (for Docker); never stashes, resets, or checks out the working tree.
+# Deploy only the web service from origin/release-web-2026-10.
+# Run as root (for Docker); never stashes, resets, or checks out the source working tree.
 set -Eeuo pipefail
 
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   echo "Run with sudo: sudo bash $0" >&2
   exit 2
 fi
+
+# Persist the complete transcript, while still showing it in the terminal.
+LOG_ROOT="${LOG_ROOT:-/opt/medical-assistant-logs}"
+mkdir -p "$LOG_ROOT"
+chmod 700 "$LOG_ROOT"
+LOG_FILE="$LOG_ROOT/deploy-web-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
+touch "$LOG_FILE"
+chmod 600 "$LOG_FILE"
+exec > >(tee -a "$LOG_FILE") 2>&1
+trap 'rc=$?; echo "[ERROR] line=$LINENO exit=$rc command=$BASH_COMMAND"; echo "Full deployment log: $LOG_FILE"; exit "$rc"' ERR
+echo "Deployment started: $(date -u +%FT%TZ)"
+echo "Full deployment log: $LOG_FILE"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_ROOT="${SOURCE_ROOT:-$(git -C "$SCRIPT_DIR/.." rev-parse --show-toplevel)}"
@@ -77,25 +89,84 @@ PY
 echo "Database backup created: $BACKUP_FILE"
 
 SERVICE="medical-archive-web"
-PROJECT="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$SERVICE" 2>/dev/null || true)"
-PROJECT="${PROJECT:-medical-assistant-bot}"
+COMPOSE=(docker compose -p medical-assistant-bot -f "$DEPLOY_WORKTREE/docker-compose.yml")
+"${COMPOSE[@]}" config --quiet
+
+# Capture the existing web container before changing anything.
+OLD_CONTAINER_ID="$(docker inspect -f '{{.Id}}' "$SERVICE")"
 OLD_IMAGE_ID="$(docker inspect -f '{{.Image}}' "$SERVICE")"
 OLD_IMAGE_NAME="$(docker inspect -f '{{.Config.Image}}' "$SERVICE")"
+OLD_PROJECT="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$SERVICE" 2>/dev/null || true)"
+OLD_SERVICE="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.service" }}' "$SERVICE" 2>/dev/null || true)"
 ROLLBACK_TAG="medical-archive-web:rollback-$STAMP"
 docker image tag "$OLD_IMAGE_ID" "$ROLLBACK_TAG"
+echo "Existing container: id=$OLD_CONTAINER_ID image=$OLD_IMAGE_NAME project=${OLD_PROJECT:-<none>} service=${OLD_SERVICE:-<none>}"
 
-COMPOSE=(docker compose -p "$PROJECT" -f "$DEPLOY_WORKTREE/docker-compose.yml")
-"${COMPOSE[@]}" config --quiet
 "${COMPOSE[@]}" build --pull "$SERVICE"
-"${COMPOSE[@]}" up -d --no-deps "$SERVICE"
+
+# An unmanaged container with the fixed Compose container_name blocks Compose from
+# creating its replacement. Validate its data mount and published port, then stop
+# and rename it (do not delete it) so it remains available for rollback.
+RENAMED_CONTAINER=""
+if [[ -z "$OLD_PROJECT" || "$OLD_SERVICE" != "$SERVICE" || "$OLD_PROJECT" != "medical-assistant-bot" ]]; then
+  python3 - "$SERVICE" "$SOURCE_ROOT/data" <<'PY'
+import json, os, subprocess, sys
+name, expected_data = sys.argv[1:3]
+obj = json.loads(subprocess.check_output(["docker", "inspect", name], text=True))[0]
+mounts = {m.get("Destination"): os.path.realpath(m.get("Source", "")) for m in obj.get("Mounts", [])}
+if mounts.get("/app/data") != os.path.realpath(expected_data):
+    raise SystemExit("Refusing to replace unmanaged web container: /app/data mount does not match " + expected_data)
+bindings = obj.get("HostConfig", {}).get("PortBindings", {}).get("8000/tcp") or []
+if not any(b.get("HostIp") == "127.0.0.1" and b.get("HostPort") == "8000" for b in bindings):
+    raise SystemExit("Refusing to replace unmanaged web container: expected 127.0.0.1:8000 binding not found")
+print("Existing unmanaged container validated: data mount and loopback port match.")
+PY
+  RENAMED_CONTAINER="medical-archive-web-preserved-$STAMP"
+  docker stop "$SERVICE"
+  docker rename "$SERVICE" "$RENAMED_CONTAINER"
+  echo "Preserved previous web container as $RENAMED_CONTAINER (stopped, not deleted)."
+fi
+
+restore_preserved_container() {
+  if [[ -n "$RENAMED_CONTAINER" ]] && docker inspect "$RENAMED_CONTAINER" >/dev/null 2>&1; then
+    # Remove only the newly created Compose web container, if it is ours.
+    if docker inspect "$SERVICE" >/dev/null 2>&1; then
+      NEW_PROJECT="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$SERVICE" 2>/dev/null || true)"
+      NEW_SERVICE="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.service" }}' "$SERVICE" 2>/dev/null || true)"
+      if [[ "$NEW_PROJECT" == "medical-assistant-bot" && "$NEW_SERVICE" == "$SERVICE" ]]; then
+        docker stop "$SERVICE" || true
+        docker rm "$SERVICE" || true
+      else
+        echo "Cannot safely remove conflicting container named $SERVICE; preserved container remains $RENAMED_CONTAINER." >&2
+        return 1
+      fi
+    fi
+    docker rename "$RENAMED_CONTAINER" "$SERVICE"
+    docker start "$SERVICE"
+    echo "Restored original web container $OLD_CONTAINER_ID."
+  fi
+}
+
+if ! "${COMPOSE[@]}" up -d --no-deps "$SERVICE"; then
+  echo "Compose failed to replace the web service; restoring preserved container if applicable." >&2
+  restore_preserved_container || true
+  exit 6
+fi
 
 if python3 "$DEPLOY_WORKTREE/scripts/smoke_test_web.py" --env-file "$DEPLOY_WORKTREE/.env"; then
   echo "Deployment verified. Telegram/bot service was not restarted."
   echo "Rollback image retained as $ROLLBACK_TAG"
+  if [[ -n "$RENAMED_CONTAINER" ]]; then
+    echo "Previous container retained (stopped) as $RENAMED_CONTAINER."
+  fi
 else
-  echo "Smoke test failed; restoring the previous web image." >&2
-  docker image tag "$OLD_IMAGE_ID" "$OLD_IMAGE_NAME"
-  "${COMPOSE[@]}" up -d --no-deps --no-build --force-recreate "$SERVICE" || true
-  echo "Rollback attempted. Inspect medical-archive-web logs before retrying." >&2
-  exit 6
+  echo "Smoke test failed; attempting rollback." >&2
+  if [[ -n "$RENAMED_CONTAINER" ]]; then
+    restore_preserved_container || true
+  else
+    docker image tag "$OLD_IMAGE_ID" "$OLD_IMAGE_NAME"
+    "${COMPOSE[@]}" up -d --no-deps --no-build --force-recreate "$SERVICE" || true
+  fi
+  echo "Rollback attempted. Inspect this log and the web container logs before retrying." >&2
+  exit 7
 fi
