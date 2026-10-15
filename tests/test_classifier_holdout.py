@@ -156,6 +156,20 @@ class ClassifierHoldoutTests(unittest.TestCase):
             "не определено",
         )
 
+    def test_holdout_future_mri_appointment_is_not_report(self):
+        self.assert_primary(
+            "Врач сказал принести заключение МРТ, но в сообщении обсуждается только дата "
+            "записи на исследование. Сканирование ещё не проводилось и заключение не выдавалось.",
+            "не определено",
+        )
+
+    def test_holdout_historical_medication_is_not_new_prescription(self):
+        self.assert_primary(
+            "Пациент вспоминает прежнюю схему лечения и препарат, который принимал прошлой зимой. "
+            "Нового назначения, рецептурного бланка или листа терапии в сообщении нет.",
+            "не определено",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
