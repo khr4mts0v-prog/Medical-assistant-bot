@@ -6,20 +6,23 @@
     </linearGradient>
   </defs>
   <rect width="1024" height="1024" rx="220" fill="url(#blue)"/>
-  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
-    <path stroke-width="48" d="M270 390a242 242 0 0 1 484 0"/>
-    <path stroke-width="58" d="M300 390v115c0 118 69 197 157 230 35 13 55 39 55 77v72"/>
-    <path stroke-width="58" d="M724 390v110c0 112-58 184-143 221-36 16-69 44-69 91"/>
-    <path stroke-width="56" d="M270 390h-25c-31 0-56 25-56 56v94c0 31 25 56 56 56h28"/>
-    <path stroke-width="56" d="M754 390h25c31 0 56 25 56 56v94c0 31-25 56-56 56h-27"/>
-    <path stroke-width="48" d="M753 585c0 71-35 112-91 135"/>
-    <path stroke-width="50" d="M662 720l-45 20"/>
-    <circle cx="512" cy="860" r="76" stroke-width="28"/>
-  </g>
-  <circle cx="512" cy="860" r="30" fill="#fff"/>
   <g fill="#fff">
-    <rect x="199" y="382" width="98" height="215" rx="48"/>
-    <rect x="727" y="382" width="98" height="215" rx="48"/>
-    <rect x="620" y="711" width="108" height="62" rx="31" transform="rotate(-22 674 742)"/>
+    <!-- Headset band and ear cups -->
+    <path d="M260 320a252 252 0 0 1 504 0h-48a204 204 0 0 0-408 0z"/>
+    <path d="M292 326c-54 0-95 42-95 96v116c0 54 41 96 95 96h27V326z"/>
+    <path d="M732 326h27c54 0 95 42 95 96v116c0 54-41 96-95 96h-27z"/>
+    <!-- Stethoscope ear tips -->
+    <path d="M343 351c-18 0-31 13-31 31v29c0 17 14 31 31 31h16c29 0 48-20 48-46s-19-45-48-45z"/>
+    <path d="M681 351c-29 0-48 19-48 45s19 46 48 46h16c17 0 31-14 31-31v-29c0-18-13-31-31-31z"/>
+    <!-- Main stethoscope tubing -->
+    <path d="M337 401v97c0 109 56 186 143 226 43 20 64 54 64 102v64h38v-65c0-66-32-112-83-136-75-35-116-99-116-191v-97z"/>
+    <path d="M687 401v98c0 83-29 142-89 179-19 12-40 21-58 36l27 31c20-17 39-25 58-37 73-46 108-115 108-209v-98z"/>
+    <!-- Headset microphone arm and capsule -->
+    <path d="M780 532v38c0 65-31 110-87 132l-31-36c48-17 70-49 70-96v-38z"/>
+    <rect x="626" y="638" width="111" height="67" rx="33.5" transform="rotate(-20 681.5 671.5)"/>
+    <!-- Chestpiece -->
+    <circle cx="512" cy="824" r="88"/>
   </g>
+  <circle cx="512" cy="824" r="62" fill="url(#blue)"/>
+  <circle cx="512" cy="824" r="44" fill="#fff"/>
 </svg>
