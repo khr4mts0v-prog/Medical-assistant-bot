@@ -62,6 +62,20 @@ class ClassificationHardCasesTests(unittest.TestCase):
         )
         self.assertIn("заключение МРТ", result["document_types"])
 
+    def test_lab_report_title_is_not_invalidated_by_missing_personal_data(self):
+        self.assert_primary(
+            "УЧЕБНАЯ ЛАБОРАТОРИЯ\n"
+            "РЕЗУЛЬТАТЫ ЛАБОРАТОРНЫХ ИССЛЕДОВАНИЙ\n"
+            "Учебный образец; персональные данные отсутствуют.\n"
+            "Материал: венозная кровь; дата взятия: 08.10.2026.\n"
+            "Общий анализ крови\nГемоглобин: 128 г/л; референсный интервал 120–150.\n"
+            "Эритроциты: 4,31 × 10^12/л; лейкоциты: 6,4 × 10^9/л.\n"
+            "Тромбоциты: 271 × 10^9/л; гематокрит: 39,8 %.\n"
+            "СОЭ: 9 мм/ч. Результаты относятся только к учебному примеру.\n"
+            "Дата формирования отчёта: 08.10.2026.",
+            "лабораторный отчёт",
+        )
+
     def test_lab_report_with_common_ocr_spacing_noise(self):
         self.assert_primary(
             "РЕЗУЛЬТАТЫ ЛАБОРАТОРНЫХ ИССЛЕДОВАНИЙ\n"
@@ -118,3 +132,5 @@ class ClassificationHardCasesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+[executed on device: marss1k.fvds.ru (ecc850ae-e012-4a56-b726-1ade67f14bec)]

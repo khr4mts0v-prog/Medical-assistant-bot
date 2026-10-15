@@ -21,24 +21,50 @@ install_react_ui(app)
 @app.get("/manifest.webmanifest")
 def pwa_manifest():
     return Response(
-        '{"name":"Медицинский архив","short_name":"Медархив","description":"Личный семейный архив медицинских документов","lang":"ru","start_url":"/","scope":"/","display":"standalone","background_color":"#f4f7f5","theme_color":"#16794b","icons":[{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png","purpose":"any"},{"src":"/app-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}',
+        '{"name":"Медицинский архив","short_name":"Медархив","description":"Личный семейный архив медицинских документов","lang":"ru","start_url":"/app","scope":"/","display":"standalone","background_color":"#f2f6ff","theme_color":"#0755e8","icons":[{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png","purpose":"any"},{"src":"/app-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}',
         media_type="application/manifest+json",
         headers={"Cache-Control":"no-cache"},
     )
 
 @app.get("/app-icon.svg")
 def pwa_icon():
-    return Response(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#16794b"/><path d="M224 112h64v112h112v64H288v112h-64V288H112v-64h112z" fill="#fff"/></svg>',
-        media_type="image/svg+xml",
-        headers={"Cache-Control":"public, max-age=86400"},
-    )
+    icon_path=Path(__file__).resolve().parent/"docs"/"assets"/"medical-assistant-icon-concept.svg"
+    if not icon_path.is_file():
+        raise HTTPException(500,"Approved PWA icon asset is missing")
+    return Response(icon_path.read_text(encoding="utf-8"),media_type="image/svg+xml",headers={"Cache-Control":"public, max-age=86400"})
 
 @app.get("/apple-touch-icon.png")
 def pwa_apple_touch_icon():
-    # PNG is required for reliable iOS Home Screen icons; it contains no user data.
-    image = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAABn0lEQVR42u3dUQ2AIBRAUXFmwFBaCAOYyFKm0AyCE3DnFMC93b35BSGm5RrgJ0YjQNAgaBA0CBpBg6BB0CBoEDSCBkGDoEHQIGgEDYIGQYOgQdAIGgQNggZBg6ARNAgaBA2CBkEjaBA0CBpyTUbwzLkfn585b6vB29AIGgQNggZBg6ARNAgaBA2CBkEjaBA0CBoEDYJG0CBoEDQIGgSNoEHQIGgQNAgaQYOgQdAgaAQNggZBg6BB0AgaBA2CBkGDoBE09CzEtFwtfEiNF1p5Vwsv3trQ+OUAQYOgQdAIGgQNggZBg6ARNAgaBA2CBkEjaBA0CBoEDYJG0CBoEDQIGgSNoEHQIGgo1cxljb2ocalkC5cg2tAgaBA0CBpBg6BB0CBoEDSCBkGDoEHQCBoEDYIGQYOgETQIGgQNggZBI2gQNAgaBA2CRtAgaBA0CBoEjaBB0CBoEDQIGkGDoEHQUMBLstjQIGgQNAgaQYOgQdAgaBA0ggZBg6BB0CBoBA2CBkGDoEHQCBoEDYIGQYOgETQIGgQNggZBI2gQNAgast0qbRHLtcavEQAAAABJRU5ErkJggg==")
-    return Response(image, media_type="image/png", headers={"Cache-Control": "public, max-age=604800"})
+    # 180px PNG rendition follows the same headset/stethoscope geometry as app-icon.svg.
+    from io import BytesIO
+    from PIL import Image, ImageDraw
+    image=Image.new("RGB",(180,180))
+    pixels=image.load()
+    for y in range(180):
+        for x in range(180):
+            t=(x+y)/358
+            pixels[x,y]=(int(22*(1-t)+7*t),int(139*(1-t)+85*t),int(250*(1-t)+232*t))
+    draw=ImageDraw.Draw(image)
+    white="#ffffff"
+    # Headset arch and cups
+    draw.arc((45,17,135,91),180,360,fill=white,width=8)
+    draw.rounded_rectangle((34,57,57,112),radius=12,fill=white)
+    draw.rounded_rectangle((123,57,146,112),radius=12,fill=white)
+    # Stethoscope ear tips and tubing, with the Y-junction and chestpiece
+    draw.ellipse((49,51,69,68),fill=white)
+    draw.ellipse((111,51,131,68),fill=white)
+    draw.line([(58,64),(58,88),(64,105),(77,116),(87,124),(90,135)],fill=white,width=8,joint="curve")
+    draw.line([(121,64),(121,88),(115,105),(103,116),(96,124)],fill=white,width=8,joint="curve")
+    # Boom microphone and capsule
+    draw.line([(137,104),(137,112),(130,123),(119,128)],fill=white,width=6,joint="curve")
+    draw.rounded_rectangle((109,119,131,133),radius=7,fill=white)
+    # Chestpiece: white outer ring, blue inner ring, white diaphragm
+    draw.ellipse((74,127,106,159),fill=white)
+    draw.ellipse((80,133,100,153),fill=(9,105,239))
+    draw.ellipse((83,136,97,150),fill=white)
+    buffer=BytesIO()
+    image.save(buffer,format="PNG",optimize=True)
+    return Response(buffer.getvalue(),media_type="image/png",headers={"Cache-Control":"public, max-age=604800"})
 
 
 @app.get("/sw.js")
@@ -46,7 +72,51 @@ def pwa_service_worker():
     # Deliberately network-only: never cache private medical records or OCR text.
     script='self.addEventListener("install",e=>self.skipWaiting());self.addEventListener("activate",e=>e.waitUntil(self.clients.claim()));self.addEventListener("fetch",e=>{if(e.request.method!=="GET")return;e.respondWith(fetch(e.request));});'
     return Response(script,media_type="application/javascript",headers={"Cache-Control":"no-cache","Service-Worker-Allowed":"/"})
-security=HTTPBasic()
+security=HTTPBasic(auto_error=False)
+SESSION_COOKIE_NAME="medical_archive_session"
+SESSION_MAX_AGE=max(300,min(2592000,int(os.getenv("WEB_SESSION_MAX_AGE","604800"))))
+
+def _session_signing_key():
+    secret=os.getenv("WEB_SESSION_SECRET","").strip()
+    return secret.encode("utf-8") if len(secret)>=32 else None
+
+def _make_session(uid, expires_at=None):
+    key=_session_signing_key()
+    if not key:
+        raise RuntimeError("WEB_SESSION_SECRET must contain at least 32 characters")
+    expiry=int(expires_at if expires_at is not None else time.time()+SESSION_MAX_AGE)
+    payload=f"{int(uid)}:{expiry}:{secrets.token_urlsafe(18)}".encode("utf-8")
+    encoded=base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+    signature=hmac.new(key,encoded.encode("ascii"),hashlib.sha256).hexdigest()
+    return encoded+"."+signature
+
+def _read_session(token):
+    key=_session_signing_key()
+    if not key or not token or len(token)>2048:
+        return None
+    try:
+        encoded,signature=token.rsplit(".",1)
+        expected=hmac.new(key,encoded.encode("ascii"),hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature,expected):
+            return None
+        payload=base64.urlsafe_b64decode(encoded + "="*((4-len(encoded)%4)%4)).decode("utf-8")
+        uid,expiry,_nonce=payload.split(":",2)
+        uid=int(uid); expiry=int(expiry)
+        if uid==0 or expiry<=int(time.time()) or expiry>int(time.time())+2592000:
+            return None
+        return uid
+    except (ValueError, UnicodeDecodeError, TypeError):
+        return None
+
+def _safe_next_path(value):
+    value=str(value or "/")
+    return value if value.startswith("/") and not value.startswith("//") and "\r" not in value and "\n" not in value else "/"
+
+def _login_html(next_path="/", error="", status=200):
+    target=html.escape(_safe_next_path(next_path),quote=True)
+    message=f'<p class="error" role="alert">{html.escape(error)}</p>' if error else ""
+    body='''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0755e8"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/app-icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>Вход · Медицинский архив</title><style>:root{color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f2f6ff;color:#172b4d}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px}.card{width:min(100%,420px);padding:28px;border:1px solid #dce7f8;border-radius:24px;background:#fff;box-shadow:0 18px 60px #153b7814}.brand{display:flex;align-items:center;gap:12px;margin-bottom:24px;font-weight:750;font-size:1.1rem}.brand img{width:52px;height:52px;border-radius:14px;background:#0755e8}h1{font-size:1.65rem;letter-spacing:-.04em;margin:0 0 8px}p{color:#60718d;line-height:1.5}label{display:block;font-weight:650;margin:16px 0 6px}input{width:100%;padding:13px 14px;border:1px solid #d5e0f0;border-radius:12px;font:inherit;min-height:48px}button{width:100%;margin-top:22px;padding:13px;border:0;border-radius:12px;background:#0755e8;color:#fff;font:inherit;font-weight:700;min-height:48px}.error{padding:12px;border-radius:10px;background:#fff0f0;color:#a32424}</style></head><body><main class="card"><div class="brand"><img src="/app-icon.svg" alt=""><span>Medical Assistant</span></div><h1>Войти в архив</h1><p>Войдите, чтобы открыть семейный медицинский архив.</p>'''+message+'''<form method="post" action="/auth/login"><input type="hidden" name="next" value="'''+target+'''"><label for="username">Логин</label><input id="username" name="username" autocomplete="username" required autofocus><label for="password">Пароль</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">Войти</button></form></main></body></html>'''
+    return HTMLResponse(body,status_code=status,headers={"Cache-Control":"no-store"})
 WEB_USERNAME=os.getenv("WEB_USERNAME","").strip()
 WEB_PASSWORD=os.getenv("WEB_PASSWORD","")
 # Temporary shared demo credentials are retained for the private MVP testing phase.
@@ -102,7 +172,30 @@ async def demo_session_cookie(request: Request, call_next):
                         secure=True, samesite="lax", path="/")
     return response
 
-def current_user(request: Request, credentials: HTTPBasicCredentials=Depends(security))->int:
+@app.middleware("http")
+async def redirect_unauthenticated_browser_to_login(request: Request, call_next):
+    """Redirect browser page requests to the login screen without changing API semantics."""
+    response = await call_next(request)
+    path = request.url.path
+    excluded = {"/login", "/auth/login", "/auth/status", "/auth/logout"}
+    accepts_html = "text/html" in request.headers.get("accept", "").lower()
+    if (response.status_code == 401 and request.method in {"GET", "HEAD"}
+            and accepts_html and path not in excluded and not path.startswith("/api/")):
+        target = path
+        if request.url.query:
+            target += "?" + request.url.query
+        return RedirectResponse(url="/login?" + urlencode({"next": target}), status_code=303)
+    return response
+
+def current_user(request: Request, credentials: HTTPBasicCredentials|None=Depends(security))->int:
+    # A valid signed session takes precedence for PWA requests; legacy HTTP Basic remains supported.
+    if request and request.url.path!="/auth/login":
+        session_uid=_read_session(request.cookies.get(SESSION_COOKIE_NAME,""))
+        if session_uid is not None:
+            if is_demo_user(session_uid): _ensure_demo_tenant(session_uid)
+            return session_uid
+    if credentials is None:
+        raise HTTPException(401,"Not authenticated")
     ip = request.client.host if request and request.client else "unknown"
     now = time.monotonic()
     rate_key = ip + ":" + hashlib.sha256(credentials.username.encode()).hexdigest()[:16]
@@ -136,6 +229,49 @@ def current_user(request: Request, credentials: HTTPBasicCredentials=Depends(sec
     with AUTH_FAILURES_LOCK:
         AUTH_FAILURES.setdefault(ip, []).append(now)
     raise HTTPException(401,"Invalid username or password",headers={"WWW-Authenticate":'Basic realm="Medical Archive"'})
+
+@app.get("/login",response_class=HTMLResponse,include_in_schema=False)
+def login_page(request:Request,next_path:str="/"):
+    if _read_session(request.cookies.get(SESSION_COOKIE_NAME,"")) is not None:
+        return RedirectResponse(_safe_next_path(next_path),status_code=303)
+    return _login_html(next_path)
+
+@app.post("/auth/login",include_in_schema=False)
+def create_login_session(request:Request,username:str=Form(...),password:str=Form(...),next_path:str=Form("/",alias="next")):
+    if not _session_signing_key():
+        return _login_html(next_path,"Сессии не настроены. Администратору необходимо задать WEB_SESSION_SECRET длиной не менее 32 символов.",503)
+    credentials=HTTPBasicCredentials(username=username,password=password)
+    demo_ok=bool(DEMO_USERNAME and DEMO_PASSWORD and hmac.compare_digest(username.encode(),DEMO_USERNAME.encode()) and hmac.compare_digest(password.encode(),DEMO_PASSWORD.encode()))
+    demo_cookie=request.cookies.get("medical_demo_session","")
+    if demo_ok:
+        demo_cookie=demo_cookie or secrets.token_urlsafe(32)
+        request.state.medical_demo_session=demo_cookie
+    try:
+        uid=current_user(request,credentials)
+    except HTTPException:
+        return _login_html(next_path,"Неверный логин или пароль.",401)
+    try:
+        token=_make_session(uid)
+    except RuntimeError:
+        return _login_html(next_path,"Не удалось создать защищённую сессию.",503)
+    response=RedirectResponse(_safe_next_path(next_path),status_code=303)
+    response.set_cookie(SESSION_COOKIE_NAME,token,max_age=SESSION_MAX_AGE,httponly=True,secure=True,samesite="lax",path="/")
+    if demo_ok:
+        response.set_cookie("medical_demo_session",demo_cookie,max_age=SESSION_MAX_AGE,httponly=True,secure=True,samesite="lax",path="/")
+    response.headers["Cache-Control"]="no-store"
+    return response
+
+@app.get("/auth/status",include_in_schema=False)
+def auth_status(uid:int=Depends(current_user)):
+    return Response('{"authenticated":true}',media_type="application/json",headers={"Cache-Control":"no-store"})
+
+@app.post("/auth/logout",include_in_schema=False)
+def logout():
+    response=RedirectResponse("/login",status_code=303)
+    response.delete_cookie(SESSION_COOKIE_NAME,path="/",secure=True,httponly=True,samesite="lax")
+    response.delete_cookie("medical_demo_session",path="/",secure=True,httponly=True,samesite="lax")
+    response.headers["Cache-Control"]="no-store"
+    return response
 
 def _cleanup_expired_demo_tenants_once():
     """Purge artifacts only for expired tenants explicitly marked as demo."""
@@ -193,7 +329,7 @@ def start_demo_cleanup_worker():
         DEMO_CLEANUP_STARTED = True
 
 def page(title,body,status=200):
-    return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#16794b"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Медархив"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/app-icon.svg" type="image/svg+xml"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
+    return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0755e8"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Медархив"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/app-icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
 :root{color-scheme:light;--bg:#f4f8ff;--fg:#172b4d;--card:#ffffff;--line:#e2eaf5;--muted:#6b7b94;--field:#f8fbff;--accent:#3478df;--accent-strong:#245fc0;--accent-soft:#e6f0ff;--warn:#a76800;--danger:#b42318;--shadow:0 5px 22px rgba(35,76,130,.065);--radius:18px}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -862,295 +998,5 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), ai_c
                 stored=f"{Path(format_filename(patient,kind,date,ex)).stem}_{digest[:8]}.{ex}"
                 ocr_stored=Path(stored).stem+".txt"
                 if storage_backend=="local":
-                    saved_path=save_local_file(family_id,patient,stored,local); saved_paths.append(saved_path)
-                    ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(text,encoding="utf-8")
-                    saved_paths.append(save_local_file(family_id,patient,ocr_stored,ocr_tmp))
-                    remote=str(saved_path); oremote=str(saved_path.parent/ocr_stored)
-                else:
-                    disk=YaDiskClient(token); folder=f"{ROOT}/family_{family_id}/{safe_name(patient)}"
-                    docs,ocr=folder+"/docs",folder+"/OCR"
-                    disk.ensure_folder(docs); disk.ensure_folder(ocr)
-                    remote,oremote=docs+"/"+stored,ocr+"/"+ocr_stored
-                    disk.upload_file(str(local),remote)
-                    with tempfile.TemporaryDirectory() as od:
-                        op=Path(od)/"ocr.txt"; op.write_text(text,encoding="utf-8"); disk.upload_file(str(op),oremote)
-                if not db.add_doc(family_id,patient,stored,kind,date,remote,oremote,text,keywords,digest,analysis=analysis):
-                    if storage_backend=="local":
-                        for candidate in saved_paths:
-                            try: candidate.unlink()
-                            except FileNotFoundError: pass
-                    results.append('<li><strong>'+html.escape(name)+'</strong>: дубликат, запись не добавлена.</li>')
-                    continue
-                if storage_backend=="yandex":
-                    with tempfile.TemporaryDirectory() as hd:
-                        hp=Path(hd)/"history.txt"; hp.write_text(db.history(family_id,patient),encoding="utf-8")
-                        disk.upload_file(str(hp),folder+"/history.txt")
-                review="; требуется проверить тип" if analysis.get("review_required") else ""
-                results.append('<li><strong>'+html.escape(name)+'</strong>: сохранён пациенту <strong>'+html.escape(patient)+'</strong>; тип: '+html.escape(kind)+'; дата: '+html.escape(str(date or "не указана"))+review+'.</li>')
-        except Exception as e:
-            for candidate in saved_paths:
-                try: candidate.unlink()
-                except FileNotFoundError: pass
-            logging.exception("Inbox upload failed (%s)",type(e).__name__)
-            results.append('<li><strong>'+html.escape(name)+'</strong>: ошибка обработки ('+html.escape(type(e).__name__)+').</li>')
-        finally:
-            try: upload_file.file.close()
-            except Exception: pass
-    body='<p><a href="/?family_id='+str(family_id)+'">← В архив</a></p><h2>Результаты загрузки</h2><div class="card"><ul>'+''.join(results)+'</ul></div>'
-    return page("Результаты загрузки",body)
 
-
-
-@app.get("/families/{fid}/inbox", response_class=HTMLResponse)
-def review_inbox(fid:int,uid:int=Depends(current_user)):
-    family(fid,uid)
-    rows=db.pending_documents(fid)
-    body=[f'<p><a href="/?family_id={fid}">← В архив</a></p><h2>Нераспознанные документы</h2><p>Документы здесь сохранены в зашифрованном виде до назначения пациента.</p>']
-    if not rows:
-        body.append('<div class="card">Входящих документов нет.</div>')
-    if rows:
-        patient_options = "".join('<option value="' + html.escape(p,quote=True) + '">' + html.escape(p) + '</option>' for p in db.patients(fid))
-        body.append('<form class="card" method="post" action="/families/' + str(fid) + '/inbox/assign-selected"><h3>Массовое назначение пациента</h3><p>Отметьте документы одного человека. Тип и дата каждого документа сохраняются отдельно, если их удалось определить.</p><label>Назначить пациенту<br><select name="patient" required>' + patient_options + '</select></label>')
-        for row in rows:
-            body.append(f'<div class="card"><label><input type="checkbox" name="pending_ids" value="{int(row["id"])}"> <strong>{html.escape(row["name"])}</strong></label><p>Добавлен: {html.escape(row["created"])}</p><a href="/families/{fid}/inbox/{row["id"]}">Открыть и классифицировать отдельно</a></div>')
-        body.append('<button type="submit">Назначить выбранные документы</button></form>')
-    return page("Нераспознанные документы","".join(body))
-
-@app.post("/families/{fid}/inbox/assign-selected", response_class=HTMLResponse)
-def assign_selected_pending(fid:int,patient:str=Form(...),pending_ids:list[int]=Form(...),uid:int=Depends(current_user)):
-    family(fid,uid)
-    if patient not in db.patients(fid): raise HTTPException(400,"Выбранный пациент не найден")
-    ids=list(dict.fromkeys(int(x) for x in pending_ids))
-    if not ids or len(ids)>50: raise HTTPException(400,"Выберите от 1 до 50 документов")
-    results=[]
-    from AIAnalise import DOCUMENT_TYPE_RULES
-    for pending_id in ids:
-        d=db.get_pending_doc(fid,pending_id)
-        if not d:
-            results.append("<li>Документ #"+str(pending_id)+": не найден, пропущен.</li>")
-            continue
-        analysis=d.get("analysis") or {}
-        kind=str(analysis.get("primary_type") or "не определено")
-        if kind not in DOCUMENT_TYPE_RULES: kind="не определено"
-        title=str(analysis.get("display_title") or (kind if kind!="не определено" else Path(d["name"]).stem))[:180].strip()
-        # Avoid confusing a patient's date of birth with the document date.
-        date=explicit_document_date(d.get("text") or "")
-        try:
-            response=assign_pending_document(fid,pending_id,patient,kind,title,date,uid)
-            results.append("<li><strong>"+html.escape(d["name"])+"</strong>: назначен пациенту "+html.escape(patient)+"; индивидуальные тип и дата сохранены.</li>")
-        except HTTPException as exc:
-            results.append("<li><strong>"+html.escape(d["name"])+"</strong>: ошибка "+html.escape(str(exc.detail))+"; требуется проверить документ.</li>")
-        except Exception as exc:
-            logging.exception("Bulk pending assignment failed (%s)",type(exc).__name__)
-            results.append("<li><strong>"+html.escape(d["name"])+"</strong>: ошибка обработки; требуется повторная проверка.</li>")
-    body='<p><a href="/families/'+str(fid)+'/inbox">← Ко входящим</a></p><h2>Результат массового назначения</h2><div class="card"><ul>'+''.join(results)+'</ul></div>'
-    return page("Массовое назначение",body)
-
-@app.get("/families/{fid}/inbox/{pending_id}/preview")
-def preview_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)):
-    family(fid,uid)
-    d=db.get_pending_doc(fid,pending_id)
-    if not d: raise HTTPException(404,"Документ не найден")
-    ext=Path(d["name"]).suffix.lower()
-    media={".pdf":"application/pdf",".jpg":"image/jpeg",".jpeg":"image/jpeg",".png":"image/png",".webp":"image/webp",".bmp":"image/bmp",".tif":"image/tiff",".tiff":"image/tiff"}.get(ext)
-    if not media: raise HTTPException(415,"Предпросмотр формата недоступен")
-    return Response(content=d["file_bytes"],media_type=media,headers={"Content-Disposition":"inline; filename*=UTF-8''"+__import__("urllib.parse",fromlist=["quote"]).quote(d["name"])})
-
-@app.get("/families/{fid}/inbox/{pending_id}", response_class=HTMLResponse)
-def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)):
-    family(fid,uid)
-    d=db.get_pending_doc(fid,pending_id)
-    if not d: raise HTTPException(404,"Документ не найден во входящих")
-    patients=db.patient_records(fid)
-    from AIAnalise import DOCUMENT_TYPE_RULES
-    kinds=["не определено"]+sorted(DOCUMENT_TYPE_RULES.keys())
-    patient_options="".join('<option value="'+html.escape(p["name"],quote=True)+'">'+html.escape(p["name"])+(' · рожд. '+html.escape(p["birth_date"]) if p.get("birth_date") else '')+'</option>' for p in patients)
-    labels={"лабораторный отчёт":"Анализы","заключение УЗИ":"УЗИ","заключение КТ":"КТ","заключение МРТ":"МРТ","рентгенологическое заключение":"Рентген","направление":"Направление","протокол осмотра или приёма":"Приём врача","консультация специалиста":"Консультация врача","выписной эпикриз":"Выписка из стационара","выписка из медицинской карты":"Выписка из карты","назначение или рецепт":"Назначение / рецепт","заключение ЭКГ":"ЭКГ","эндоскопическое заключение":"Эндоскопия (ФГДС / колоноскопия)","патоморфологическое заключение":"Гистология / биопсия","операционный протокол":"Операция","медицинская справка":"Медицинская справка","справка о временной нетрудоспособности":"Больничный / справка","вакцинальный документ":"Прививки","история развития ребёнка":"История развития ребёнка","контрольная карта диспансерного наблюдения":"Диспансерное наблюдение","медицинская карта или наблюдение":"Медицинская карта","документ по беременности и родам":"Беременность и роды","медицинское свидетельство о рождении":"Свидетельство о рождении","медицинское свидетельство о смерти":"Свидетельство о смерти","санаторно-курортная документация":"Санаторий / реабилитация","не определено":"Не определено"}
-    kind_options="".join('<option value="'+html.escape(k,quote=True)+'"'+(' selected' if k==d["analysis"].get("primary_type") else '')+'>'+html.escape(labels.get(k,k[:1].upper()+k[1:]))+'</option>' for k in kinds)
-    ext=Path(d["name"]).suffix.lower()
-    preview_url=f"/families/{fid}/inbox/{pending_id}/preview"
-    if ext in {".jpg",".jpeg",".png",".webp",".bmp",".tif",".tiff"}:
-        preview=f'<a class="document-preview-link" href="{preview_url}" target="_blank" rel="noopener" aria-label="Открыть изображение в полном размере"><img class="preview-image" src="{preview_url}" alt="Предпросмотр документа"><span>Нажмите, чтобы открыть полностью ↗</span></a>'
-    elif ext==".pdf":
-        preview=f'<div class="pdf-preview"><div class="pdf-preview-toolbar">Предпросмотр PDF · прокрутите документ ниже</div><iframe src="{preview_url}#view=FitH" title="Предпросмотр PDF" loading="lazy"></iframe><p><a href="{preview_url}" target="_blank" rel="noopener">Открыть PDF отдельно ↗</a></p></div>'
-    else:
-        preview=""
-    body=f'<p><a href="/families/{fid}/inbox">← К входящим</a></p><h2>Классификация документа</h2><div class="card pending-review-card"><strong>Файл:</strong> {html.escape(d["name"])}{preview}<details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape(d["text"][:12000])}</pre></details></div>'
-    body+=f'<p><a href="/families/{fid}/patients/new">＋ Добавить пациента</a></p>'
-    body+=f'<form class="pending-classification-form" method="post" action="/families/{fid}/inbox/{pending_id}/assign"><label>Пациент<br><select name="patient" required>{patient_options}</select></label><label>Тип документа<br><select name="kind" required>{kind_options}</select></label><label>Название в архиве<br><input name="title" required maxlength="180" value="{html.escape(str(d["analysis"].get("display_title") or d["analysis"].get("primary_type") or d["name"]),quote=True)}"></label><label>Дата документа (ДД-ММ-ГГГГ)<br><input name="date" placeholder="17-03-2025" maxlength="10"></label><p><button type="submit">Сохранить в историю пациента</button></p></form>'
-    body+=f'<form class="pending-delete-form" method="post" action="/families/{fid}/inbox/{pending_id}/delete" onsubmit="return confirm(\'Удалить этот документ из входящих без возможности восстановления?\')"><input type="hidden" name="confirm" value="yes"><button type="submit">Удалить документ</button></form>'
-    return page("Ручная классификация",body)
-
-
-@app.post("/families/{fid}/inbox/{pending_id}/delete", response_class=HTMLResponse)
-def delete_pending_document(fid:int,pending_id:int,confirm:str=Form(...),uid:int=Depends(current_user)):
-    family(fid,uid)
-    if confirm != "yes":
-        raise HTTPException(400,"Удаление не подтверждено")
-    d=db.get_pending_doc(fid,pending_id)
-    if not d:
-        raise HTTPException(404,"Документ не найден во входящих")
-    # Only remove a record that is still in the pending inbox; do not touch
-    # patient archive files or shared storage paths here.
-    db.delete_pending_doc(fid,pending_id)
-    return RedirectResponse(f"/families/{fid}/inbox?deleted=1",status_code=303)
-
-@app.post("/families/{fid}/inbox/{pending_id}/assign", response_class=HTMLResponse)
-def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:str=Form(...),title:str=Form(...),date:str=Form(""),uid:int=Depends(current_user)):
-    family(fid,uid)
-    storage_backend = "local" if is_demo_user(uid) else STORAGE_BACKEND
-    if is_demo_user(uid): tenancy.refresh_demo_expiry(fid)
-    d=db.get_pending_doc(fid,pending_id)
-    if not d: raise HTTPException(404,"Документ не найден во входящих")
-    if patient not in db.patients(fid): raise HTTPException(400,"Выбранный пациент не найден")
-    from AIAnalise import DOCUMENT_TYPE_RULES, DOCUMENT_TAXONOMY
-    from datetime import datetime
-    if kind!="не определено" and kind not in DOCUMENT_TYPE_RULES: raise HTTPException(400,"Неизвестный тип документа")
-    title=" ".join((title or "").split()).strip()[:180]
-    if not title: raise HTTPException(400,"Введите название документа")
-    date=(date or "").strip()
-    if date:
-        try: date=datetime.strptime(date,"%d-%m-%Y").strftime("%d-%m-%Y")
-        except ValueError: raise HTTPException(400,"Дата должна быть в формате ДД-ММ-ГГГГ")
-    if db.document_exists(fid,patient,d["digest"]):
-        db.delete_pending_doc(fid,pending_id)
-        return RedirectResponse(f"/families/{fid}/inbox",status_code=303)
-    token=tenancy.get_yadisk_token(fid) if storage_backend=="yandex" else None
-    if storage_backend=="yandex" and not token: raise HTTPException(400,"Сначала подключите Яндекс Диск")
-    analysis=d["analysis"] or {}
-    analysis.update({"primary_type":kind,"primary_category":DOCUMENT_TAXONOMY.get(kind,{}).get("category","не определено"),
-      "taxonomy_path":[DOCUMENT_TAXONOMY.get(kind,{}).get("category","не определено"),kind] if kind in DOCUMENT_TAXONOMY else [],
-      "document_types":[kind] if kind!="не определено" else [],"types":[kind] if kind!="не определено" else [],
-      "confidence":"manual","review_required":kind=="не определено","display_title":title})
-    ext=Path(d["name"]).suffix.lower()
-    stored=f"{Path(format_filename(patient,kind,date,ext)).stem}_{d['digest'][:8]}.{normalize_extension(d['name'])}"
-    ocr_stored=Path(stored).stem+".txt"
-    with tempfile.TemporaryDirectory() as td:
-        local=Path(td)/Path(d["name"]).name
-        local.write_bytes(d["file_bytes"])
-        if storage_backend=="local":
-            remote_path=save_local_file(fid,patient,stored,local)
-            ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(d["text"],encoding="utf-8")
-            ocr_path=save_local_file(fid,patient,ocr_stored,ocr_tmp)
-            remote,oremote=str(remote_path),str(ocr_path)
-        else:
-            disk=YaDiskClient(token); folder=f"{ROOT}/family_{fid}/{safe_name(patient)}"
-            docs,ocr=folder+"/docs",folder+"/OCR"; disk.ensure_folder(docs); disk.ensure_folder(ocr)
-            remote,oremote=docs+"/"+stored,ocr+"/"+ocr_stored
-            disk.upload_file(str(local),remote)
-            ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(d["text"],encoding="utf-8"); disk.upload_file(str(ocr_tmp),oremote)
-        if not db.add_doc(fid,patient,stored,kind,date,remote,oremote,d["text"],extract_keywords(d["text"],analysis),d["digest"],analysis=analysis):
-            raise HTTPException(409,"Не удалось добавить документ в историю; запись во входящих сохранена")
-        db.delete_pending_doc(fid,pending_id)
-        if storage_backend=="yandex":
-            hp=Path(td)/"history.txt"; hp.write_text(db.history(fid,patient),encoding="utf-8"); disk.upload_file(str(hp),folder+"/history.txt")
-    return RedirectResponse(f"/families/{fid}/patients/{patient}",status_code=303)
-
-@app.post("/families/{fid}/patients/{patient}/upload",response_class=HTMLResponse)
-def upload(fid:int,patient:str,file:UploadFile=File(...),ai_consent:bool=Form(False),uid:int=Depends(current_user)):
-    family(fid,uid)
-    storage_backend = "local" if is_demo_user(uid) else STORAGE_BACKEND
-    upload_limit_mb = min(MAX_UPLOAD_MB, DEMO_MAX_UPLOAD_MB) if is_demo_user(uid) else MAX_UPLOAD_MB
-    if is_demo_user(uid):
-        tenancy.refresh_demo_expiry(fid)
-        enforce_demo_document_quota(fid, 1)
-    if patient not in db.patients(fid): raise HTTPException(404,"Пациент не найден")
-    if storage_backend not in {"local","yandex"}: raise HTTPException(503,"Неизвестный backend хранения")
-    token=tenancy.get_yadisk_token(fid) if storage_backend == "yandex" else None
-    if storage_backend == "yandex" and not token: raise HTTPException(400,"Сначала подключите Яндекс Диск")
-    name=Path(file.filename or "document.bin").name
-    ext=Path(name).suffix.lower()
-    if ext not in ALLOWED: raise HTTPException(400,"Формат файла не поддерживается")
-    with tempfile.TemporaryDirectory() as td:
-        local=Path(td)/name
-        size=0
-        with local.open("wb") as out:
-            while True:
-                chunk=file.file.read(1024*1024)
-                if not chunk: break
-                size+=len(chunk)
-                if size>upload_limit_mb*1024*1024: raise HTTPException(413,f"Файл больше {upload_limit_mb} МБ")
-                out.write(chunk)
-        saved_paths=[]
-        try:
-            text=ocr_file(str(local))
-            analysis=analyze_document(text)
-            if ai_consent and os.getenv("AI_CLASSIFICATION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}:
-                try:
-                    analysis=classify_with_ai(text, analysis)
-                except Exception as exc:
-                    logging.warning("AI classification unavailable (%s); retaining local classification", type(exc).__name__)
-            kind=analysis["primary_type"]
-            keywords=extract_keywords(text,analysis)
-            date=parse_date_from_text(text)
-            digest=hashlib.sha256(local.read_bytes()).hexdigest()
-            ex=normalize_extension(name)
-            if db.document_exists(fid,patient,digest):
-                return page("Дубликат",f'<p>Этот файл уже сохранён в архиве.</p><p><a href="/families/{fid}/patients/{html.escape(patient,quote=True)}">Назад к пациенту</a></p>')
-            stored=f"{Path(format_filename(patient,kind,date,ex)).stem}_{digest[:8]}.{ex}"
-            ocr_stored=Path(stored).stem+".txt"
-            if storage_backend == "local":
-                saved_path=save_local_file(fid,patient,stored,local); saved_paths.append(saved_path)
-                ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(text,encoding="utf-8")
-                saved_paths.append(save_local_file(fid,patient,ocr_stored,ocr_tmp))
-                remote=str(saved_path); oremote=str(saved_path.parent/ocr_stored)
-            else:
-                disk=YaDiskClient(token); folder=f"{ROOT}/family_{fid}/{safe_name(patient)}"
-                docs,ocr=folder+"/docs",folder+"/OCR"
-                disk.ensure_folder(docs); disk.ensure_folder(ocr)
-                remote,oremote=docs+"/"+stored,ocr+"/"+ocr_stored
-                disk.upload_file(str(local),remote)
-                with tempfile.TemporaryDirectory() as od:
-                    op=Path(od)/"ocr.txt"; op.write_text(text,encoding="utf-8"); disk.upload_file(str(op),oremote)
-            if not db.add_doc(fid,patient,stored,kind,date,remote,oremote,text,keywords,digest,analysis=analysis):
-                if storage_backend == "local":
-                    for candidate in saved_paths:
-                        try: candidate.unlink()
-                        except FileNotFoundError: pass
-                return page("Дубликат",'<p>Файл уже есть в индексе.</p><p><a href="/">На главную</a></p>')
-            if storage_backend == "yandex":
-                with tempfile.TemporaryDirectory() as hd:
-                    hp=Path(hd)/"history.txt"; hp.write_text(db.history(fid,patient),encoding="utf-8"); disk.upload_file(str(hp),folder+"/history.txt")
-            status="Требуется проверить тип вручную." if analysis["review_required"] else "Тип определён автоматически; проверьте по оригиналу."
-            other_types=", ".join(analysis["document_types"]) or "не определено"
-            return page("Сохранено",f'<p>Документ сохранён.</p><p>Основной тип: {html.escape(kind)}.</p><p>Типы документа: {html.escape(other_types)}.</p><p>Уверенность: {html.escape(analysis["confidence"])}.</p><p>{html.escape(status)}</p><p><a href="/families/{fid}/patients/{html.escape(patient,quote=True)}">Назад к пациенту</a></p>')
-        except HTTPException: raise
-        except Exception as e:
-            if storage_backend == "local":
-                for candidate in saved_paths:
-                    try: candidate.unlink()
-                    except FileNotFoundError: pass
-            logging.exception("Web upload failed (%s)",type(e).__name__)
-            raise HTTPException(502,f"Не удалось обработать документ ({type(e).__name__}). Проверьте OCR и выбранное хранилище.") from e
-
-@app.get("/families/{fid}/connect-disk")
-def connect_disk(fid:int,uid:int=Depends(current_user)):
-    if is_demo_user(uid): raise HTTPException(403,"В демо-режиме доступно только локальное временное хранилище")
-    family(fid,uid)
-    if tenancy.role_for_user(fid,uid) not in ("owner","admin"): raise HTTPException(403,"Нет прав")
-    cid=os.getenv("YANDEX_CLIENT_ID","").strip(); secret=os.getenv("YANDEX_CLIENT_SECRET","").strip(); uri=os.getenv("YANDEX_REDIRECT_URI","").strip()
-    if not cid or not secret or not uri.startswith("https://"): raise HTTPException(503,"Настройте Yandex OAuth и HTTPS callback")
-    state=tenancy.create_oauth_state(fid,uid)
-    params={"response_type":"code","client_id":cid,"redirect_uri":uri,"scope":"cloud_api:disk.read cloud_api:disk.write","state":state}
-    return RedirectResponse("https://oauth.yandex.ru/authorize?"+urlencode(params),status_code=303)
-
-@app.get("/oauth/yandex/callback",response_class=HTMLResponse)
-def yandex_callback(code:str="",state:str="",error:str=""):
-    if error: return page("Отменено","<p>Авторизация отменена. Вернитесь в архив.</p>",400)
-    if not code or not state: return page("Ошибка","<p>Не хватает параметров авторизации.</p>",400)
-    pending=tenancy.consume_oauth_state(state)
-    if not pending: return page("Ссылка истекла","<p>Ссылка истекла или использована. Начните подключение заново.</p>",400)
-    if tenancy.role_for_user(pending["family_id"],pending["telegram_id"]) not in ("owner","admin"): return page("Нет доступа","<p>Нет прав на этот архив.</p>",403)
-    payload={"grant_type":"authorization_code","code":code,"client_id":os.getenv("YANDEX_CLIENT_ID","").strip(),"client_secret":os.getenv("YANDEX_CLIENT_SECRET","").strip(),"redirect_uri":os.getenv("YANDEX_REDIRECT_URI","").strip()}
-    try:
-        r=requests.post("https://oauth.yandex.ru/token",data=payload,timeout=20); data=r.json()
-        if r.status_code>=400 or not data.get("access_token"): return page("Ошибка Яндекса","<p>Яндекс не выдал токен. Проверьте настройки OAuth.</p>",502)
-        tenancy.save_yadisk_token(pending["family_id"],data["access_token"],"Подключённый Яндекс Диск")
-        return page("Подключено","<p>Яндекс Диск подключён. <a href='/'>Вернуться в архив</a></p>")
-    except Exception as e:
-        logging.exception("OAuth callback failed (%s)",type(e).__name__)
-        return page("Ошибка","<p>Не удалось подключить Яндекс Диск.</p>",502)
-
-# AI-assisted retrieval routes are isolated from Telegram bot handlers.
-from assistant_routes import install_assistant_routes
-install_assistant_routes(app, current_user, family)
+[executed on device: marss1k.fvds.ru (ecc850ae-e012-4a56-b726-1ade67f14bec)]

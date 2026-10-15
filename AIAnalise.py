@@ -396,8 +396,10 @@ def _classify_segment(text):
     if re.match(r"^\s*(?:медицинское\s+)?направлени[ея]\b", title_text):
         detected_title = "направление"
         detected_title_pattern = None
+    # Keep absence evidence local: do not connect a report title to unrelated
+    # missing personal data elsewhere in the document (e.g. a synthetic blank form).
     explicit_report_absence = bool(re.search(
-        r"\b(?:заключени\w*|протокол\w*|результат\w*|описани\w*)\b[^.!?]{0,90}\b(?:не\s+(?:выдавал\w*|оформлял\w*|содерж\w*|представлен\w*|приложен\w*|проводил\w*)|отсутств\w*)\b",
+        r"\b(?:заключени\w*|протокол\w*|результат\w*|описани\w*)\b[^.!?;:]{0,45}\b(?:не\s+(?:выдавал\w*|оформлял\w*|содерж\w*|представлен\w*|приложен\w*|проводил\w*)|отсутств\w*)\b",
         normalized,
     ))
     if detected_title in report_title_labels and (
@@ -716,3 +718,5 @@ def classify_with_ai(text, analysis):
         analysis["review_required"] = True
         analysis["classification_source"] = "rules+ai"
     return analysis
+
+[executed on device: marss1k.fvds.ru (ecc850ae-e012-4a56-b726-1ade67f14bec)]
