@@ -329,7 +329,8 @@ def _classify_segment(text):
     pending_report_context = bool(re.search(
         r"\b(?:гистологическ\w+|патоморфологическ\w+|цитологическ\w+|лабораторн\w+|ультразвуков\w+|компьютерн\w+\s+томографи\w*|магнитно[- ]резонансн\w+\s+томографи\w*)\b"
         r"[^.!?;:]{0,55}\b(?:будет\s+готов\w*|ожидает\w*|ожидается|позднее\s+будет|ещ[её]\s+не\s+готов\w*)\b",
-        normalized))\n    plan_list_context = bool(re.search(
+        normalized))
+    plan_list_context = bool(re.search(
         r"\b(?:план\s+(?:обследовани\w*|диагностик\w*|анализ\w*)|"
         r"перечень\s+(?:обследовани\w*|исследовани\w*))\b", normalized))
     imaging_labels = (
