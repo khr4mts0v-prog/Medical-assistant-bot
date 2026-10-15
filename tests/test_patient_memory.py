@@ -53,5 +53,29 @@ class PatientMemoryValidationTests(unittest.TestCase):
         self.assertNotIn("Беременность", context)
 
 
+    @patch("patient_memory.save_fact", return_value=17)
+    @patch("ai_provider.chat_completion")
+    def test_extraction_requires_verbatim_support_and_uses_application_date(self, completion, save):
+        completion.return_value = (
+            '{"facts":[{"category":"pregnancy","key":"Беременность",'
+            '"value":"Сообщена пользователем","status":"user_reported",'
+            '"source_type":"conversation","source_ref":"Сообщение пользователя",'
+            '"observed_at":"2099-01-01","valid_until":"2099-12-31",'
+            '"confidence":1.0,"exact_support":"Юля беременна"}]}'
+        )
+        ids = patient_memory.extract_and_save_facts(1, "Юля", "Юля беременна", [])
+        self.assertEqual(ids, [17])
+        saved_fact = save.call_args.args[2]
+        self.assertEqual(saved_fact["observed_at"], patient_memory.date.today().isoformat())
+        self.assertEqual(saved_fact["valid_until"], "")
+        self.assertLessEqual(saved_fact["confidence"], 0.85)
+
+    @patch("ai_provider.chat_completion")
+    def test_question_is_not_automatically_saved_as_patient_fact(self, completion):
+        result = patient_memory.extract_and_save_facts(1, "Юля", "Юля беременна?", [])
+        self.assertEqual(result, [])
+        completion.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
