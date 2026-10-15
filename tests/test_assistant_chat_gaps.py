@@ -45,6 +45,10 @@ class AssistantChatGapTests(unittest.TestCase):
         records = [{"name": "Александр", "aliases": ["Александр", "Саша"]}]
         self.assertEqual(assistant._mentioned_people(records, "Дай сводку по УЗИ Саши"), ["Александр"])
 
+    def test_registered_alexander_matches_common_sasha_nickname(self):
+        records = [{"name": "Александр", "aliases": ["Александр"]}]
+        self.assertEqual(assistant._mentioned_people(records, "Дай сводку по УЗИ Саши"), ["Александр"])
+
     def test_structured_answer_extracts_missing_document_and_limitations(self):
         raw = (
             '{"answer":"По найденным документам можно сделать предварительную сводку.",'
