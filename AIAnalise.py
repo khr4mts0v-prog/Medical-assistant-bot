@@ -396,9 +396,15 @@ def _classify_segment(text):
     if re.match(r"^\s*(?:медицинское\s+)?направлени[ея]\b", title_text):
         detected_title = "направление"
         detected_title_pattern = None
-    if detected_title in report_title_labels and (negative_report_context or pending_report_context):
+    explicit_report_absence = bool(re.search(
+        r"\\b(?:заключени\\w*|протокол\\w*|результат\\w*|описани\\w*)\\b[^.!?]{0,90}\\b(?:не\\s+(?:выдавал\\w*|оформлял\\w*|содерж\\w*|представлен\\w*|приложен\\w*|проводил\\w*)|отсутств\\w*)\\b",
+        normalized,
+    ))
+    if detected_title in report_title_labels and (
+        negative_report_context or pending_report_context or explicit_report_absence
+    ):
         # Explicit denial that the report is present always wins over a title-like
-        # mention (e.g. "заключение УЗИ отсутствует").
+        # mention (including when the mention occurs inside prose, not a heading).
         detected_title = None
     elif detected_title in report_title_labels and (
         (mention_context or plan_list_context) and not specific_report_context
