@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  ArrowLeft, ChevronRight, ClipboardCheck, FilePlus2, Home, Menu, Search,
+  ArrowLeft, ChevronRight, ClipboardCheck, FilePlus2, Home, Menu, Search, Plus,
   Settings, Users, X, HeartPulse, Cloud, ShieldCheck, PanelLeftClose, BrainCircuit
 } from 'lucide-react';
 import './style.css';
@@ -86,6 +86,7 @@ function App() {
   const [smartBusy, setSmartBusy] = useState(false);
   const [smartError, setSmartError] = useState('');
   const [smartResult, setSmartResult] = useState<any>(null);
+  const [smartConversation, setSmartConversation] = useState<any[]>([]);
   const [toast, setToast] = useState('');
   const contentRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<string[]>([]);
@@ -169,7 +170,7 @@ function App() {
       let pendingRequests = 0;
       const finishRequest = () => {
         pendingRequests -= 1;
-        if (pendingRequests === 0) window.setTimeout(() => window.dispatchEvent(new Event('medical-archive-refresh')), 350);
+        if (pendingRequests === 0) window.setTimeout(() => window.dispatchEvent(new Event('medical-archive-refresh')), 1800);
       };
       files.forEach(file => {
         const item = document.createElement('div');
@@ -292,36 +293,78 @@ function App() {
   return <div className="app-frame">
     {toast && <div className="app-toast" role="status" aria-live="polite"><span className="app-toast-check">✓</span><span>{toast}</span></div>}
     {smartSearchOpen && <div className="modal-scrim smart-search-scrim" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !smartBusy) setSmartSearchOpen(false); }}>
-      <section className="app-modal smart-search-modal" role="dialog" aria-modal="true" aria-label="Интеллектуальный поиск по семейному архиву">
-        <header className="app-modal-header"><div><span className="modal-eyebrow">СЕМЕЙНЫЙ АРХИВ</span><h2>Умный поиск</h2><p className="smart-search-subtitle">Поиск по всей семье. Укажи имя, если нужен конкретный человек.</p></div><button type="button" className="icon-button" aria-label="Закрыть поиск" onClick={() => setSmartSearchOpen(false)}><X size={20}/></button></header>
-        <div className="smart-search-body">
-          <form className="smart-search-form" onSubmit={async event => {
-            event.preventDefault(); setSmartBusy(true); setSmartError('');
+      <section className="app-modal smart-search-modal smart-chat-modal" role="dialog" aria-modal="true" aria-label="ИИ-чат по медицинскому архиву">
+        <header className="app-modal-header">
+          <div><span className="modal-eyebrow">СЕМЕЙНЫЙ АРХИВ</span><h2>ИИ-ассистент</h2><p className="smart-search-subtitle">Задавай вопросы обычным языком. Сначала ответ, ниже — документы, на которых он основан.</p></div>
+          <div className="smart-chat-head-actions">
+            <button type="button" className="icon-button" aria-label="Новый диалог" title="Новый диалог" disabled={smartBusy} onClick={() => {setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);}}><Plus size={19}/></button>
+            <button type="button" className="icon-button" aria-label="Закрыть чат" onClick={() => setSmartSearchOpen(false)}><X size={20}/></button>
+          </div>
+        </header>
+        <div className="smart-search-body smart-chat-body">
+          {smartConversation.length === 0 && !smartResult?.needs_consent && <section className="smart-chat-welcome">
+            <h3>Что разберём?</h3><p>Я найду подходящие документы, подготовлю сводку и укажу, если важных источников не хватает.</p>
+            <div className="smart-chat-suggestions">
+              <button type="button" onClick={() => setSmartQuery('Дай краткую сводку по УЗИ Саши')}>Сводка по УЗИ Саши</button>
+              <button type="button" onClick={() => setSmartQuery('Сравни результаты анализов крови по датам')}>Сравнить анализы крови</button>
+              <button type="button" onClick={() => setSmartQuery('Какие важные документы упоминаются в найденных заключениях, но не находятся в архиве?')}>Проверить ссылки на документы</button>
+            </div>
+          </section>}
+          <div className="smart-chat-history">
+            {smartConversation.map((turn:any, index:number) => <article className="smart-chat-turn" key={index}>
+              <div className="smart-user-message"><span>Вы</span><div>{turn.question}</div></div>
+              {turn.result?.answer && <article className="smart-answer"><h3><BrainCircuit size={17}/> Ответ ассистента</h3><pre>{turn.result.answer}</pre></article>}
+              {turn.result?.missing_documents?.length > 0 && <section className="smart-gaps">
+                <h3><FilePlus2 size={17}/> Что может не хватать</h3>
+                <p className="smart-gap-intro">Я проверил архив по названиям документов из найденных заключений. Если нужного файла здесь нет, загружать его необязательно — сводка выше уже составлена по доступным источникам.</p>
+                {turn.result.missing_documents.map((gap:any, gapIndex:number) => <div className="smart-gap-card" key={gapIndex}>
+                  <strong>{gap.name}</strong><p>{gap.reason}</p>
+                  {gap.status === 'candidate_found' ? <small className="smart-gap-status">Есть совпадение по поисковым словам среди архивных документов; проверьте, что это именно нужный источник.</small> : <small className="smart-gap-status">Не найден по названию в доступном архиве. Возможно, он сохранён под другим именем.</small>}
+                  <div className="smart-gap-actions">
+                    <button type="button" onClick={() => {setSmartQuery('Найди документы: ' + gap.name + (turn.result.documents?.[0]?.patient ? ' для ' + turn.result.documents[0].patient : ''));setSmartResult(null);}}>Проверить в архиве</button>
+                    <button type="button" onClick={() => {setSmartSearchOpen(false);navigate('/');}}>Загрузить, если файл есть</button>
+                  </div>
+                </div>)}
+              </section>}
+              {turn.result?.limitations?.length > 0 && <section className="smart-limitations"><strong>Ограничения вывода</strong><ul>{turn.result.limitations.map((item:string, i:number)=><li key={i}>{item}</li>)}</ul></section>}
+              {turn.result?.documents && <section className="smart-documents"><h3>{turn.result.mode === 'analysis' ? 'Документы-источники' : 'Найденные документы'} <span>{turn.result.documents.length}</span></h3>
+                {turn.result.documents.length === 0 ? <p className="muted">Подходящих документов не найдено.</p> : turn.result.documents.map((doc:any) => <a className="smart-document" href={doc.url} key={doc.id} onClick={event => {event.preventDefault();setSmartSearchOpen(false);navigate(doc.url);}}>
+                  <span className="smart-document-date">{doc.date || 'Дата не указана'}</span><strong>{doc.name}</strong><span>{doc.patient} · {doc.kind}</span><span className="smart-document-open">Открыть документ <ChevronRight size={16}/></span>
+                </a>)}
+              </section>}
+            </article>)}
+          </div>
+          {smartBusy && <div className="smart-search-loading" role="status"><span className="smart-spinner"/>Ищу документы и готовлю ответ…</div>}
+          {smartError && <div className="error-banner" role="alert">{smartError}</div>}
+          {smartResult?.needs_consent && <p className="smart-consent-note">{smartResult.message}</p>}
+          <form className="smart-search-form smart-chat-compose" onSubmit={async event => {
+            event.preventDefault();
+            const submittedQuestion = smartQuery.trim();
+            if (!submittedQuestion) return;
+            setSmartBusy(true);setSmartError('');
             try {
               const familyId = new URLSearchParams(location.search).get('family_id');
-              const response = await fetch('/api/intelligent-search', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({query:smartQuery, family_id:familyId ? Number(familyId) : undefined, consent:smartConsent})});
+              const history = smartConversation.map((turn:any) => String(turn.question || '')).slice(-5);
+              const response = await fetch('/api/intelligent-search', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:submittedQuestion,history,family_id:familyId ? Number(familyId) : undefined,consent:smartConsent})});
               const result = await response.json();
-              if (!response.ok) throw new Error(result.detail || result.error || 'Не удалось выполнить поиск.');
-              setSmartResult(result);
-              if (result.needs_consent) setSmartConsent(false);
-            } catch (e) { setSmartError(e instanceof Error ? e.message : 'Ошибка поиска'); }
-            finally { setSmartBusy(false); }
+              if (!response.ok) throw new Error(result.detail || result.error || 'Не удалось выполнить запрос.');
+              if (result.needs_consent) {
+                setSmartResult(result);
+                setSmartConsent(false);
+              } else {
+                setSmartConversation((previous:any[]) => [...previous,{question:submittedQuestion,result}].slice(-20));
+                setSmartResult(null);
+                setSmartQuery('');
+              }
+            } catch (e) {setSmartError(e instanceof Error ? e.message : 'Не удалось выполнить запрос');}
+            finally {setSmartBusy(false);}
           }}>
-            <label htmlFor="smart-search-query">Что найти или проанализировать?</label>
-            <textarea id="smart-search-query" rows={2} maxLength={1200} value={smartQuery} onChange={e => setSmartQuery(e.target.value)} placeholder="Например: последние ФЛГ всех членов семьи" required />
-            {smartResult?.needs_consent && <label className="smart-consent"><input type="checkbox" checked={smartConsent} onChange={e => setSmartConsent(e.target.checked)} /> Я согласен отправить вопрос и найденные фрагменты медицинских документов внешнему ИИ-провайдеру для анализа.</label>}
-            <button type="submit" disabled={smartBusy || !smartQuery.trim()}>{smartBusy ? 'Ищем…' : smartResult?.needs_consent ? 'Продолжить анализ' : 'Найти и проанализировать'}</button>
+            <label htmlFor="smart-search-query">Что хочешь узнать?</label>
+            <textarea id="smart-search-query" rows={2} maxLength={1200} value={smartQuery} onChange={e => setSmartQuery(e.target.value)} placeholder="Например: Дай краткую сводку по УЗИ Саши" required />
+            {smartResult?.needs_consent && <label className="smart-consent"><input type="checkbox" checked={smartConsent} onChange={e => setSmartConsent(e.target.checked)} /> Я разрешаю отправить вопрос и найденные фрагменты медицинских документов внешнему ИИ-провайдеру для анализа.</label>}
+            <button type="submit" disabled={smartBusy || !smartQuery.trim()}>{smartBusy ? 'Готовлю ответ…' : smartResult?.needs_consent ? 'Продолжить анализ' : 'Отправить'}</button>
           </form>
-          {smartBusy && <div className="smart-search-loading" role="status"><span className="smart-spinner"/>Ищем документы и готовим ответ…</div>}
-          {smartError && <div className="error-banner" role="alert">{smartError}</div>}
-          {smartResult?.message && <p className="smart-consent-note">{smartResult.message}</p>}
-          {smartResult?.answer && <article className="smart-answer"><h3>Ответ</h3><pre>{smartResult.answer}</pre></article>}
-          {smartResult?.documents && <section className="smart-documents"><h3>{smartResult.mode === 'analysis' ? 'Документы-источники' : 'Найденные документы'} <span>{smartResult.documents.length}</span></h3>
-            {smartResult.documents.length === 0 ? <p className="muted">Документы не найдены. Попробуй уточнить запрос.</p> : smartResult.documents.map((doc:any) => <a className="smart-document" href={doc.url} key={doc.id} onClick={event => {event.preventDefault(); setSmartSearchOpen(false); navigate(doc.url);}}>
-              <span className="smart-document-date">{doc.date || 'Дата не указана'}</span><strong>{doc.name}</strong><span>{doc.patient} · {doc.kind}</span><span className="smart-document-open">Открыть документ <ChevronRight size={16}/></span>
-            </a>)}
-          </section>}
-          <p className="smart-search-footnote">Результаты отсортированы по дате исследования: сначала новые, затем старые. Обычный поиск выполняется локально; для медицинского анализа требуется отдельное согласие.</p>
+          <p className="smart-search-footnote">Медицинские фрагменты передаются внешней модели только после явного согласия. ИИ может ошибаться; источники всегда доступны для проверки.</p>
         </div>
       </section>
     </div>}
