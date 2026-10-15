@@ -1,0 +1,29 @@
+{
+  "name": "Семейный медицинский архив",
+  "short_name": "Медархив",
+  "description": "Семейный медицинский архив",
+  "lang": "ru",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "background_color": "#f2f6ff",
+  "theme_color": "#f2f6ff",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
