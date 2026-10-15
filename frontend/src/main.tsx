@@ -85,6 +85,10 @@ function App() {
   const [smartSearchOpen, setSmartSearchOpen] = useState(false);
   const [smartQuery, setSmartQuery] = useState('');
   const [smartConsent, setSmartConsent] = useState(false);
+  const [aiConsentGranted, setAiConsentGranted] = useState(false);
+  const [aiConsentLoaded, setAiConsentLoaded] = useState(false);
+  const [aiConsentActionBusy, setAiConsentActionBusy] = useState(false);
+  const [aiConsentError, setAiConsentError] = useState('');
   const [smartBusy, setSmartBusy] = useState(false);
   const [smartError, setSmartError] = useState('');
   const [smartResult, setSmartResult] = useState<any>(null);
@@ -92,6 +96,16 @@ function App() {
   const [toast, setToast] = useState('');
   const contentRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/ai-consent', { credentials: 'same-origin' })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('Не удалось получить настройки согласия')))
+      .then(data => { if (active) setAiConsentGranted(data.granted === true); })
+      .catch(() => { if (active) setAiConsentGranted(false); })
+      .finally(() => { if (active) setAiConsentLoaded(true); });
+    return () => { active = false; };
+  }, []);
 
   const navigate = useCallback(async (url: string, push = true) => {
     setLoading(true); setError(''); setMenuOpen(false);
@@ -354,6 +368,10 @@ function App() {
                 setSmartResult(result);
                 setSmartConsent(false);
               } else {
+                if (smartConsent) {
+                  setAiConsentGranted(true);
+                  setSmartConsent(false);
+                }
                 setSmartConversation((previous:any[]) => [...previous,{question:submittedQuestion,result}].slice(-20));
                 setSmartResult(null);
                 setSmartQuery('');
@@ -399,7 +417,7 @@ function App() {
       <button className="nav-item" onClick={() => navigate('/search')}><Search size={19}/>Поиск</button>
       <button className="nav-item" onClick={() => navigate('/assistant')}><BrainCircuit size={19}/>Ассистент</button>
       <div className="sidebar-spacer"/>
-      <button className={'nav-item ' + (settingsOpen ? 'active' : '')} onClick={() => navigate('/settings' + (location.search || ''))}><Settings size={19}/>Настройки архива</button>
+      <button className={'nav-item ' + (settingsOpen ? 'active' : '')} onClick={() => { setSettingsOpen(true); setMenuOpen(false); }}><Settings size={19}/>Настройки архива</button>
       <div className="sidebar-foot"><ShieldCheck size={16}/> Данные хранятся на вашем сервере</div>
     </aside>
     <main className="main-area">
@@ -412,6 +430,28 @@ function App() {
         <div className="eyebrow">ПАРАМЕТРЫ</div><h1>Настройки архива</h1><p className="lead">Управление семейным архивом и хранением документов.</p>
         <article className="settings-card"><div className="settings-icon"><Users size={21}/></div><div><h2>Семейный архив</h2><p>Имя архива и данные семьи будут доступны здесь после подключения безопасного редактирования на сервере.</p></div></article>
         <article className="settings-card"><div className="settings-icon"><Cloud size={21}/></div><div><h2>Хранение документов</h2><p>Сейчас документы хранятся локально на VPS. Подключение Яндекс Диска добавим отдельным этапом с OAuth и проверкой прав доступа.</p><span className="status-pill">Локальное хранилище</span></div></article>
+        <article className="settings-card"><div className="settings-icon"><BrainCircuit size={21}/></div><div>
+          <h2>Внешний ИИ-анализ</h2>
+          <p>При включении внешнему ИИ-провайдеру передаётся ваш вопрос и только отобранные релевантные фрагменты документов выбранного пациента. Весь архив целиком не отправляется. Вход в аккаунт сам по себе не означает согласия.</p>
+          <span className="status-pill">{!aiConsentLoaded ? 'Проверка настроек…' : aiConsentGranted ? 'Согласие включено' : 'Согласие не дано'}</span>
+          {aiConsentError && <p role="alert">{aiConsentError}</p>}
+          <button type="button" disabled={!aiConsentLoaded || aiConsentActionBusy} onClick={async () => {
+            const nextGranted = !aiConsentGranted;
+            setAiConsentActionBusy(true); setAiConsentError('');
+            try {
+              const response = await fetch('/api/ai-consent', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({granted:nextGranted})});
+              const data = await response.json();
+              if (!response.ok) throw new Error(data.detail || data.error || 'Не удалось сохранить согласие');
+              setAiConsentGranted(data.granted === true);
+              setSmartConsent(false);
+              setSmartResult(null);
+              setToast(data.granted ? 'Согласие на внешний ИИ-анализ сохранено' : 'Согласие отозвано');
+              window.setTimeout(() => setToast(''), 3500);
+            } catch (e) { setAiConsentError(e instanceof Error ? e.message : 'Не удалось изменить согласие'); }
+            finally { setAiConsentActionBusy(false); }
+          }}>{aiConsentActionBusy ? 'Сохранение…' : aiConsentGranted ? 'Отозвать согласие' : 'Дать согласие на внешний ИИ-анализ'}</button>
+          <p className="muted">Согласие сохраняется для учётной записи и действует для следующих вопросов, пока вы его не отзовёте. Настройку можно изменить здесь в любое время.</p>
+        </div></article>
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
