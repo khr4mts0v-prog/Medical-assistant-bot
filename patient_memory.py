@@ -408,8 +408,10 @@ def to_context(snapshot: dict, max_chars: int = 8500) -> str:
     ]
     for item in snapshot.get("diagnoses_mentioned", [])[:60]:
         src = item.get("source") or {}
+        correction = " [ИСПРАВЛЕНО ПОЛЬЗОВАТЕЛЕМ; исходное извлечение: " + str(item.get("original_text")) + "]" if item.get("user_corrected") else ""
         lines.append(
             "- " + str(item.get("date") or "дата не указана") + ": " + str(item.get("text") or "")
+            + correction
             + " [источник ID " + str(src.get("document_id")) + ": " + str(src.get("name") or "") + "]"
         )
     lines.append("Упомянутые лекарства и назначения (не означает, что приём продолжается):")
@@ -422,9 +424,11 @@ def to_context(snapshot: dict, max_chars: int = 8500) -> str:
     lines.append("Лабораторные результаты (значения и единицы не пересчитывались):")
     for item in snapshot.get("lab_results", [])[:100]:
         src = item.get("source") or {}
+        correction = " [ИСПРАВЛЕНО ПОЛЬЗОВАТЕЛЕМ; исходное значение: " + str(item.get("original_value")) + " " + str(item.get("original_unit") or "") + "]" if item.get("user_corrected") else ""
         lines.append(
             "- " + str(item.get("date") or "дата не указана") + ": " + str(item.get("name") or "")
             + " = " + str(item.get("value") or "") + " " + str(item.get("unit") or "")
+            + correction
             + " [источник ID " + str(src.get("document_id")) + ", стр. " + str(item.get("page") or "?") + "]"
         )
     lines.append("Сравнение двух последних числовых результатов с одинаковыми единицами:")
