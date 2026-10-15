@@ -5,12 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#f2f6ff" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Медархив" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="description" content="Семейный медицинский архив" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/app-icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/app-icon.svg" />
     <title>Медицинский архив</title>
+    <script>
+      // Keep private medical records out of browser caches. The worker is network-only.
+      if ('serviceWorker' in navigator && location.protocol === 'https:') {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {
+            // The app remains usable in Safari if service-worker registration is unavailable.
+          });
+        });
+      }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><p style="padding:24px;font:16px -apple-system,BlinkMacSystemFont,sans-serif;color:#526681">Загрузка медицинского архива…</p></div>
+    <noscript>Для работы медицинского архива необходимо включить JavaScript.</noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
