@@ -252,6 +252,22 @@ def install_assistant_routes(app, current_user, family_guard):
             + html.escape(str(item.get("name") or "")) + ': ' + html.escape(str(item.get("value") or ""))
             + (' ' + html.escape(str(item.get("unit"))) if item.get("unit") else "")
             + source_link(item.get("source")) + '</li>')
+        def render_trend(item):
+            previous = item.get("previous") or {}
+            latest = item.get("latest") or {}
+            delta = str(item.get("absolute_change") or "0")
+            if item.get("direction") == "increase":
+                delta = "+" + delta
+            return (
+                '<li><strong>' + html.escape(str(item.get("name") or "")) + '</strong>: '
+                + html.escape(str(previous.get("value") or "")) + ' → '
+                + html.escape(str(latest.get("value") or "")) + ' ' + html.escape(str(item.get("unit") or ""))
+                + '; изменение ' + html.escape(delta) + ' ' + html.escape(str(item.get("unit") or ""))
+                + ' (' + html.escape(str(previous.get("date") or "?")) + ' → '
+                + html.escape(str(latest.get("date") or "?")) + ')'
+                + source_link(previous.get("source")) + source_link(latest.get("source")) + '</li>'
+            )
+        trend_html = section("Динамика лабораторных показателей", snapshot.get("lab_trends", []), render_trend)
         docs_html = section("Документы в истории", snapshot["documents"][:150],
             lambda item: '<li><strong>' + html.escape(str(item.get("date") or "Дата не указана")) + '</strong> — '
             + html.escape(str(item.get("kind") or "Тип не определён")) + ': '
@@ -265,7 +281,7 @@ def install_assistant_routes(app, current_user, family_guard):
             '<p>Память формируется локально из структурированных результатов распознавания и обновляется при открытии. '
             'Каждая запись ведёт к исходному документу.</p>'
             '<p><a href="/assistant?family_id=' + str(fid) + '&patient=' + quote(patient, safe="") + '">Задать вопрос ассистенту по этому пациенту</a></p></div>'
-            + diagnosis_html + medication_html + lab_html + docs_html
+            + diagnosis_html + medication_html + lab_html + trend_html + docs_html
             + '<section class="card"><h2>Ограничения памяти</h2><ul>' + caveats + '</ul></section>'
         )
         return _page("Память пациента", body)
