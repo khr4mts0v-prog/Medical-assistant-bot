@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 DIST = Path(__file__).resolve().parent / "frontend" / "dist"
 
 def install_react_ui(app: FastAPI) -> None:
-    assets = DIST / "assets"
+    assets = DIST
     if assets.is_dir():
         app.mount("/react-assets", StaticFiles(directory=str(assets)), name="react-assets")
 
