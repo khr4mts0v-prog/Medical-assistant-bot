@@ -259,6 +259,7 @@ def install_assistant_routes(app, current_user, family_guard):
         caveats = "".join('<li>' + html.escape(str(note)) + '</li>' for note in snapshot["limitations"])
         body = (
             '<div class="card"><p><strong>Пациент:</strong> ' + html.escape(patient) + '</p>'
+            '<p><strong>Дата рождения:</strong> ' + html.escape(str((snapshot.get("profile") or {}).get("birth_date") or "не указана")) + '</p>'
             '<p><strong>Документов учтено:</strong> ' + str(snapshot["document_count"]) + '</p>'
             '<p>Память формируется локально из структурированных результатов распознавания и обновляется при открытии. '
             'Каждая запись ведёт к исходному документу.</p>'
