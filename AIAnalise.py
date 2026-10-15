@@ -389,10 +389,8 @@ def _classify_segment(text):
     # Explicit report headings should not be erased by incidental mentions in the body.
 
     # Remove document types named only in an explicit negation.
-    # positive title intact (e.g. a diary heading followed by "not an epicrisis").
     denial_windows = re.findall(
         r"\b(?:не\s+является|это\s+не|не\s+представляет(?:\s+собой)?|не\s+оформля\w*|не\s+оформлен\w*|не\s+содержит|не\s+относится\s+к)\b([^.!?]{0,260})",
-        r"не\s+оформлен\w*|не\s+содержит|не\s+относится\s+к)\b([^.!?]{0,260})",
         normalized,
     )
     denied_text = " ".join(denial_windows)
