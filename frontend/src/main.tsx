@@ -91,7 +91,17 @@ function App() {
   const [smartConversation, setSmartConversation] = useState<any[]>([]);
   const [toast, setToast] = useState('');
   const contentRef = useRef<HTMLDivElement>(null);
+  const chatHistoryRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    const history = chatHistoryRef.current;
+    if (!history) return;
+    const frame = window.requestAnimationFrame(() => {
+      history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [smartConversation, smartBusy, smartResult, smartError, smartSearchOpen]);
 
   const navigate = useCallback(async (url: string, push = true) => {
     setLoading(true); setError(''); setMenuOpen(false);
@@ -309,7 +319,7 @@ function App() {
               <button type="button" onClick={() => setSmartQuery('Какие важные документы упоминаются в найденных заключениях, но не находятся в архиве?')}>Проверить ссылки на документы</button>
             </div>
           </section>}
-          <div className="smart-chat-history">
+          <div className="smart-chat-history" ref={chatHistoryRef}>
             {smartConversation.map((turn:any, index:number) => <article className="smart-chat-turn" key={index}>
               <div className="smart-user-message"><span>Вы</span><div>{turn.question}</div></div>
               {turn.result?.answer && <article className="smart-answer"><h3><BrainCircuit size={17}/> Ответ ассистента</h3><pre>{turn.result.answer}</pre></article>}
