@@ -377,12 +377,15 @@ def _classify_segment(text):
         "рентгенологическое заключение", "заключение КТ", "заключение МРТ",
         "эндоскопическое заключение", "патоморфологическое заключение",
     }
-    if detected_title in report_title_labels and (
-        negative_report_context
-        or ((mention_context or plan_list_context) and not specific_report_context)
+    if detected_title in report_title_labels and negative_report_context:
+        # Explicit denial that the report is present always wins over a title-like
+        # mention (e.g. "заключение УЗИ отсутствует").
+        detected_title = None
+    elif detected_title in report_title_labels and (
+        (mention_context or plan_list_context) and not specific_report_context
     ):
-        # Explicit report headings in the opening lines outrank incidental mentions
-        # of referrals, recommendations, or historical studies in the body.
+        # A clear report heading in the opening lines outranks incidental references
+        # to other studies later in the document.
         explicit_report_heading = bool(re.search(
             r"^\s*(?:протокол|заключение|результат|описание)\w*\s+(?:узи|экг|кт|мрт|фгдс|рентген\w*|ультразвуков\w+|компьютерн\w+\s+томографи\w*|магнитно[- ]резонансн\w+\s+томографи\w*|эндоскопическ\w+\s+исследовани\w*)\b",
             title_text,
