@@ -4,6 +4,7 @@ This module does not diagnose or infer new medical facts. It stores a compact, v
 snapshot of structured information already extracted from documents and preserves source IDs.
 """
 import hashlib
+import hmac
 import json
 import logging
 from datetime import date, datetime
@@ -176,7 +177,7 @@ def _build_snapshot(fid: int, patient: str, rows: list[dict], profile: dict | No
 
     # Store a bounded summary but retain a complete, encrypted list of source document IDs.
     snapshot = {
-        "schema_version": 1,
+        "schema_version": 2,
         "family_id": int(fid),
         "patient": patient,
         "profile": {
@@ -209,8 +210,12 @@ def _build_snapshot(fid: int, patient: str, rows: list[dict], profile: dict | No
             for row in rows
         ],
     }
-    fingerprint = hashlib.sha256(
-        json.dumps(fingerprint_payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    fingerprint_bytes = json.dumps(
+        fingerprint_payload, ensure_ascii=False, sort_keys=True, default=str
+    ).encode("utf-8")
+    # A keyed fingerprint prevents dictionary attacks against low-entropy medical facts in SQLite.
+    fingerprint = hmac.new(
+        tenancy.FERNET_KEY.encode("utf-8"), fingerprint_bytes, hashlib.sha256
     ).hexdigest()
     source_ids = sorted({int(row["id"]) for row in rows})
     return snapshot, source_ids, fingerprint
@@ -233,10 +238,10 @@ def refresh(fid: int, patient: str) -> dict:
     crypt = tenancy.cipher()
     with tenancy.connect() as conn:
         existing = conn.execute(
-            "SELECT source_fingerprint,snapshot_enc FROM patient_memory_snapshots WHERE family_id=? AND patient_id=?",
+            "SELECT source_fingerprint,snapshot_enc,schema_version FROM patient_memory_snapshots WHERE family_id=? AND patient_id=?",
             (fid, int(pid)),
         ).fetchone()
-        if existing and existing["source_fingerprint"] == fingerprint:
+        if existing and int(existing["schema_version"]) == 2 and existing["source_fingerprint"] == fingerprint:
             try:
                 return json.loads(crypt.decrypt(existing["snapshot_enc"]).decode("utf-8"))
             except Exception:
@@ -244,10 +249,10 @@ def refresh(fid: int, patient: str) -> dict:
         conn.execute(
             """INSERT INTO patient_memory_snapshots
                (family_id,patient_id,snapshot_enc,source_ids_enc,source_fingerprint,schema_version,updated_at)
-               VALUES(?,?,?,?,?,1,?)
+               VALUES(?,?,?,?,?,2,?)
                ON CONFLICT(family_id,patient_id) DO UPDATE SET
                  snapshot_enc=excluded.snapshot_enc, source_ids_enc=excluded.source_ids_enc,
-                 source_fingerprint=excluded.source_fingerprint, schema_version=1, updated_at=excluded.updated_at""",
+                 source_fingerprint=excluded.source_fingerprint, schema_version=2, updated_at=excluded.updated_at""",
             (
                 fid, int(pid),
                 crypt.encrypt(json.dumps(snapshot, ensure_ascii=False).encode("utf-8")),
