@@ -161,7 +161,7 @@ def add_doc(fid,p,name,kind,date,remote,ocr_remote,text,keywords,digest,analysis
         cur=c.execute("""INSERT OR IGNORE INTO docs
         (family_id,patient,name,kind,date,remote,ocr_remote,text,keywords,analysis,digest,added)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (int(fid),p,name,kind,date,remote,oremote if False else ocr_remote,cipher().encrypt((text or "").encode("utf-8")),
+        (int(fid),p,name,kind,date,remote,ocr_remote,cipher().encrypt((text or "").encode("utf-8")),
          cipher().encrypt(json.dumps(keywords,ensure_ascii=False).encode("utf-8")),
          cipher().encrypt(json.dumps(analysis,ensure_ascii=False).encode("utf-8")) if analysis else None,
          digest,datetime.now().isoformat()))
