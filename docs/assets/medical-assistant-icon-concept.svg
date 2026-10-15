@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#168BFA"/>
+      <stop offset="1" stop-color="#0755E8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="220" fill="url(#blue)"/>
+  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke-width="48" d="M270 390a242 242 0 0 1 484 0"/>
+    <path stroke-width="58" d="M300 390v115c0 118 69 197 157 230 35 13 55 39 55 77v72"/>
+    <path stroke-width="58" d="M724 390v110c0 112-58 184-143 221-36 16-69 44-69 91"/>
+    <path stroke-width="56" d="M270 390h-25c-31 0-56 25-56 56v94c0 31 25 56 56 56h28"/>
+    <path stroke-width="56" d="M754 390h25c31 0 56 25 56 56v94c0 31-25 56-56 56h-27"/>
+    <path stroke-width="48" d="M753 585c0 71-35 112-91 135"/>
+    <path stroke-width="50" d="M662 720l-45 20"/>
+    <circle cx="512" cy="860" r="76" stroke-width="28"/>
+  </g>
+  <circle cx="512" cy="860" r="30" fill="#fff"/>
+  <g fill="#fff">
+    <rect x="199" y="382" width="98" height="215" rx="48"/>
+    <rect x="727" y="382" width="98" height="215" rx="48"/>
+    <rect x="620" y="711" width="108" height="62" rx="31" transform="rotate(-22 674 742)"/>
+  </g>
+</svg>
