@@ -246,7 +246,7 @@ def install_assistant_routes(app, current_user, family_guard):
             if not key:
                 return ""
             lab = category == "lab_result"
-            current = str(item.get("value") if lab else item.get("text") or "")
+            current = str((item.get("value") if lab else item.get("text")) or "")
             unit = str(item.get("unit") or "") if lab else ""
             corrected = bool(item.get("user_corrected"))
             details = '<details class="memory-edit"><summary>' + ("Изменить / скрыть запись" if not corrected else "Запись исправлена · изменить или вернуть исходную") + '</summary>'
