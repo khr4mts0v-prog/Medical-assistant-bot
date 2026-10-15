@@ -7,6 +7,8 @@ import hashlib
 import json
 import logging
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+import re
 from typing import Any
 
 import database as db
@@ -54,6 +56,64 @@ def _source_ref(row: dict) -> dict:
         "date": _clean_text(row.get("date"), 40) or None,
         "kind": _clean_text(row.get("kind") or "не определён", 100),
     }
+
+def _numeric_value(value: Any):
+    text = str(value or "").strip().replace(" ", "").replace(",", ".")
+    if not text or text.startswith(("<", ">", "≤", "≥")):
+        return None
+    if not re.fullmatch(r"[-+]?\d+(?:\.\d+)?", text):
+        return None
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        return None
+
+def _build_lab_trends(lab_results: list[dict]) -> list[dict]:
+    """Compare only numeric results with the same normalized marker and explicit unit."""
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for item in lab_results:
+        name = _norm_lab_name = " ".join(re.sub(r"[^0-9a-zа-яё]+", " ", str(item.get("name") or "").casefold().replace("ё", "е")).split())
+        unit = " ".join(str(item.get("unit") or "").casefold().split())
+        value = _numeric_value(item.get("value"))
+        if not name or not unit or value is None or _date_key(item.get("date")) == date.min:
+            continue
+        groups.setdefault((name, unit), []).append({**item, "_numeric": value})
+
+    trends = []
+    for (name_key, unit_key), items in groups.items():
+        by_date = {}
+        ambiguous_dates = set()
+        for item in items:
+            day = _date_key(item.get("date"))
+            entry = {
+                "date": item.get("date"),
+                "value": str(item.get("value")),
+                "numeric": item["_numeric"],
+                "source": item.get("source") or {},
+            }
+            if day in by_date and by_date[day]["numeric"] != entry["numeric"]:
+                ambiguous_dates.add(day)
+            else:
+                by_date[day] = entry
+        valid = [
+            by_date[day] for day in sorted(by_date, reverse=True)
+            if day not in ambiguous_dates
+        ]
+        if len(valid) < 2:
+            continue
+        latest, previous = valid[0], valid[1]
+        delta = latest["numeric"] - previous["numeric"]
+        direction = "increase" if delta > 0 else "decrease" if delta < 0 else "unchanged"
+        trends.append({
+            "name": latest["source"].get("name") or name_key,
+            "unit": latest["source"].get("unit") or unit_key,
+            "latest": {k: latest[k] for k in ("date", "value", "source")},
+            "previous": {k: previous[k] for k in ("date", "value", "source")},
+            "absolute_change": format(delta.normalize(), "f"),
+            "direction": direction,
+        })
+    trends.sort(key=lambda item: (_date_key(item["latest"].get("date")), item["name"]), reverse=True)
+    return trends[:100]
 
 def _build_snapshot(fid: int, patient: str, rows: list[dict], profile: dict | None = None) -> dict:
     records = []
@@ -111,6 +171,7 @@ def _build_snapshot(fid: int, patient: str, rows: list[dict], profile: dict | No
     diagnoses.sort(key=lambda x: (_date_key(x.get("date")), x["source"]["document_id"]), reverse=True)
     medications.sort(key=lambda x: (_date_key(x.get("date")), x["source"]["document_id"]), reverse=True)
     lab_results.sort(key=lambda x: (_date_key(x.get("date")), x["source"]["document_id"]), reverse=True)
+    lab_trends = _build_lab_trends(lab_results)
 
     # Store a bounded summary but retain a complete, encrypted list of source document IDs.
     snapshot = {
@@ -127,11 +188,13 @@ def _build_snapshot(fid: int, patient: str, rows: list[dict], profile: dict | No
         "diagnoses_mentioned": diagnoses[:300],
         "medications_mentioned": medications[:300],
         "lab_results": lab_results[:500],
+        "lab_trends": lab_trends,
         "limitations": [
             "Сведения извлечены из документов и не являются независимо подтверждённым диагнозом.",
             "Результаты OCR и извлечённые показатели необходимо сверять с оригиналом.",
             "Отсутствие записи в памяти не доказывает отсутствие заболевания или назначения.",
             "Неизвестные даты не восстанавливаются предположением.",
+            "Динамика рассчитывается только для числовых результатов с совпадающими единицами; сама по себе не устанавливает диагноз.",
         ],
     }
     fingerprint_payload = {
@@ -226,6 +289,20 @@ def to_context(snapshot: dict, max_chars: int = 8500) -> str:
             "- " + str(item.get("date") or "дата не указана") + ": " + str(item.get("name") or "")
             + " = " + str(item.get("value") or "") + " " + str(item.get("unit") or "")
             + " [источник ID " + str(src.get("document_id")) + ", стр. " + str(item.get("page") or "?") + "]"
+        )
+    lines.append("Сравнение двух последних числовых результатов с одинаковыми единицами:")
+    for trend in snapshot.get("lab_trends", [])[:40]:
+        latest = trend.get("latest") or {}
+        previous = trend.get("previous") or {}
+        latest_source = latest.get("source") or {}
+        previous_source = previous.get("source") or {}
+        lines.append(
+            "- " + str(trend.get("name") or "") + ": " + str(previous.get("value") or "")
+            + " -> " + str(latest.get("value") or "") + " " + str(trend.get("unit") or "")
+            + "; изменение " + str(trend.get("absolute_change")) + " " + str(trend.get("unit") or "")
+            + "; даты " + str(previous.get("date") or "?") + " -> " + str(latest.get("date") or "?")
+            + "; источники ID " + str(previous_source.get("document_id")) + " и "
+            + str(latest_source.get("document_id"))
         )
     lines.append("Последние документы:")
     for item in snapshot.get("documents", [])[:30]:
