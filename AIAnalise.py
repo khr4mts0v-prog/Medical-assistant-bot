@@ -279,7 +279,7 @@ def _page_chunks(text):
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         page_text = text[match.end():end]
         if i == 0 and preamble:
-            page_text = preamble + "\\n" + page_text
+            page_text = preamble + "\n" + page_text
         chunks.append({"page": int(match.group(1)), "text": page_text})
     return chunks
 
