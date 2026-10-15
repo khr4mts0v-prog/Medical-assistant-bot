@@ -21,24 +21,42 @@ install_react_ui(app)
 @app.get("/manifest.webmanifest")
 def pwa_manifest():
     return Response(
-        '{"name":"Медицинский архив","short_name":"Медархив","description":"Личный семейный архив медицинских документов","lang":"ru","start_url":"/","scope":"/","display":"standalone","background_color":"#f4f7f5","theme_color":"#16794b","icons":[{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png","purpose":"any"},{"src":"/app-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}',
+        '{"name":"Медицинский архив","short_name":"Медархив","description":"Личный семейный архив медицинских документов","lang":"ru","start_url":"/app","scope":"/","display":"standalone","background_color":"#f2f6ff","theme_color":"#0755e8","icons":[{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png","purpose":"any"},{"src":"/app-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}',
         media_type="application/manifest+json",
         headers={"Cache-Control":"no-cache"},
     )
 
 @app.get("/app-icon.svg")
 def pwa_icon():
-    return Response(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#16794b"/><path d="M224 112h64v112h112v64H288v112h-64V288H112v-64h112z" fill="#fff"/></svg>',
-        media_type="image/svg+xml",
-        headers={"Cache-Control":"public, max-age=86400"},
-    )
+    icon_path=Path(__file__).resolve().parent/"docs"/"assets"/"medical-assistant-icon-concept.svg"
+    if not icon_path.is_file():
+        raise HTTPException(500,"Approved PWA icon asset is missing")
+    return Response(icon_path.read_text(encoding="utf-8"),media_type="image/svg+xml",headers={"Cache-Control":"public, max-age=86400"})
 
 @app.get("/apple-touch-icon.png")
 def pwa_apple_touch_icon():
-    # PNG is required for reliable iOS Home Screen icons; it contains no user data.
-    image = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAABn0lEQVR42u3dUQ2AIBRAUXFmwFBaCAOYyFKm0AyCE3DnFMC93b35BSGm5RrgJ0YjQNAgaBA0CBpBg6BB0CBoEDSCBkGDoEHQIGgEDYIGQYOgQdAIGgQNggZBg6ARNAgaBA2CBkEjaBA0CBpyTUbwzLkfn585b6vB29AIGgQNggZBg6ARNAgaBA2CBkEjaBA0CBoEDYJG0CBoEDQIGgSNoEHQIGgQNAgaQYOgQdAgaAQNggZBg6BB0AgaBA2CBkGDoBE09CzEtFwtfEiNF1p5Vwsv3trQ+OUAQYOgQdAIGgQNggZBg6ARNAgaBA2CBkEjaBA0CBoEDYJG0CBoEDQIGgSNoEHQIGgo1cxljb2ocalkC5cg2tAgaBA0CBpBg6BB0CBoEDSCBkGDoEHQCBoEDYIGQYOgETQIGgQNggZBI2gQNAgaBA2CRtAgaBA0CBoEjaBB0CBoEDQIGkGDoEHQUMBLstjQIGgQNAgaQYOgQdAgaBA0ggZBg6BB0CBoBA2CBkGDoEHQCBoEDYIGQYOgETQIGgQNggZBI2gQNAgast0qbRHLtcavEQAAAABJRU5ErkJggg==")
-    return Response(image, media_type="image/png", headers={"Cache-Control": "public, max-age=604800"})
+    # PNG rendition of the approved blue/white headset-stethoscope concept for iOS.
+    from io import BytesIO
+    from PIL import Image, ImageDraw
+    image=Image.new("RGB",(180,180))
+    pixels=image.load()
+    for y in range(180):
+        for x in range(180):
+            t=(x+y)/358
+            pixels[x,y]=(int(22*(1-t)+7*t),int(139*(1-t)+85*t),int(250*(1-t)+232*t))
+    draw=ImageDraw.Draw(image)
+    white="#ffffff"
+    draw.arc((37,18,143,108),180,360,fill=white,width=9)
+    draw.rounded_rectangle((30,65,53,112),radius=10,fill=white)
+    draw.rounded_rectangle((127,65,150,112),radius=10,fill=white)
+    draw.line([(42,98),(42,116),(55,132),(76,141),(88,141),(88,151)],fill=white,width=8)
+    draw.line([(138,98),(138,113),(127,126),(111,133)],fill=white,width=8)
+    draw.line([(111,133),(103,137)],fill=white,width=8)
+    draw.ellipse((73,138,103,168),outline=white,width=7)
+    draw.ellipse((84,149,92,157),fill=white)
+    buffer=BytesIO()
+    image.save(buffer,format="PNG",optimize=True)
+    return Response(buffer.getvalue(),media_type="image/png",headers={"Cache-Control":"public, max-age=604800"})
 
 
 @app.get("/sw.js")
@@ -46,7 +64,51 @@ def pwa_service_worker():
     # Deliberately network-only: never cache private medical records or OCR text.
     script='self.addEventListener("install",e=>self.skipWaiting());self.addEventListener("activate",e=>e.waitUntil(self.clients.claim()));self.addEventListener("fetch",e=>{if(e.request.method!=="GET")return;e.respondWith(fetch(e.request));});'
     return Response(script,media_type="application/javascript",headers={"Cache-Control":"no-cache","Service-Worker-Allowed":"/"})
-security=HTTPBasic()
+security=HTTPBasic(auto_error=False)
+SESSION_COOKIE_NAME="medical_archive_session"
+SESSION_MAX_AGE=max(300,min(2592000,int(os.getenv("WEB_SESSION_MAX_AGE","604800"))))
+
+def _session_signing_key():
+    secret=os.getenv("WEB_SESSION_SECRET","").strip()
+    return secret.encode("utf-8") if len(secret)>=32 else None
+
+def _make_session(uid, expires_at=None):
+    key=_session_signing_key()
+    if not key:
+        raise RuntimeError("WEB_SESSION_SECRET must contain at least 32 characters")
+    expiry=int(expires_at if expires_at is not None else time.time()+SESSION_MAX_AGE)
+    payload=f"{int(uid)}:{expiry}:{secrets.token_urlsafe(18)}".encode("utf-8")
+    encoded=base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+    signature=hmac.new(key,encoded.encode("ascii"),hashlib.sha256).hexdigest()
+    return encoded+"."+signature
+
+def _read_session(token):
+    key=_session_signing_key()
+    if not key or not token or len(token)>2048:
+        return None
+    try:
+        encoded,signature=token.rsplit(".",1)
+        expected=hmac.new(key,encoded.encode("ascii"),hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature,expected):
+            return None
+        payload=base64.urlsafe_b64decode(encoded + "="*((4-len(encoded)%4)%4)).decode("utf-8")
+        uid,expiry,_nonce=payload.split(":",2)
+        uid=int(uid); expiry=int(expiry)
+        if uid==0 or expiry<=int(time.time()) or expiry>int(time.time())+2592000:
+            return None
+        return uid
+    except (ValueError, UnicodeDecodeError, TypeError):
+        return None
+
+def _safe_next_path(value):
+    value=str(value or "/")
+    return value if value.startswith("/") and not value.startswith("//") and "\r" not in value and "\n" not in value else "/"
+
+def _login_html(next_path="/", error="", status=200):
+    target=html.escape(_safe_next_path(next_path),quote=True)
+    message=f'<p class="error" role="alert">{html.escape(error)}</p>' if error else ""
+    body='''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0755e8"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/app-icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>Вход · Медицинский архив</title><style>:root{color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f2f6ff;color:#172b4d}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px}.card{width:min(100%,420px);padding:28px;border:1px solid #dce7f8;border-radius:24px;background:#fff;box-shadow:0 18px 60px #153b7814}.brand{display:flex;align-items:center;gap:12px;margin-bottom:24px;font-weight:750;font-size:1.1rem}.brand img{width:52px;height:52px;border-radius:14px;background:#0755e8}h1{font-size:1.65rem;letter-spacing:-.04em;margin:0 0 8px}p{color:#60718d;line-height:1.5}label{display:block;font-weight:650;margin:16px 0 6px}input{width:100%;padding:13px 14px;border:1px solid #d5e0f0;border-radius:12px;font:inherit;min-height:48px}button{width:100%;margin-top:22px;padding:13px;border:0;border-radius:12px;background:#0755e8;color:#fff;font:inherit;font-weight:700;min-height:48px}.error{padding:12px;border-radius:10px;background:#fff0f0;color:#a32424}</style></head><body><main class="card"><div class="brand"><img src="/app-icon.svg" alt=""><span>Medical Assistant</span></div><h1>Войти в архив</h1><p>Войдите, чтобы открыть семейный медицинский архив.</p>'''+message+'''<form method="post" action="/auth/login"><input type="hidden" name="next" value="'''+target+'''"><label for="username">Логин</label><input id="username" name="username" autocomplete="username" required autofocus><label for="password">Пароль</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">Войти</button></form></main></body></html>'''
+    return HTMLResponse(body,status_code=status,headers={"Cache-Control":"no-store"})
 WEB_USERNAME=os.getenv("WEB_USERNAME","").strip()
 WEB_PASSWORD=os.getenv("WEB_PASSWORD","")
 # Temporary shared demo credentials are retained for the private MVP testing phase.
@@ -102,7 +164,15 @@ async def demo_session_cookie(request: Request, call_next):
                         secure=True, samesite="lax", path="/")
     return response
 
-def current_user(request: Request, credentials: HTTPBasicCredentials=Depends(security))->int:
+def current_user(request: Request, credentials: HTTPBasicCredentials|None=Depends(security))->int:
+    # A valid signed session takes precedence for PWA requests; legacy HTTP Basic remains supported.
+    if request and request.url.path!="/auth/login":
+        session_uid=_read_session(request.cookies.get(SESSION_COOKIE_NAME,""))
+        if session_uid is not None:
+            if is_demo_user(session_uid): _ensure_demo_tenant(session_uid)
+            return session_uid
+    if credentials is None:
+        raise HTTPException(401,"Not authenticated")
     ip = request.client.host if request and request.client else "unknown"
     now = time.monotonic()
     rate_key = ip + ":" + hashlib.sha256(credentials.username.encode()).hexdigest()[:16]
@@ -136,6 +206,49 @@ def current_user(request: Request, credentials: HTTPBasicCredentials=Depends(sec
     with AUTH_FAILURES_LOCK:
         AUTH_FAILURES.setdefault(ip, []).append(now)
     raise HTTPException(401,"Invalid username or password",headers={"WWW-Authenticate":'Basic realm="Medical Archive"'})
+
+@app.get("/login",response_class=HTMLResponse,include_in_schema=False)
+def login_page(request:Request,next_path:str="/"):
+    if _read_session(request.cookies.get(SESSION_COOKIE_NAME,"")) is not None:
+        return RedirectResponse(_safe_next_path(next_path),status_code=303)
+    return _login_html(next_path)
+
+@app.post("/auth/login",include_in_schema=False)
+def create_login_session(request:Request,username:str=Form(...),password:str=Form(...),next_path:str=Form("/",alias="next")):
+    if not _session_signing_key():
+        return _login_html(next_path,"Сессии не настроены. Администратору необходимо задать WEB_SESSION_SECRET длиной не менее 32 символов.",503)
+    credentials=HTTPBasicCredentials(username=username,password=password)
+    demo_ok=bool(DEMO_USERNAME and DEMO_PASSWORD and hmac.compare_digest(username.encode(),DEMO_USERNAME.encode()) and hmac.compare_digest(password.encode(),DEMO_PASSWORD.encode()))
+    demo_cookie=request.cookies.get("medical_demo_session","")
+    if demo_ok:
+        demo_cookie=demo_cookie or secrets.token_urlsafe(32)
+        request.state.medical_demo_session=demo_cookie
+    try:
+        uid=current_user(request,credentials)
+    except HTTPException:
+        return _login_html(next_path,"Неверный логин или пароль.",401)
+    try:
+        token=_make_session(uid)
+    except RuntimeError:
+        return _login_html(next_path,"Не удалось создать защищённую сессию.",503)
+    response=RedirectResponse(_safe_next_path(next_path),status_code=303)
+    response.set_cookie(SESSION_COOKIE_NAME,token,max_age=SESSION_MAX_AGE,httponly=True,secure=True,samesite="lax",path="/")
+    if demo_ok:
+        response.set_cookie("medical_demo_session",demo_cookie,max_age=SESSION_MAX_AGE,httponly=True,secure=True,samesite="lax",path="/")
+    response.headers["Cache-Control"]="no-store"
+    return response
+
+@app.get("/auth/status",include_in_schema=False)
+def auth_status(uid:int=Depends(current_user)):
+    return Response('{"authenticated":true}',media_type="application/json",headers={"Cache-Control":"no-store"})
+
+@app.post("/auth/logout",include_in_schema=False)
+def logout():
+    response=RedirectResponse("/login",status_code=303)
+    response.delete_cookie(SESSION_COOKIE_NAME,path="/",secure=True,httponly=True,samesite="lax")
+    response.delete_cookie("medical_demo_session",path="/",secure=True,httponly=True,samesite="lax")
+    response.headers["Cache-Control"]="no-store"
+    return response
 
 def _cleanup_expired_demo_tenants_once():
     """Purge artifacts only for expired tenants explicitly marked as demo."""
