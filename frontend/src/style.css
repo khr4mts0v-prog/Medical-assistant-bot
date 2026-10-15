@@ -491,3 +491,8 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
   .smart-chat-turn .smart-answer{padding:13px}
   .smart-gap-actions button{flex-basis:100%}
 }
+
+.smart-completeness{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:0 0 12px;padding:9px 12px;border:1px solid var(--line);border-radius:11px;background:#f8fbff;color:var(--muted);font-size:11px}
+.smart-completeness strong{color:var(--fg);font-size:12px}
+.smart-completeness.completeness-insufficient{border-color:#efd4ac;background:#fff9ef}
+.smart-completeness.completeness-sufficient{border-color:#cfe5d5;background:#f6fcf7}
