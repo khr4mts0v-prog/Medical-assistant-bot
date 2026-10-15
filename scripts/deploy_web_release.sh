@@ -9,7 +9,7 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
 fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE_ROOT="$(git -C "$SCRIPT_DIR/.." rev-parse --show-toplevel)"
+SOURCE_ROOT="${SOURCE_ROOT:-$(git -C "$SCRIPT_DIR/.." rev-parse --show-toplevel)}"
 RELEASE_BRANCH="${RELEASE_BRANCH:-release/web-2026-10}"
 DEPLOY_WORKTREE="${DEPLOY_WORKTREE:-/opt/medical-archive-release}"
 BACKUP_ROOT="${BACKUP_ROOT:-/opt/medical-archive-backups}"
@@ -68,7 +68,9 @@ finally:
 os.chmod(target, 0o600)
 check = sqlite3.connect("file:" + target + "?mode=ro", uri=True)
 try:
-    check.execute("PRAGMA quick_check").fetchone()
+    result = check.execute("PRAGMA quick_check").fetchone()
+    if not result or result[0] != "ok":
+        raise SystemExit("SQLite backup quick_check failed: " + repr(result))
 finally:
     check.close()
 PY
