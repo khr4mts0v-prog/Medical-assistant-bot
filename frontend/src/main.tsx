@@ -314,6 +314,9 @@ function App() {
             {smartConversation.map((turn:any, index:number) => <article className="smart-chat-turn" key={index}>
               <div className="smart-user-message"><span>Вы</span><div>{turn.question}</div></div>
               {turn.result?.answer && <article className="smart-answer"><h3><BrainCircuit size={17}/> Ответ ассистента</h3><pre>{turn.result.answer}</pre></article>}
+              {turn.result?.data_completeness && <div className={"smart-completeness completeness-" + turn.result.data_completeness}>
+                <span>Полнота данных</span><strong>{turn.result.data_completeness === 'sufficient' ? 'Достаточно для краткой сводки' : turn.result.data_completeness === 'insufficient' ? 'Данных недостаточно' : turn.result.data_completeness === 'partial' ? 'Частичная картина' : 'Не удалось оценить'}</strong>
+              </div>}
               {turn.result?.missing_documents?.length > 0 && <section className="smart-gaps">
                 <h3><FilePlus2 size={17}/> Что может не хватать</h3>
                 <p className="smart-gap-intro">Я проверил архив по названиям документов из найденных заключений. Если нужного файла здесь нет, загружать его необязательно — сводка выше уже составлена по доступным источникам.</p>
