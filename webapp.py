@@ -42,8 +42,9 @@ def pwa_service_worker():
 security=HTTPBasic()
 WEB_USERNAME=os.getenv("WEB_USERNAME","").strip()
 WEB_PASSWORD=os.getenv("WEB_PASSWORD","")
-DEMO_USERNAME=os.getenv("DEMO_USERNAME", "test").strip()
-DEMO_PASSWORD=os.getenv("DEMO_PASSWORD", "test")
+# Demo access is opt-in. Never ship a shared default credential to a public endpoint.
+DEMO_USERNAME=os.getenv("DEMO_USERNAME", "").strip()
+DEMO_PASSWORD=os.getenv("DEMO_PASSWORD", "")
 # Real web users occupy the negative 48-bit hash range; demo tenant identities
 # are derived from a random, HttpOnly per-browser cookie in a separate range.
 DEMO_UID_FLOOR=10**15
