@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 import database as db
 import tenancy
 from ai_provider import answer_archive_question, chat_completion, provider_config
+import patient_memory
 
 STOP_WORDS = {
     "что", "как", "когда", "где", "почему", "какой", "какая", "какие",
@@ -200,6 +201,85 @@ def _context(rows):
     return "\n\n--- ИСТОЧНИК ---\n\n".join(chunks)[:18000]
 
 def install_assistant_routes(app, current_user, family_guard):
+    patient_memory.init()
+
+    @app.get("/patient-memory", response_class=HTMLResponse)
+    def patient_memory_page(family_id: int | None = None, patient: str = "",
+                            uid: int = __import__("fastapi").Depends(current_user)):
+        families = tenancy.families_for_user(uid)
+        if not families:
+            return _page("Память пациента", '<div class="card">Сначала создайте семейный архив и добавьте пациента.</div>')
+        allowed = {int(f["id"]) for f in families}
+        fid = int(family_id) if family_id is not None else int(families[0]["id"])
+        if fid not in allowed:
+            raise HTTPException(403, "Нет доступа к этому семейному архиву")
+        family_guard(fid, uid)
+        patients = db.patients(fid)
+        if patient not in patients:
+            if len(patients) == 1:
+                patient = patients[0]
+            else:
+                options = "".join(
+                    '<li><a href="/patient-memory?family_id=' + str(fid) + '&patient=' + quote(p, safe="") + '">' + html.escape(p) + '</a></li>'
+                    for p in patients
+                )
+                return _page("Память пациента", '<div class="card"><p>Выберите пациента:</p><ul>' + options + '</ul></div>')
+        if not patient:
+            return _page("Память пациента", '<div class="card">В этом архиве пока нет пациентов.</div>')
+        snapshot = patient_memory.get_snapshot(fid, patient)
+
+        def section(title, items, render_item):
+            if not items:
+                return '<section class="card"><h2>' + html.escape(title) + '</h2><p class="muted">Записей пока нет.</p></section>'
+            return '<section class="card"><h2>' + html.escape(title) + '</h2><ul>' + "".join(render_item(item) for item in items) + '</ul></section>'
+
+        def source_link(source):
+            source = source or {}
+            doc_id = source.get("document_id")
+            if not doc_id:
+                return ""
+            return ' · <a href="/families/' + str(fid) + '/documents/' + str(int(doc_id)) + '/edit">Источник: ' + html.escape(str(source.get("name") or "документ")) + '</a>'
+
+        diagnosis_html = section("Упомянутые диагнозы и состояния", snapshot["diagnoses_mentioned"][:100],
+            lambda item: '<li><strong>' + html.escape(str(item.get("date") or "Дата не указана")) + '</strong> — '
+            + html.escape(str(item.get("text") or "")) + source_link(item.get("source")) + '</li>')
+        medication_html = section("Упомянутые лекарства и назначения", snapshot["medications_mentioned"][:100],
+            lambda item: '<li><strong>' + html.escape(str(item.get("date") or "Дата не указана")) + '</strong> — '
+            + html.escape(str(item.get("text") or "")) + source_link(item.get("source")) + '</li>')
+        lab_html = section("Лабораторные показатели", snapshot["lab_results"][:150],
+            lambda item: '<li><strong>' + html.escape(str(item.get("date") or "Дата не указана")) + '</strong> — '
+            + html.escape(str(item.get("name") or "")) + ': ' + html.escape(str(item.get("value") or ""))
+            + (' ' + html.escape(str(item.get("unit"))) if item.get("unit") else "")
+            + source_link(item.get("source")) + '</li>')
+        docs_html = section("Документы в истории", snapshot["documents"][:150],
+            lambda item: '<li><strong>' + html.escape(str(item.get("date") or "Дата не указана")) + '</strong> — '
+            + html.escape(str(item.get("kind") or "Тип не определён")) + ': '
+            + '<a href="/families/' + str(fid) + '/documents/' + str(int(item["document_id"])) + '/edit">'
+            + html.escape(str(item.get("name") or "Документ без названия")) + '</a></li>')
+        caveats = "".join('<li>' + html.escape(str(note)) + '</li>' for note in snapshot["limitations"])
+        body = (
+            '<div class="card"><p><strong>Пациент:</strong> ' + html.escape(patient) + '</p>'
+            '<p><strong>Дата рождения:</strong> ' + html.escape(str((snapshot.get("profile") or {}).get("birth_date") or "не указана")) + '</p>'
+            '<p><strong>Документов учтено:</strong> ' + str(snapshot["document_count"]) + '</p>'
+            '<p>Память формируется локально из структурированных результатов распознавания и обновляется при открытии. '
+            'Каждая запись ведёт к исходному документу.</p>'
+            '<p><a href="/assistant?family_id=' + str(fid) + '&patient=' + quote(patient, safe="") + '">Задать вопрос ассистенту по этому пациенту</a></p></div>'
+            + diagnosis_html + medication_html + lab_html + docs_html
+            + '<section class="card"><h2>Ограничения памяти</h2><ul>' + caveats + '</ul></section>'
+        )
+        return _page("Память пациента", body)
+
+    @app.get("/api/patient-memory")
+    def patient_memory_api(family_id: int, patient: str,
+                           uid: int = __import__("fastapi").Depends(current_user)):
+        families = tenancy.families_for_user(uid)
+        if int(family_id) not in {int(f["id"]) for f in families}:
+            raise HTTPException(403, "Нет доступа к этому семейному архиву")
+        family_guard(family_id, uid)
+        if patient not in db.patients(family_id):
+            raise HTTPException(400, "Выбранный пациент не найден в этом архиве")
+        return JSONResponse(patient_memory.get_snapshot(family_id, patient))
+
     @app.get("/assistant", response_class=HTMLResponse)
     def assistant_page(family_id: int | None = None, patient: str = "", uid: int = __import__("fastapi").Depends(current_user)):
         families = tenancy.families_for_user(uid)
@@ -220,6 +300,7 @@ def install_assistant_routes(app, current_user, family_guard):
             '<form method="post" action="/assistant">'
             '<label>Семейный архив</label><select name="family_id" onchange="location.href=\'/assistant?family_id=\'+this.value">' + family_options + '</select>'
             '<label>Пациент</label><select name="patient" required>' + patient_options + '</select>'
+            '<p><a href="/patient-memory?family_id=' + str(fid) + '&patient=' + quote(patient, safe="") + '">Открыть память пациента и историю показателей</a></p>'
             '<label>Вопрос</label><textarea name="question" rows="4" required maxlength="1200" placeholder="Например: сравни гемоглобин за последние полгода и покажи динамику"></textarea>'
             '<label style="font-weight:400"><input type="checkbox" name="consent" value="yes" required style="width:auto"> Я разрешаю отправить текст вопроса и найденные фрагменты медицинских документов внешнему ИИ-провайдеру для анализа.</label>'
             '<button type="submit">Найти и проанализировать</button></form>'
@@ -258,17 +339,26 @@ def install_assistant_routes(app, current_user, family_guard):
                 plan = _fallback_plan(question)
                 planner_status = "План построен локально: нейросеть планирования недоступна"
             rows = _retrieve(family_id, patient, plan)
+            snapshot = patient_memory.get_snapshot(family_id, patient)
+            if not rows and not snapshot.get("document_count"):
+                return _page("Результаты поиска", '<div class="card"><p>В архиве пациента пока нет документов, на которых можно построить ответ.</p><p class="muted">' + html.escape(planner_status) + '. Добавьте документы или уточните запрос.</p></div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Задать другой вопрос</a></p>')
+            context = patient_memory.to_context(snapshot) + "\\n\\nРЕЛЕВАНТНЫЕ ДОКУМЕНТЫ ПО ЗАПРОСУ:\\n" + _context(rows)
             if not rows:
-                return _page("Результаты поиска", '<div class="card"><p>По заданным критериям документы не найдены.</p><p class="muted">' + html.escape(planner_status) + '. Попробуйте сформулировать вопрос иначе или проверить период.</p></div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Задать другой вопрос</a></p>')
-            context = _context(rows)
+                planner_status += "; отдельные документы по запросу не найдены, использована память по всей истории"
             answer = answer_archive_question(question, patient, context=context)
             if answer.startswith("Не удалось получить ответ ИИ") or answer.startswith("Не задан "):
                 return _page("Ошибка анализа", '<div class="card">' + html.escape(answer) + '</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Попробовать ещё раз</a></p>', 502)
+            source_rows = {int(r["id"]): r for r in rows}
+            for item in snapshot.get("documents", [])[:100]:
+                doc_id = int(item["document_id"])
+                source_rows.setdefault(doc_id, {
+                    "id": doc_id, "name": item.get("name"), "date": item.get("date"), "kind": item.get("kind")
+                })
             sources = "".join(
                 '<div class="source"><strong>' + html.escape(str(r.get("name") or "Без названия")) + '</strong><br>'
                 + html.escape(str(r.get("date") or "Дата не указана")) + ' · ' + html.escape(str(r.get("kind") or "не определён"))
                 + ' · <a href="/families/' + str(family_id) + '/documents/' + str(r["id"]) + '/edit">Открыть документ</a></div>'
-                for r in rows
+                for r in list(source_rows.values())[:100]
             )
             plan_html = '<p class="muted">' + html.escape(planner_status) + '; найдено источников: ' + str(len(rows)) + '.</p>'
             answer_html = '<div class="card assistant-answer"><h2>Ответ</h2><pre>' + html.escape(answer) + '</pre></div>'
