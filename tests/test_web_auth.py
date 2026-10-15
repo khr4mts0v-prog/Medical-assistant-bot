@@ -4,7 +4,7 @@ from fastapi.security import HTTPBasicCredentials
 
 os.environ["WEB_USERNAME"] = "test-admin"
 os.environ["WEB_PASSWORD"] = "test-password-for-unit-tests"
-# Demo credentials are configured explicitly for tests; production defaults are disabled.
+# Demo credentials default to test/test for the current MVP test phase.
 os.environ["DEMO_USERNAME"] = "test"
 os.environ["DEMO_PASSWORD"] = "test"
 
@@ -20,7 +20,7 @@ class WebAuthTests(unittest.TestCase):
             webapp.current_user(None, HTTPBasicCredentials(username="test-admin", password="wrong"))
         self.assertEqual(getattr(ctx.exception, "status_code", None), 401)
 
-    def test_demo_login_is_disabled_without_explicit_configuration(self):
+    def test_demo_login_can_be_disabled_with_empty_configuration(self):
         from unittest.mock import patch
         with patch.object(webapp, "DEMO_USERNAME", ""), patch.object(webapp, "DEMO_PASSWORD", ""):
             with self.assertRaises(Exception) as ctx:
