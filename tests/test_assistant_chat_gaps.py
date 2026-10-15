@@ -25,6 +25,22 @@ class AssistantChatGapTests(unittest.TestCase):
         self.assertNotIn("по", terms)
         self.assertNotIn("исследованию", terms)
 
+    def test_fallback_plan_does_not_treat_common_words_as_archive_terms(self):
+        plan = assistant._fallback_plan("что по для об")
+        self.assertEqual(plan["search_terms"], [])
+        self.assertFalse(plan["allow_full_history"])
+
+    @patch("assistant_routes.db.search", return_value=[])
+    def test_planner_phrase_is_split_into_specific_terms(self, search):
+        assistant._retrieve(
+            12, "Александр",
+            {"search_terms": ["ультразвуковое исследование"], "allow_full_history": False},
+        )
+        terms = [call.args[2] for call in search.call_args_list]
+        self.assertIn("ультразвуковое", terms)
+        self.assertNotIn("исследование", terms)
+        self.assertNotIn("ультразвуковое исследование", terms)
+
     def test_patient_alias_inflection_scopes_sasha(self):
         records = [{"name": "Александр", "aliases": ["Александр", "Саша"]}]
         self.assertEqual(assistant._mentioned_people(records, "Дай сводку по УЗИ Саши"), ["Александр"])
