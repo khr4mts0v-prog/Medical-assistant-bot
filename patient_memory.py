@@ -40,6 +40,19 @@ CREATE TABLE IF NOT EXISTS patient_memory_edits (
 );
 CREATE INDEX IF NOT EXISTS patient_memory_edits_patient
     ON patient_memory_edits(family_id, patient_id);
+CREATE TABLE IF NOT EXISTS patient_memory_manual_facts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
+    patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    payload_enc BLOB NOT NULL,
+    created_by INTEGER NOT NULL,
+    updated_by INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','inactive')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS patient_memory_manual_patient
+    ON patient_memory_manual_facts(family_id, patient_id, status, updated_at);
 """
 
 def init() -> None:
@@ -347,7 +360,102 @@ def get_snapshot(fid: int, patient: str) -> dict:
     pid = db.patient_id(int(fid), patient)
     if pid is None:
         raise ValueError("Пациент не найден в этом семейном архиве")
-    return _apply_edits(snapshot, _load_edits(fid, pid))
+    snapshot = _apply_edits(snapshot, _load_edits(fid, pid))
+    snapshot["manual_facts"] = get_manual_facts(fid, patient)
+    return snapshot
+
+def _manual_payload(text: str, category: str, fact_date: str) -> dict:
+    text = _clean_text(text, 2000)
+    category = str(category or "note").strip()
+    if category not in {"note", "diagnosis", "medication", "lab_result", "symptom"}:
+        raise ValueError("Неизвестный тип ручной записи")
+    if not text:
+        raise ValueError("Введите текст факта")
+    fact_date = _clean_text(fact_date, 40)
+    if fact_date and _date_key(fact_date) == date.min:
+        raise ValueError("Дата должна быть в формате ГГГГ-ММ-ДД или ДД.ММ.ГГГГ")
+    return {"text": text, "category": category, "date": fact_date or None}
+
+
+def get_manual_facts(fid: int, patient: str, include_inactive: bool = False) -> list[dict]:
+    """Return explicitly user-entered facts; payload is encrypted at rest."""
+    pid = db.patient_id(int(fid), patient)
+    if pid is None:
+        raise ValueError("Пациент не найден в этом семейном архиве")
+    where_status = "" if include_inactive else " AND status='active'"
+    with tenancy.connect() as conn:
+        rows = conn.execute(
+            "SELECT id,payload_enc,created_by,updated_by,status,created_at,updated_at "
+            "FROM patient_memory_manual_facts WHERE family_id=? AND patient_id=?" + where_status +
+            " ORDER BY updated_at DESC,id DESC",
+            (int(fid), int(pid)),
+        ).fetchall()
+    facts = []
+    crypt = tenancy.cipher()
+    for row in rows:
+        try:
+            payload = json.loads(crypt.decrypt(row["payload_enc"]).decode("utf-8"))
+        except Exception:
+            logging.warning("Unable to decrypt manual patient memory fact id=%s", row["id"])
+            continue
+        facts.append({
+            "id": int(row["id"]), **payload, "created_by": int(row["created_by"]),
+            "updated_by": int(row["updated_by"]), "status": row["status"],
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+            "origin": "user_entered", "source": None,
+        })
+    return facts
+
+
+def add_manual_fact(fid: int, patient: str, text: str, category: str,
+                    fact_date: str, actor_id: int) -> int:
+    """Add an encrypted, user-entered fact without inventing a document source."""
+    pid = db.patient_id(int(fid), patient)
+    if pid is None:
+        raise ValueError("Пациент не найден в этом семейном архиве")
+    payload = _manual_payload(text, category, fact_date)
+    encrypted = tenancy.cipher().encrypt(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    with tenancy.connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO patient_memory_manual_facts
+               (family_id,patient_id,payload_enc,created_by,updated_by,status,created_at,updated_at)
+               VALUES(?,?,?,?,?,'active',?,?)""",
+            (int(fid), int(pid), encrypted, int(actor_id), int(actor_id), now, now),
+        )
+        return int(cur.lastrowid)
+
+
+def update_manual_fact(fid: int, patient: str, fact_id: int, text: str,
+                       category: str, fact_date: str, actor_id: int) -> None:
+    pid = db.patient_id(int(fid), patient)
+    if pid is None:
+        raise ValueError("Пациент не найден в этом семейном архиве")
+    payload = _manual_payload(text, category, fact_date)
+    encrypted = tenancy.cipher().encrypt(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    with tenancy.connect() as conn:
+        cur = conn.execute(
+            """UPDATE patient_memory_manual_facts SET payload_enc=?,updated_by=?,updated_at=?
+               WHERE id=? AND family_id=? AND patient_id=?""",
+            (encrypted, int(actor_id), now, int(fact_id), int(fid), int(pid)),
+        )
+        if cur.rowcount != 1:
+            raise ValueError("Ручная запись не найдена у выбранного пациента")
+
+
+def delete_manual_fact(fid: int, patient: str, fact_id: int) -> None:
+    pid = db.patient_id(int(fid), patient)
+    if pid is None:
+        raise ValueError("Пациент не найден в этом семейном архиве")
+    with tenancy.connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM patient_memory_manual_facts WHERE id=? AND family_id=? AND patient_id=?",
+            (int(fact_id), int(fid), int(pid)),
+        )
+        if cur.rowcount != 1:
+            raise ValueError("Ручная запись не найдена у выбранного пациента")
+
 
 def save_edit(fid: int, patient: str, fact_key: str, action: str,
               replacement: str = "", unit: str = "", note: str = "") -> None:
@@ -406,7 +514,17 @@ def to_context(snapshot: dict, max_chars: int = 8500) -> str:
         "Пациент: " + str(snapshot.get("patient") or "не указан"),
         "Дата рождения в карточке: " + str((snapshot.get("profile") or {}).get("birth_date") or "не указана"),
         "Документов в архиве: " + str(snapshot.get("document_count", 0)),
-        "Упомянутые диагнозы/состояния (сначала сверить источник):",
+        "РУЧНЫЕ ЗАПИСИ ПОЛЬЗОВАТЕЛЯ (не извлечены из документа; автор/дата сохранения указаны отдельно):",
+    ]
+    for item in snapshot.get("manual_facts", [])[:80]:
+        lines.append(
+            "- [" + str(item.get("category") or "note") + "] " + str(item.get("date") or "дата факта не указана")
+            + ": " + str(item.get("text") or "")
+            + " [внесено пользователем ID " + str(item.get("created_by")) + "; создано "
+            + str(item.get("created_at") or "?") + "; обновлено " + str(item.get("updated_at") or "?")
+            + "; статус " + str(item.get("status") or "active") + "; документ-источник отсутствует]"
+        )
+    lines.append("Упомянутые диагнозы/состояния (сначала сверить источник):"
     ]
     for item in snapshot.get("diagnoses_mentioned", [])[:60]:
         src = item.get("source") or {}

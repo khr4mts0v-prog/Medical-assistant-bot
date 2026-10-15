@@ -47,6 +47,55 @@ class PatientMemoryTests(unittest.TestCase):
         rows = db.search(self.family, self.patient, "", limit=1000)
         self.doc_id = next(row["id"] for row in rows if row["name"] == name)
 
+    def test_manual_facts_are_encrypted_audited_and_in_assistant_context(self):
+        fact_id = patient_memory.add_manual_fact(
+            self.family, self.patient, "Со слов пациента, препарат отменён",
+            "medication", "12.10.2026", 1001,
+        )
+        facts = patient_memory.get_manual_facts(self.family, self.patient)
+        self.assertEqual(len(facts), 1)
+        fact = facts[0]
+        self.assertEqual(fact["id"], fact_id)
+        self.assertEqual(fact["origin"], "user_entered")
+        self.assertIsNone(fact["source"])
+        self.assertEqual(fact["created_by"], 1001)
+        with tenancy.connect() as conn:
+            row = conn.execute(
+                "SELECT payload_enc FROM patient_memory_manual_facts WHERE id=?", (fact_id,)
+            ).fetchone()
+        self.assertNotIn("препарат отменён", bytes(row["payload_enc"]).decode("latin1"))
+        snapshot = patient_memory.get_snapshot(self.family, self.patient)
+        context = patient_memory.to_context(snapshot)
+        self.assertIn("РУЧНЫЕ ЗАПИСИ ПОЛЬЗОВАТЕЛЯ", context)
+        self.assertIn("документ-источник отсутствует", context)
+        self.assertIn("препарат отменён", context)
+
+    def test_manual_facts_can_be_updated_and_deleted_with_patient_isolation(self):
+        fact_id = patient_memory.add_manual_fact(
+            self.family, self.patient, "Первоначальная заметка", "note", "", 1001,
+        )
+        patient_memory.update_manual_fact(
+            self.family, self.patient, fact_id, "Исправленная заметка", "symptom", "2026-10-12", 1001,
+        )
+        fact = patient_memory.get_manual_facts(self.family, self.patient)[0]
+        self.assertEqual(fact["text"], "Исправленная заметка")
+        self.assertEqual(fact["category"], "symptom")
+        self.assertEqual(fact["date"], "2026-10-12")
+        other_family = tenancy.create_family("Другой архив", 1002)
+        db.add_patient(other_family, self.patient)
+        with self.assertRaises(ValueError):
+            patient_memory.update_manual_fact(other_family, self.patient, fact_id, "Чужая запись", "note", "", 1002)
+        with self.assertRaises(ValueError):
+            patient_memory.delete_manual_fact(other_family, self.patient, fact_id)
+        patient_memory.delete_manual_fact(self.family, self.patient, fact_id)
+        self.assertEqual(patient_memory.get_manual_facts(self.family, self.patient), [])
+
+    def test_manual_fact_rejects_invalid_date_and_empty_text(self):
+        with self.assertRaises(ValueError):
+            patient_memory.add_manual_fact(self.family, self.patient, "Запись", "note", "вчера", 1001)
+        with self.assertRaises(ValueError):
+            patient_memory.add_manual_fact(self.family, self.patient, "   ", "note", "", 1001)
+
     def test_memory_is_persisted_encrypted_and_source_linked(self):
         snapshot = patient_memory.refresh(self.family, self.patient)
         self.assertEqual(snapshot["document_count"], 1)
