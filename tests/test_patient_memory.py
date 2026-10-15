@@ -71,6 +71,14 @@ class PatientMemoryTests(unittest.TestCase):
             "2026-05-02",
             {"diagnoses": [{"text": "Упоминание из заключения", "page": 2}]},
         )
+        with tenancy.connect() as conn:
+            row = conn.execute(
+                "SELECT snapshot_enc FROM patient_memory_snapshots WHERE family_id=?",
+                (self.family,),
+            ).fetchone()
+        automatically_updated = json.loads(tenancy.cipher().decrypt(row["snapshot_enc"]).decode("utf-8"))
+        self.assertEqual(automatically_updated["document_count"], 2)
+        self.assertEqual(automatically_updated["documents"][0]["name"], "УЗИ")
         second = patient_memory.refresh(self.family, self.patient)
         self.assertEqual(first["document_count"], 1)
         self.assertEqual(second["document_count"], 2)
