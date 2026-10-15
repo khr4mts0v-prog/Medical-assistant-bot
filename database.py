@@ -105,6 +105,7 @@ def update_patient_profile(fid, old_name, new_name, birth_date=None, aliases=Non
                   (new_name,birth_date or None,encrypted,int(row["id"]),int(fid)))
         if old_name.casefold()!=new_name.casefold():
             c.execute("UPDATE docs SET patient=? WHERE family_id=? AND patient=? COLLATE NOCASE",(new_name,int(fid),old_name))
+    _refresh_patient_memory(fid, new_name)
 
 def patient_aliases_configured(fid,name):
     with connect() as c:
@@ -307,10 +308,17 @@ def delete_pending_doc(fid,pending_id):
 
 
 def delete_doc(fid, doc_id):
-    """Delete one document index row scoped to its family."""
+    """Delete one document index row scoped to its family and refresh derived memory."""
     with connect() as c:
+        row = c.execute("SELECT patient FROM docs WHERE family_id=? AND id=?", (int(fid), int(doc_id))).fetchone()
+        if not row:
+            return False
+        patient = row["patient"]
         cur=c.execute("DELETE FROM docs WHERE family_id=? AND id=?", (int(fid), int(doc_id)))
-        return cur.rowcount == 1
+        deleted = cur.rowcount == 1
+    if deleted:
+        _refresh_patient_memory(fid, patient)
+    return deleted
 
 
 def family_document_count(fid):
