@@ -27,7 +27,9 @@ function extractContent(documentText: string): string {
     main.querySelectorAll('.tabs, .tab-row, nav.tabs').forEach(tabs => tabs.classList.add('app-tabs'));
   }
   const welcome = main.querySelector('.home-welcome');
-  const search = main.querySelector('form.home-search');
+  const search = main.querySelector<HTMLFormElement>('form.home-search');
+  const searchInput = search?.querySelector<HTMLInputElement>('input[type="search"], input[type="text"]');
+  if (searchInput) searchInput.placeholder = 'Быстрый запрос';
   const upload = main.querySelector('#quick-upload');
   const actions = main.querySelector('.home-actions');
   const inboxAction = main.querySelector<HTMLAnchorElement>('.home-action[href*="/inbox"]');
