@@ -439,3 +439,55 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
   .smart-search-form{padding:12px}
   .smart-search-form button{width:100%;justify-self:stretch}
 }
+
+
+/* Conversational medical archive: answer first, sources and missing references afterwards. */
+.smart-chat-modal .app-modal-header{align-items:flex-start}
+.smart-chat-head-actions{display:flex;align-items:center;gap:7px;flex:0 0 auto}
+.smart-chat-head-actions .icon-button{border:1px solid var(--line);background:#fff;color:var(--blue-dark)}
+.smart-chat-body{display:flex;flex-direction:column;gap:12px}
+.smart-chat-welcome{padding:18px 0 7px}
+.smart-chat-welcome h3{margin:0 0 5px;font-size:19px;letter-spacing:-.025em}
+.smart-chat-welcome p{margin:0;color:var(--muted);font-size:13px;line-height:1.55}
+.smart-chat-suggestions{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}
+.smart-chat-suggestions button{border:1px solid #cbdcf6;border-radius:18px;background:#fff;color:var(--blue-dark);padding:8px 12px;font-size:12px;font-weight:700;text-align:left}
+.smart-chat-suggestions button:hover{background:var(--blue-soft)}
+.smart-chat-history{display:flex;flex-direction:column;gap:19px}
+.smart-chat-turn{min-width:0}
+.smart-user-message{display:flex;flex-direction:column;gap:5px;max-width:94%;margin:0 0 12px auto;padding:12px 14px;border:1px solid #d7e6ff;border-radius:17px 17px 4px 17px;background:#edf4ff;color:var(--fg);white-space:pre-wrap;overflow-wrap:anywhere}
+.smart-user-message>span{font-size:11px;color:var(--blue-dark);font-weight:800}
+.smart-chat-turn .smart-answer{margin:0 0 12px;padding:15px;border-color:#dce8f7;box-shadow:0 2px 8px #24466e08}
+.smart-chat-turn .smart-answer h3{display:flex;align-items:center;gap:7px}
+.smart-gaps,.smart-limitations{margin:12px 0;padding:14px;border:1px solid #e3eaf5;border-radius:15px;background:#fff}
+.smart-gaps>h3{display:flex;align-items:center;gap:7px;margin:0 0 8px;font-size:15px}
+.smart-gap-intro{margin:0 0 8px;color:var(--muted);font-size:12px;line-height:1.55}
+.smart-gap-card{margin-top:9px;padding:12px;border-radius:12px;border:1px solid #f0dba9;background:#fffaf0}
+.smart-gap-card>strong{display:block;font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.smart-gap-card>p{margin:5px 0;color:#4e5c70;font-size:12px;line-height:1.5}
+.smart-gap-status{display:block;margin-top:6px;color:#79652f;font-size:11px;line-height:1.5}
+.smart-gap-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+.smart-gap-actions button{flex:1 1 145px;min-height:37px;padding:7px 10px;border:1px solid #d7e2f1;border-radius:10px;background:#fff;color:var(--blue-dark);font-size:12px;font-weight:750}
+.smart-gap-actions button:first-child{background:var(--blue);border-color:var(--blue);color:#fff}
+.smart-limitations{background:#f8fbff;color:#51647f;font-size:12px;line-height:1.55}
+.smart-limitations strong{color:var(--fg)}
+.smart-limitations ul{margin:7px 0 0;padding-left:18px}
+.smart-chat-compose{position:sticky;bottom:0;z-index:2;margin:0;padding:13px;border-color:#d8e4f4;box-shadow:0 -8px 20px #f3f7ff}
+.smart-chat-compose label[for="smart-search-query"]{font-size:12px}
+.smart-chat-compose textarea{min-height:60px;max-height:170px}
+.smart-chat-compose button[type="submit"]{width:100%;justify-self:stretch;min-height:44px}
+.smart-chat-compose .smart-consent{padding:10px;border-radius:10px;background:#fff8e8}
+.smart-chat-modal .smart-search-footnote{margin:0;padding:2px 0 4px}
+@media(max-width:560px){
+  .smart-search-scrim{align-items:flex-end;padding:0}
+  .smart-chat-modal{width:100%;height:94dvh;max-height:94dvh;border-radius:22px 22px 0 0}
+  .smart-chat-modal .app-modal-header{padding:16px 14px 13px;gap:10px}
+  .smart-chat-modal .app-modal-header h2{font-size:21px}
+  .smart-chat-modal .smart-search-subtitle{max-width:260px;font-size:12px}
+  .smart-chat-head-actions{gap:4px}
+  .smart-chat-head-actions .icon-button{width:38px;min-width:38px;height:38px}
+  .smart-chat-body{padding:0 12px 14px}
+  .smart-chat-suggestions{display:grid;grid-template-columns:1fr}
+  .smart-chat-suggestions button{width:100%}
+  .smart-chat-turn .smart-answer{padding:13px}
+  .smart-gap-actions button{flex-basis:100%}
+}
