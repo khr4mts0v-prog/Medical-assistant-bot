@@ -99,6 +99,7 @@ def save_fact(family_id, patient, fact, supersedes_id=None):
     data = _validate_fact(fact)
     payload = tenancy.cipher().encrypt(json.dumps(data, ensure_ascii=False).encode("utf-8"))
     now = _now()
+    key_hash = hashlib.sha256(data["key"].casefold().encode("utf-8")).hexdigest()
     with tenancy.connect() as conn:
         if supersedes_id is not None:
             old = conn.execute(
@@ -111,13 +112,27 @@ def save_fact(family_id, patient, fact, supersedes_id=None):
                 "UPDATE patient_memory_facts SET status='superseded', updated_at=? WHERE id=?",
                 (now, int(supersedes_id)),
             )
+        else:
+            # Idempotency: don't create a new row for the same fact on every turn.
+            existing = conn.execute(
+                "SELECT id, payload_enc FROM patient_memory_facts WHERE family_id=? AND patient=? COLLATE NOCASE AND fact_key=? AND status!='superseded' ORDER BY id DESC LIMIT 20",
+                (int(family_id), patient, key_hash),
+            ).fetchall()
+            for row in existing:
+                try:
+                    prior = json.loads(tenancy.cipher().decrypt(row["payload_enc"]).decode("utf-8"))
+                except Exception:
+                    continue
+                if (prior.get("value") == data["value"] and prior.get("source_ref") == data["source_ref"]
+                        and prior.get("status") == data["status"] and prior.get("observed_at") == data["observed_at"]):
+                    return int(row["id"])
         cur = conn.execute("""
             INSERT INTO patient_memory_facts
               (family_id, patient, category, fact_key, payload_enc, status, source_type,
                source_ref, observed_at, valid_until, created_at, updated_at, supersedes_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            int(family_id), patient, "other", hashlib.sha256(data["key"].casefold().encode("utf-8")).hexdigest(), payload, data["status"],
+            int(family_id), patient, "other", key_hash, payload, data["status"],
             data["source_type"], None, data["observed_at"], data["valid_until"],
             now, now, int(supersedes_id) if supersedes_id is not None else None,
         ))
@@ -144,7 +159,7 @@ def list_facts(family_id, patient, include_superseded=False, limit=100):
             # Never expose ciphertext or silently fabricate a fact.
             continue
         result.append({"id": int(row["id"]), "family_id": int(row["family_id"]),
-                       "patient": row["patient"], **payload,
+                       "patient": row["patient"], **payload, "status": row["status"],
                        "created_at": row["created_at"], "updated_at": row["updated_at"],
                        "supersedes_id": row["supersedes_id"]})
     return result
