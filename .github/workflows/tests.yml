@@ -18,6 +18,9 @@ jobs:
       - run: python -m compileall -q .
       - run: python -m unittest discover -s tests -v
       - run: python -m pytest -q -ra
+      - name: Diagnostic classifier benchmark (non-blocking until baseline is reviewed)
+        run: python scripts/evaluate_classifier_corpus.py
+        continue-on-error: true
       - run: npm install --no-package-lock
         working-directory: frontend
       - run: npm run build
