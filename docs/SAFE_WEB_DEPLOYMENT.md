@@ -8,10 +8,13 @@
 
 1. Слить и проверить PR в `release/web-2026-10`.
 2. Убедиться, что CI завершился успешно.
-3. На VPS запустить скрипт из checkout репозитория:
+3. На VPS безопасно извлечь deploy-скрипт из удалённой релизной ветки во временный файл — это не меняет текущую рабочую директорию с незакоммиченными изменениями:
 
    ```bash
-   sudo bash /opt/medical-assistant-bot/scripts/deploy_web_release.sh
+   git -c safe.directory=/opt/medical-assistant-bot -C /opt/medical-assistant-bot fetch origin release/web-2026-10
+   git -c safe.directory=/opt/medical-assistant-bot -C /opt/medical-assistant-bot show origin/release/web-2026-10:scripts/deploy_web_release.sh > /tmp/deploy_web_release.sh
+   chmod 700 /tmp/deploy_web_release.sh
+   sudo env SOURCE_ROOT=/opt/medical-assistant-bot bash /tmp/deploy_web_release.sh
    ```
 
 4. Скрипт создаёт отдельный Git worktree `/opt/medical-archive-release`, ссылается на существующие `.env` и `data` без копирования/перезаписи и обновляет только `medical-archive-web`.
