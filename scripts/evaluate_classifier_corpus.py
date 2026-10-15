@@ -16,6 +16,7 @@ CORPORA = [
     FIXTURES / "realistic_medical_documents_round2.json",
     FIXTURES / "russian_public_template_examples.json",
     FIXTURES / "public_official_forms_round2.json",
+    FIXTURES / "public_official_forms_round3.json",
     FIXTURES / "public_document_stress_190.json",
 ]
 
