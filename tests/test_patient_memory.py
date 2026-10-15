@@ -86,7 +86,7 @@ class PatientMemoryTests(unittest.TestCase):
         snapshot = patient_memory.refresh(self.family, self.patient)
         context = patient_memory.to_context(snapshot)
         self.assertIn("источник ID", context)
-        self.assertIn("не являются независимо подтверждёнными", context)
+        self.assertIn("не считать диагнозы независимо подтверждёнными", context)
         self.assertIn("Гемоглобин = 115 г/л", context)
 
 
