@@ -69,8 +69,8 @@ def main():
     status, _, app_html = request(urljoin(base, "app/"))
     require(status == 200, f"React-приложение недоступно: GET /app/ вернул HTTP {status}.")
     app_text = app_html.decode("utf-8", errors="replace")
-    js_paths = re.findall(r'(?:src|href)="([^"]+\\.js(?:\\?[^"]*)?)"', app_text)
-    css_paths = re.findall(r'href="([^"]+\\.css(?:\\?[^"]*)?)"', app_text)
+    js_paths = re.findall(r'(?:src|href)="([^"]+\.js(?:\?[^"]*)?)"', app_text)
+    css_paths = re.findall(r'href="([^"]+\.css(?:\?[^"]*)?)"', app_text)
     require(bool(js_paths), "В React shell не найден JavaScript bundle; возможна проблема сборки frontend/dist.")
     for asset in dict.fromkeys(js_paths + css_paths):
         asset_status, _, _ = request(urljoin(base, asset))
@@ -81,7 +81,7 @@ def main():
     manifest = json.loads(manifest_body.decode("utf-8"))
     require(manifest.get("name") and manifest.get("start_url"), "PWA manifest не содержит обязательных полей.")
     status, headers, icon_body = request(urljoin(base, "apple-touch-icon.png"))
-    require(status == 200 and "image/png" in headers.get("Content-Type", "") and icon_body.startswith(b"\\x89PNG"),
+    require(status == 200 and "image/png" in headers.get("Content-Type", "") and icon_body.startswith(b"\x89PNG"),
             "Apple touch icon отсутствует или имеет неверный формат.")
 
     print("PASS: demo login, session cookie, React shell/assets, PWA manifest and Apple icon.")
