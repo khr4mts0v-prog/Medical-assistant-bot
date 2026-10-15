@@ -117,6 +117,72 @@ class PatientMemoryTests(unittest.TestCase):
         snapshot = patient_memory.refresh(self.family, self.patient)
         self.assertEqual(snapshot["lab_trends"], [])
 
+    def test_user_correction_is_encrypted_persistent_and_used_in_context(self):
+        snapshot = patient_memory.get_snapshot(self.family, self.patient)
+        original = snapshot["diagnoses_mentioned"][0]
+        patient_memory.save_edit(
+            self.family, self.patient, original["fact_key"], "correct",
+            "Подтверждённое пользователем описание", note="Сверено с оригиналом",
+        )
+        corrected = patient_memory.get_snapshot(self.family, self.patient)["diagnoses_mentioned"][0]
+        self.assertEqual(corrected["text"], "Подтверждённое пользователем описание")
+        self.assertEqual(corrected["original_text"], original["text"])
+        self.assertTrue(corrected["user_corrected"])
+        self.assertEqual(corrected["correction_note"], "Сверено с оригиналом")
+        self.assertEqual(corrected["source"]["document_id"], self.doc_id)
+        context = patient_memory.to_context(patient_memory.get_snapshot(self.family, self.patient))
+        self.assertIn("Подтверждённое пользователем описание", context)
+        self.assertNotIn("- " + original["date"] + ": " + original["text"], context)
+        with tenancy.connect() as conn:
+            row = conn.execute(
+                "SELECT payload_enc FROM patient_memory_edits WHERE family_id=?",
+                (self.family,),
+            ).fetchone()
+        self.assertNotIn("Подтверждённое пользователем описание", bytes(row["payload_enc"]).decode("latin1"))
+
+    def test_user_can_hide_and_restore_a_memory_fact(self):
+        snapshot = patient_memory.get_snapshot(self.family, self.patient)
+        item = snapshot["medications_mentioned"][0]
+        patient_memory.save_edit(self.family, self.patient, item["fact_key"], "ignore")
+        self.assertEqual(patient_memory.get_snapshot(self.family, self.patient)["medications_mentioned"], [])
+        patient_memory.save_edit(self.family, self.patient, item["fact_key"], "restore")
+        self.assertEqual(
+            patient_memory.get_snapshot(self.family, self.patient)["medications_mentioned"][0]["text"],
+            item["text"],
+        )
+
+    def test_memory_edit_cannot_target_another_patient_fact(self):
+        snapshot = patient_memory.get_snapshot(self.family, self.patient)
+        fact_key = snapshot["diagnoses_mentioned"][0]["fact_key"]
+        other_family = tenancy.create_family("Other family", 1003)
+        db.add_patient(other_family, self.patient)
+        with self.assertRaises(ValueError):
+            patient_memory.save_edit(other_family, self.patient, fact_key, "ignore")
+
+    def test_document_insert_and_reclassification_refresh_persisted_memory(self):
+        # add_doc triggers a best-effort rebuild without an explicit memory-page request.
+        with tenancy.connect() as conn:
+            row = conn.execute(
+                "SELECT snapshot_enc FROM patient_memory_snapshots WHERE family_id=?",
+                (self.family,),
+            ).fetchone()
+        stored = json.loads(tenancy.cipher().decrypt(row["snapshot_enc"]).decode("utf-8"))
+        self.assertEqual(stored["document_count"], 1)
+        analysis = {
+            "diagnoses": [{"text": "Ручная классификация обновлена", "page": 1}],
+            "lab_results": [],
+            "medications": [],
+        }
+        self.assertTrue(db.update_doc_metadata(self.family, self.doc_id, "заключение", "2026-04-11", analysis))
+        with tenancy.connect() as conn:
+            row = conn.execute(
+                "SELECT snapshot_enc FROM patient_memory_snapshots WHERE family_id=?",
+                (self.family,),
+            ).fetchone()
+        stored = json.loads(tenancy.cipher().decrypt(row["snapshot_enc"]).decode("utf-8"))
+        self.assertEqual(stored["documents"][0]["kind"], "заключение")
+        self.assertEqual(stored["diagnoses_mentioned"][0]["text"], "Ручная классификация обновлена")
+
     def test_context_has_caveats_and_source_ids(self):
         snapshot = patient_memory.refresh(self.family, self.patient)
         context = patient_memory.to_context(snapshot)
