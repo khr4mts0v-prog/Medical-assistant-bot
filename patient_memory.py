@@ -3,6 +3,7 @@
 The model may suggest facts, but persistence is performed by validated application code.
 This module intentionally does not infer diagnoses or medication status.
 """
+import hashlib
 import json
 import re
 from datetime import date, datetime, timezone
@@ -116,8 +117,8 @@ def save_fact(family_id, patient, fact, supersedes_id=None):
                source_ref, observed_at, valid_until, created_at, updated_at, supersedes_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            int(family_id), patient, data["category"], data["key"], payload, data["status"],
-            data["source_type"], data["source_ref"], data["observed_at"], data["valid_until"],
+            int(family_id), patient, "other", hashlib.sha256(data["key"].casefold().encode("utf-8")).hexdigest(), payload, data["status"],
+            data["source_type"], None, data["observed_at"], data["valid_until"],
             now, now, int(supersedes_id) if supersedes_id is not None else None,
         ))
         return int(cur.lastrowid)
