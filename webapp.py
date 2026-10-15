@@ -306,7 +306,7 @@ def start_demo_cleanup_worker():
         DEMO_CLEANUP_STARTED = True
 
 def page(title,body,status=200):
-    return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#16794b"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Медархив"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/app-icon.svg" type="image/svg+xml"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
+    return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0755e8"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Медархив"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/app-icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
 :root{color-scheme:light;--bg:#f4f8ff;--fg:#172b4d;--card:#ffffff;--line:#e2eaf5;--muted:#6b7b94;--field:#f8fbff;--accent:#3478df;--accent-strong:#245fc0;--accent-soft:#e6f0ff;--warn:#a76800;--danger:#b42318;--shadow:0 5px 22px rgba(35,76,130,.065);--radius:18px}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
