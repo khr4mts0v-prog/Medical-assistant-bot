@@ -709,22 +709,22 @@ def install_assistant_routes(app, current_user, family_guard):
             'Я разрешаю передавать внешнему ИИ-провайдеру текст вопроса и только релевантные фрагменты документов выбранного пациента. '
             'Согласие можно отозвать в настройках.</label>'
         )
-        consent_note = (
-            '<p class="muted">' + ("Разрешение на внешний ИИ-анализ сохранено для этой учётной записи; его можно отозвать в настройках. "
-            if consent_state["granted"] else "Без явного согласия данные внешнему ИИ не передаются. ") +
-            'Ответ не заменяет консультацию врача.</p>'
+        consent_message = (
+            "Разрешение на внешний ИИ-анализ сохранено для этой учётной записи; его можно отозвать в настройках. "
+            if consent_state["granted"] else "Без явного согласия данные внешнему ИИ не передаются. "
         )
+        consent_note = '<p class="muted">' + consent_message + 'Ответ не заменяет консультацию врача.</p>'
         body = (
             '<div class="card"><p>Ассистент сначала планирует поиск, затем ищет только в архиве выбранного пациента и анализирует найденные источники.</p>'
             '<form method="post" action="/assistant">'
-            '<label>Семейный архив</label><select name="family_id" onchange="location.href=\'/assistant?family_id=\'+this.value">' + family_options + '</select>'
+            '<label>Семейный архив</label><select name="family_id" onchange="location.href=\\'/assistant?family_id=\\'+this.value">' + family_options + '</select>'
             '<label>Пациент</label><select name="patient" required>' + patient_options + '</select>'
             '<p><a href="/patient-memory?family_id=' + str(fid) + '&patient=' + quote(patient, safe="") + '">Открыть память пациента и историю показателей</a></p>'
             '<label>Вопрос</label><textarea name="question" rows="4" required maxlength="1200" placeholder="Например: сравни гемоглобин за последние полгода и покажи динамику"></textarea>'
-            + consent_html +
-            '<button type="submit">Найти и проанализировать</button></form>'
-            + consent_note + '</div>'
         )
+        body += consent_html
+        body += '<button type="submit">Найти и проанализировать</button></form>'
+        body += consent_note + '</div>'
         return _page("Медицинский ассистент", body)
 
     @app.post("/assistant", response_class=HTMLResponse)
