@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 import requests
 from fastapi import Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 import database as db
 import tenancy
@@ -335,7 +335,7 @@ def install_assistant_routes(app, current_user, family_guard):
             patient_memory.save_edit(family_id, patient, fact_key, action, replacement, unit, note)
         except ValueError as exc:
             return _page("Не удалось изменить память пациента", '<div class="card"><p>' + html.escape(str(exc)) + '</p><p><a href="/patient-memory?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться к памяти</a></p></div>', 400)
-        return __import__("fastapi").responses.RedirectResponse(
+        return RedirectResponse(
             "/patient-memory?family_id=" + str(family_id) + "&patient=" + quote(patient, safe=""),
             status_code=303,
         )
