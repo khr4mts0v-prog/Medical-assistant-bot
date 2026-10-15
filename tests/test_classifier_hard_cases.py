@@ -24,6 +24,23 @@ class ClassificationHardCasesTests(unittest.TestCase):
             "не определено",
         )
 
+    def test_real_ultrasound_report_with_routine_referral_metadata_is_classified(self):
+        self.assert_primary(
+            "УЗИ ВНУТРЕННИХ ОРГАНОВ\\n"
+            "Направлен: амбулаторно.\\n"
+            "Печень: описание размеров, контуров, структуры и эхогенности.\\n"
+            "ЗАКЛЮЧЕНИЕ: исследование выполнено.",
+            "заключение УЗИ",
+        )
+
+    def test_patient_information_leaflet_does_not_become_an_imaging_report(self):
+        self.assert_primary(
+            "ПАМЯТКА ДЛЯ ПАЦИЕНТА\\n"
+            "Этот информационный лист не является направлением или заключением исследования.\\n"
+            "Протокол УЗИ, МРТ или анализы оформляются отдельно после выполнения процедур.",
+            "не определено",
+        )
+
     def test_medication_mention_is_not_a_prescription(self):
         result = self.assert_primary(
             "Пациент принимает препарат по ранее выданному назначению врача.",

@@ -18,12 +18,16 @@ jobs:
       - run: python -m compileall -q .
       - name: Validate deployment script syntax
         run: bash -n scripts/deploy_web_release.sh
+      - name: Independent synthetic classifier holdout (diagnostic; no accuracy gate)
+        run: python scripts/evaluate_classifier_holdout.py
       - run: python -m unittest discover -s tests -v
       - run: python -m pytest -q -ra
       - name: Diagnostic classifier benchmark (non-blocking until baseline is reviewed)
         run: python scripts/evaluate_classifier_corpus.py
         continue-on-error: true
-      - run: npm install --no-package-lock
+      - name: Pin npm to stable 10.x before dependency installation
+        run: npm install --global npm@10.9.4
+      - run: npm install --no-package-lock --no-audit --no-fund --legacy-peer-deps
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
