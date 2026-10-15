@@ -71,9 +71,13 @@ OFF_TOPIC_TERMS = re.compile(
 def _is_archive_related(question):
     """No provider call is made for clearly unrelated or programming/politics requests."""
     q = " ".join(str(question or "").casefold().replace("ё", "е").split())
-    if not q or len(q) > 1200 or OFF_TOPIC_TERMS.search(q):
+    if not q or len(q) > 1200:
         return False
-    return bool(ARCHIVE_INTENT_TERMS.search(q))
+    # Medical intent takes precedence when a question also contains a generic
+    # word that happens to overlap with the off-topic filter.
+    if ARCHIVE_INTENT_TERMS.search(q):
+        return True
+    return not bool(OFF_TOPIC_TERMS.search(q))
 
 def _off_topic_response():
     return "Я отвечаю только на вопросы о медицинских документах, результатах обследований и анализов, истории здоровья и поиске по семейному архиву. Погоду, политику, программирование и другие посторонние темы я не обрабатываю."
