@@ -9,8 +9,9 @@ class AssistantChatGapTests(unittest.TestCase):
         self.assertTrue(assistant._needs_ai_analysis("Дай краткую сводку по УЗИ Саши"))
 
     def test_explicit_document_listing_stays_local(self):
-        self.assertTrue(assistant._is_document_listing_request("Покажи последние ФЛГ всех членов семьи"))
-        self.assertFalse(assistant._needs_ai_analysis("Покажи последние ФЛГ всех членов семьи"))
+        question = "Покажи последние ФЛГ всех членов семьи"
+        self.assertTrue(assistant._is_document_listing_request(question))
+        self.assertFalse(assistant._needs_ai_analysis(question))
 
     def test_full_archive_access_requires_explicit_request(self):
         self.assertTrue(assistant._explicit_full_history("Покажи все документы Саши"))
@@ -56,6 +57,23 @@ class AssistantChatGapTests(unittest.TestCase):
         )
         self.assertEqual(result, [])
         search.assert_called_once_with(12, "Александр", "", limit=1000)
+
+    @patch("assistant_routes.db.search")
+    def test_referenced_document_is_checked_locally_before_marking_missing(self, search):
+        candidate = {
+            "id": 41, "patient": "Александр", "name": "epilepsy_report_2024.pdf",
+            "kind": "заключение эпилептолога", "date": "12-02-2024",
+            "_search_score": 101, "text": "Заключение врача",
+        }
+        search.return_value = [candidate]
+        extra, matched = assistant._search_referenced_documents(
+            12, ["Александр"],
+            [{"name": "Заключение эпилептолога", "reason": "На документ есть ссылка."}],
+            set(),
+        )
+        self.assertEqual([row["id"] for row in extra], [41])
+        self.assertEqual(matched["заключение эпилептолога"], {41})
+        search.assert_called_with(12, "Александр", "эпилептолога", limit=30)
 
 
 if __name__ == "__main__":
