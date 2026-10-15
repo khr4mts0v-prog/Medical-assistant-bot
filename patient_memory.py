@@ -237,8 +237,11 @@ def extract_and_save_facts(family_id, patient, question, rows, max_facts=8):
 
     question = _clean_text(question, 1200)
     evidence = []
-    if question:
-        evidence.append({"type": "conversation", "ref": "Сообщение пользователя", "text": question})
+    if question and not question.endswith("?") and not re.match(
+        r"^(?:что|как|почему|зачем|можно ли|опасно ли|является ли|беременна ли|есть ли)\b",
+        question.casefold(),
+    ):
+        evidence.append({"type": "conversation", "ref": "Сообщение пользователя", "date": date.today().isoformat(), "text": question})
     for row in (rows or [])[:15]:
         text = _clean_text(row.get("text"), 3500)
         if text:
@@ -287,13 +290,13 @@ def extract_and_save_facts(family_id, patient, question, rows, max_facts=8):
             return []
     facts = data.get("facts", []) if isinstance(data, dict) else []
     saved = []
-    refs = {item["ref"]: item["text"] for item in evidence}
+    refs = {item["ref"]: item for item in evidence}
     for item in facts[:max(1, min(int(max_facts), 12))] if isinstance(facts, list) else []:
         if not isinstance(item, dict):
             continue
         ref = _clean_text(item.get("source_ref"), MAX_SOURCE_LENGTH)
         support = _clean_text(item.get("exact_support"), 500)
-        if ref not in refs or not support or support.casefold() not in refs[ref].casefold():
+        if ref not in refs or not support or support.casefold() not in refs[ref]["text"].casefold():
             continue
         source_type = "conversation" if ref == "Сообщение пользователя" else "document"
         if item.get("source_type") != source_type:
@@ -306,6 +309,9 @@ def extract_and_save_facts(family_id, patient, question, rows, max_facts=8):
             fact = _validate_fact(item)
             fact["source_type"] = source_type
             fact["source_ref"] = ref
+            # Dates come from application-controlled evidence metadata, never model guesses.
+            fact["observed_at"] = refs[ref].get("date", "") or ""
+            fact["valid_until"] = ""
             # Don't allow the model to set confidence to absolute certainty.
             fact["confidence"] = min(fact["confidence"], 0.85)
             fact_id = save_fact(family_id, patient, fact)
