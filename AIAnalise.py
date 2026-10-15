@@ -341,7 +341,11 @@ def _classify_segment(text):
     missing_prescription = bool(re.search(
         r"\b(?:рецепт|назначени\w*)\b[^.!?;:]{0,55}\b(?:не\s+(?:приложен\w*|выдавал\w*|выдан\w*|оформлен\w*|представлен\w*)|отсутств\w*)\b",
         normalized))
-    if missing_prescription:
+    historical_medication_context = bool(
+        re.search(r"\\b(?:раньше|ранее|прошл\\w+|в\\s+прошлом|в\\s+анамнезе)\\b[^.!?]{0,100}\\b(?:принимал\\w*|при[её]м\\w*|схем\\w+\\s+лечени\\w*)\\b", normalized)
+        and re.search(r"\\b(?:нов\\w+\\s+(?:рецепт|назначени\\w*)|рецептурн\\w+\\s+бланк|лист\\s+назначени\\w*)\\b[^.!?]{0,70}\\b(?:нет|не\\s+(?:выдавал\\w*|оформлен\\w*|выдан\\w*))\\b|\\b(?:нет|не\\s+(?:выдавал\\w*|оформлен\\w*|выдан\\w*))\\b[^.!?]{0,70}\\b(?:нов\\w+\\s+(?:рецепт|назначени\\w*)|рецептурн\\w+\\s+бланк|лист\\s+назначени\\w*)\\b", normalized)
+    )
+    if missing_prescription or historical_medication_context:
         scores.pop("назначение или рецепт", None)
         evidence.pop("назначение или рецепт", None)
     # An absent/unattached lab result is not itself a lab report. Keep the
