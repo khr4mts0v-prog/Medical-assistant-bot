@@ -364,7 +364,7 @@ def _classify_segment(text):
             if label != "направление":
                 scores.pop(label, None)
                 evidence.pop(label, None)
-    if re.fullmatch(r"(?:узи|экг|мрт|кт|фгдс|рентген|анализ\\s+крови)", normalized):
+    if re.fullmatch(r"(?:узи|экг|мрт|кт|фгдс|рентген|анализ\s+крови)", normalized):
         for label in imaging_labels:
             scores.pop(label, None)
             evidence.pop(label, None)
