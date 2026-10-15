@@ -79,14 +79,14 @@ def _is_archive_related(question):
     # or "where can I eat pizza?". Keep generic politics separate because
     # public-health/vaccine-policy questions can be genuinely medical.
     clearly_off_topic = re.compile(
-        r"\\b(programmирован\\w*|программ\\w+ на|programming|python|javascript|typescript|java|c\\+\\+|"
+        r"\b(programmирован\w*|программ\w+ на|programming|python|javascript|typescript|java|c\+\+|"
         r"code|script|код|скрипт|компилятор|html|css|api|git|linux|windows|сервер|"
-        r"погод\\w*|weather|анекдот\\w*|joke|мем\\w*|фильм\\w*|movie|сериал\\w*|игр\\w*|game|"
-        r"word|excel|powerpoint|zip|rar|winrar|news|sport\\w*|футбол|баскетбол|теннис|travel|"
-        r"путешеств\\w*|туризм|отел\\w*|доллар\\w*|евро|валют\\w*|финанс\\w*|акци\\w*|"
-        r"бирж\\w*|bitcoin|crypto|shopping|купить|покупк\\w*|price|цен\\w*|скидк\\w*|"
-        r"ресторан\\w*|кулинар\\w*|рецепт\\s+(?:борщ\\w*|пицц\\w*|блюд\\w*|торт\\w*)|"
-        r"автомобил\\w*|машин\\w*)\\b", re.I)
+        r"погод\w*|weather|анекдот\w*|joke|мем\w*|фильм\w*|movie|сериал\w*|игр\w*|game|"
+        r"word|excel|powerpoint|zip|rar|winrar|news|sport\w*|футбол|баскетбол|теннис|travel|"
+        r"путешеств\w*|туризм|отел\w*|доллар\w*|евро|валют\w*|финанс\w*|акци\w*|"
+        r"бирж\w*|bitcoin|crypto|shopping|купить|покупк\w*|price|цен\w*|скидк\w*|"
+        r"ресторан\w*|кулинар\w*|рецепт\s+(?:борщ\w*|пицц\w*|блюд\w*|торт\w*)|"
+        r"автомобил\w*|машин\w*)\b", re.I)
     if clearly_off_topic.search(q):
         return False
 
