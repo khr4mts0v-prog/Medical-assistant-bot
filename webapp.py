@@ -35,7 +35,7 @@ def pwa_icon():
 
 @app.get("/apple-touch-icon.png")
 def pwa_apple_touch_icon():
-    # PNG rendition of the approved blue/white headset-stethoscope concept for iOS.
+    # 180px PNG rendition follows the same headset/stethoscope geometry as app-icon.svg.
     from io import BytesIO
     from PIL import Image, ImageDraw
     image=Image.new("RGB",(180,180))
@@ -46,14 +46,22 @@ def pwa_apple_touch_icon():
             pixels[x,y]=(int(22*(1-t)+7*t),int(139*(1-t)+85*t),int(250*(1-t)+232*t))
     draw=ImageDraw.Draw(image)
     white="#ffffff"
-    draw.arc((37,18,143,108),180,360,fill=white,width=9)
-    draw.rounded_rectangle((30,65,53,112),radius=10,fill=white)
-    draw.rounded_rectangle((127,65,150,112),radius=10,fill=white)
-    draw.line([(42,98),(42,116),(55,132),(76,141),(88,141),(88,151)],fill=white,width=8)
-    draw.line([(138,98),(138,113),(127,126),(111,133)],fill=white,width=8)
-    draw.line([(111,133),(103,137)],fill=white,width=8)
-    draw.ellipse((73,138,103,168),outline=white,width=7)
-    draw.ellipse((84,149,92,157),fill=white)
+    # Headset arch and cups
+    draw.arc((45,17,135,91),180,360,fill=white,width=8)
+    draw.rounded_rectangle((34,57,57,112),radius=12,fill=white)
+    draw.rounded_rectangle((123,57,146,112),radius=12,fill=white)
+    # Stethoscope ear tips and tubing, with the Y-junction and chestpiece
+    draw.ellipse((49,51,69,68),fill=white)
+    draw.ellipse((111,51,131,68),fill=white)
+    draw.line([(58,64),(58,88),(64,105),(77,116),(87,124),(90,135)],fill=white,width=8,joint="curve")
+    draw.line([(121,64),(121,88),(115,105),(103,116),(96,124)],fill=white,width=8,joint="curve")
+    # Boom microphone and capsule
+    draw.line([(137,104),(137,112),(130,123),(119,128)],fill=white,width=6,joint="curve")
+    draw.rounded_rectangle((109,119,131,133),radius=7,fill=white)
+    # Chestpiece: white outer ring, blue inner ring, white diaphragm
+    draw.ellipse((74,127,106,159),fill=white)
+    draw.ellipse((80,133,100,153),fill=(9,105,239))
+    draw.ellipse((83,136,97,150),fill=white)
     buffer=BytesIO()
     image.save(buffer,format="PNG",optimize=True)
     return Response(buffer.getvalue(),media_type="image/png",headers={"Cache-Control":"public, max-age=604800"})
