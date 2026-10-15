@@ -229,6 +229,27 @@ def install_assistant_routes(app, current_user, family_guard):
             return _page("Память пациента", '<div class="card">В этом архиве пока нет пациентов.</div>')
         snapshot = patient_memory.get_snapshot(fid, patient)
 
+        manual_facts = patient_memory.get_manual_facts(fid, patient, include_inactive=True)
+
+        def manual_fact_card(item):
+            inactive = item.get("status") != "active"
+            content = '<div class="source"><strong>' + html.escape(str(item.get("date") or "Дата факта не указана")) + '</strong> · ' + html.escape(str(item.get("category") or "note")) + '<p>' + html.escape(str(item.get("text") or "")) + '</p>'
+            content += '<p class="muted">Внесено пользователем ID ' + str(item.get("created_by")) + '; создано ' + html.escape(str(item.get("created_at") or "?")) + '; обновлено ' + html.escape(str(item.get("updated_at") or "?")) + '; статус: ' + ("активна" if not inactive else "неактивна") + '. Документ-источник не заявлен.</p>'
+            if not inactive:
+                content += '<details><summary>Изменить или удалить</summary><form method="post" action="/patient-memory/manual/update">'
+                content += '<input type="hidden" name="family_id" value="' + str(fid) + '"><input type="hidden" name="patient" value="' + html.escape(patient, quote=True) + '"><input type="hidden" name="fact_id" value="' + str(item["id"]) + '">'
+                content += '<label>Тип записи</label><select name="category">'
+                for value, label in (("note","Заметка"),("diagnosis","Диагноз/состояние"),("medication","Лекарство/назначение"),("lab_result","Лабораторный результат"),("symptom","Симптом")):
+                    content += '<option value="' + value + '"' + (" selected" if item.get("category")==value else "") + '>' + label + '</option>'
+                content += '</select><label>Дата факта (необязательно)</label><input name="fact_date" maxlength="40" value="' + html.escape(str(item.get("date") or ""), quote=True) + '"><label>Текст</label><textarea name="text" rows="3" maxlength="2000" required>' + html.escape(str(item.get("text") or "")) + '</textarea><button type="submit">Сохранить изменения</button></form>'
+                content += '<form method="post" action="/patient-memory/manual/delete"><input type="hidden" name="family_id" value="' + str(fid) + '"><input type="hidden" name="patient" value="' + html.escape(patient, quote=True) + '"><input type="hidden" name="fact_id" value="' + str(item["id"]) + '"><button type="submit">Удалить ручную запись</button></form></details>'
+            return content + '</div>'
+
+        manual_html = '<section class="card"><h2>Ручные факты и заметки</h2><p class="muted">Эти записи введены пользователем, а не извлечены из медицинского документа. Ассистент будет видеть их именно с этой пометкой.</p>'
+        manual_html += '<form method="post" action="/patient-memory/manual/add"><label>Тип записи</label><select name="category"><option value="note">Заметка</option><option value="diagnosis">Диагноз/состояние</option><option value="medication">Лекарство/назначение</option><option value="lab_result">Лабораторный результат</option><option value="symptom">Симптом</option></select><label>Дата факта (необязательно; ГГГГ-ММ-ДД или ДД.ММ.ГГГГ)</label><input name="fact_date" maxlength="40"><label>Текст</label><textarea name="text" rows="3" maxlength="2000" required placeholder="Например: со слов пациента, препарат отменён 12.10.2026"></textarea><button type="submit">Добавить ручную запись</button></form>'
+        manual_html += ''.join(manual_fact_card(item) for item in manual_facts) if manual_facts else '<p class="muted">Ручных записей пока нет.</p>'
+        manual_html += '</section>'
+
         def section(title, items, render_item):
             if not items:
                 return '<section class="card"><h2>' + html.escape(title) + '</h2><p class="muted">Записей пока нет.</p></section>'
@@ -309,7 +330,7 @@ def install_assistant_routes(app, current_user, family_guard):
             '<p>Память автоматически обновляется после добавления документа и изменения его типа или даты. '
             'Исправления пользователя сохраняются отдельно от исходного документа и применяются к последующим ответам ассистента.</p>'
             '<p><a href="/assistant?family_id=' + str(fid) + '&patient=' + quote(patient, safe="") + '">Задать вопрос ассистенту по этому пациенту</a></p></div>'
-            + diagnosis_html + medication_html + lab_html + trend_html + docs_html
+            + manual_html + diagnosis_html + medication_html + lab_html + trend_html + docs_html
             + '<section class="card"><h2>Ограничения памяти</h2><ul>' + caveats + '</ul></section>'
         )
         return _page("Память пациента", body)
@@ -339,6 +360,59 @@ def install_assistant_routes(app, current_user, family_guard):
             "/patient-memory?family_id=" + str(family_id) + "&patient=" + quote(patient, safe=""),
             status_code=303,
         )
+
+    @app.post("/patient-memory/manual/add", response_class=HTMLResponse)
+    def add_patient_memory_manual_fact(
+        family_id: int = Form(...), patient: str = Form(...), text: str = Form(...),
+        category: str = Form("note"), fact_date: str = Form(""),
+        uid: int = __import__("fastapi").Depends(current_user),
+    ):
+        families = tenancy.families_for_user(uid)
+        if int(family_id) not in {int(f["id"]) for f in families}:
+            raise HTTPException(403, "Нет доступа к этому семейному архиву")
+        family_guard(family_id, uid)
+        if patient not in db.patients(family_id):
+            raise HTTPException(400, "Выбранный пациент не найден в этом архиве")
+        try:
+            patient_memory.add_manual_fact(family_id, patient, text, category, fact_date, uid)
+        except ValueError as exc:
+            return _page("Не удалось добавить ручную запись", '<div class="card"><p>' + html.escape(str(exc)) + '</p><p><a href="/patient-memory?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться к памяти</a></p></div>', 400)
+        return RedirectResponse("/patient-memory?family_id=" + str(family_id) + "&patient=" + quote(patient, safe=""), status_code=303)
+
+    @app.post("/patient-memory/manual/update", response_class=HTMLResponse)
+    def update_patient_memory_manual_fact(
+        family_id: int = Form(...), patient: str = Form(...), fact_id: int = Form(...),
+        text: str = Form(...), category: str = Form("note"), fact_date: str = Form(""),
+        uid: int = __import__("fastapi").Depends(current_user),
+    ):
+        families = tenancy.families_for_user(uid)
+        if int(family_id) not in {int(f["id"]) for f in families}:
+            raise HTTPException(403, "Нет доступа к этому семейному архиву")
+        family_guard(family_id, uid)
+        if patient not in db.patients(family_id):
+            raise HTTPException(400, "Выбранный пациент не найден в этом архиве")
+        try:
+            patient_memory.update_manual_fact(family_id, patient, fact_id, text, category, fact_date, uid)
+        except ValueError as exc:
+            return _page("Не удалось изменить ручную запись", '<div class="card"><p>' + html.escape(str(exc)) + '</p><p><a href="/patient-memory?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться к памяти</a></p></div>', 400)
+        return RedirectResponse("/patient-memory?family_id=" + str(family_id) + "&patient=" + quote(patient, safe=""), status_code=303)
+
+    @app.post("/patient-memory/manual/delete", response_class=HTMLResponse)
+    def delete_patient_memory_manual_fact(
+        family_id: int = Form(...), patient: str = Form(...), fact_id: int = Form(...),
+        uid: int = __import__("fastapi").Depends(current_user),
+    ):
+        families = tenancy.families_for_user(uid)
+        if int(family_id) not in {int(f["id"]) for f in families}:
+            raise HTTPException(403, "Нет доступа к этому семейному архиву")
+        family_guard(family_id, uid)
+        if patient not in db.patients(family_id):
+            raise HTTPException(400, "Выбранный пациент не найден в этом архиве")
+        try:
+            patient_memory.delete_manual_fact(family_id, patient, fact_id)
+        except ValueError as exc:
+            return _page("Не удалось удалить ручную запись", '<div class="card"><p>' + html.escape(str(exc)) + '</p><p><a href="/patient-memory?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться к памяти</a></p></div>', 400)
+        return RedirectResponse("/patient-memory?family_id=" + str(family_id) + "&patient=" + quote(patient, safe=""), status_code=303)
 
     @app.get("/api/patient-memory")
     def patient_memory_api(family_id: int, patient: str,
