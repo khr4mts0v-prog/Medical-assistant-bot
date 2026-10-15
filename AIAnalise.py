@@ -314,9 +314,9 @@ def _classify_segment(text):
     specific_report_context = bool(re.search(
         r"\b(?:протокол|заключение|результат|описание)\w*\s+(?:узи\b|экг\b|кт\b|мрт\b|рентген\w*|ультразвуков\w+|компьютерн\w+\s+томографи\w*|магнитно[- ]резонансн\w+\s+томографи\w*|эндоскопическ\w+\s+исследовани\w*)\b|\b(?:узи\s+(?:внутренних\s+органов|органов\s+брюшной\s+полости)|протокол\s+ультразвукового\s+исследования|протокол\s+рентгенологического\s+исследования)\b", normalized))
     # A recommendation/referral is not a report merely because it names an organ-specific ultrasound.
-    if re.search(r"\\b(?:рекомендовал\\w*|рекомендован\\w*|рекомендаци\\w*|направление\\s+на|пациент\\s+направлен\\s+на)\\b", normalized):
-        first_lines = _normalize("\\n".join((text or "").splitlines()[:3]))
-        if not re.search(r"\\b(?:протокол|заключение|результаты|результат|описание)\\s+(?:узи|экг|кт|мрт|рентген|ультразвуков)\\b", first_lines):
+    if re.search(r"\b(?:рекомендовал\w*|рекомендован\w*|рекомендаци\w*|направление\s+на|пациент\s+направлен\s+на)\b", normalized):
+        first_lines = _normalize("\n".join((text or "").splitlines()[:3]))
+        if not re.search(r"\b(?:протокол|заключение|результаты|результат|описание)\s+(?:узи|экг|кт|мрт|рентген|ультразвуков)\b", first_lines):
             specific_report_context = False
     # Allow "результат пока отсутствует" and similar variants.
     negative_report_context = bool(re.search(
