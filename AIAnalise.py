@@ -309,6 +309,11 @@ def _classify_segment(text):
     # of an imaging report: the report marker must be tied to a modality.
     specific_report_context = bool(re.search(
         r"\b(?:протокол|заключение|результат|описание)\w*\s+(?:узи\b|экг\b|кт\b|мрт\b|рентген\w*|ультразвуков\w+|компьютерн\w+\s+томографи\w*|магнитно[- ]резонансн\w+\s+томографи\w*|эндоскопическ\w+\s+исследовани\w*)\b|\b(?:узи\s+(?:внутренних\s+органов|органов\s+брюшной\s+полости)|протокол\s+ультразвукового\s+исследования|протокол\s+рентгенологического\s+исследования)\b", normalized))
+    # A recommendation/referral is not a report merely because it names an organ-specific ultrasound.
+    if re.search(r"\\b(?:рекомендовал\\w*|рекомендован\\w*|рекомендаци\\w*|направление\\s+на|пациент\\s+направлен\\s+на)\\b", normalized):
+        first_lines = _normalize("\\n".join((text or "").splitlines()[:3]))
+        if not re.search(r"\\b(?:протокол|заключение|результаты|результат|описание)\\s+(?:узи|экг|кт|мрт|рентген|ультразвуков)\\b", first_lines):
+            specific_report_context = False
     # Allow "результат пока отсутствует" and similar variants.
     negative_report_context = bool(re.search(
         r"\b(?:заключени\w*|протокол\w*|результат\w*|описани\w*)\b"
@@ -378,6 +383,12 @@ def _classify_segment(text):
             evidence.pop(label, None)
         if detected_title in report_title_labels:
             detected_title = None
+    # Contextual lists and explicitly missing prescriptions must not be
+    # reclassified by a title-like phrase later in the same text.
+    if plan_list_context and not specific_report_context and detected_title != "направление":
+        detected_title = None
+    if missing_prescription:
+        detected_title = None
     if (negative_report_context or (mention_context and not specific_report_context)) and detected_title in report_title_labels:
         detected_title = None
     # Remove document types named only in an explicit negation. Keep a matching
