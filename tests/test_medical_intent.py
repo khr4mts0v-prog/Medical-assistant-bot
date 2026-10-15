@@ -25,6 +25,24 @@ class MedicalIntentTests(unittest.TestCase):
             with self.subTest(question=question):
                 self.assertFalse(assistant_routes._is_archive_related(question))
 
+    def test_ai_classifier_returns_structured_categories(self):
+        cases = (
+            ('{"category":"medical_general"}', "medical_general"),
+            ('{"category":"medical_patient"}', "medical_patient"),
+            ('{"category":"non_medical"}', "non_medical"),
+            ('{"category":"ambiguous"}', "ambiguous"),
+        )
+        for raw, expected in cases:
+            with self.subTest(expected=expected):
+                with patch.object(ai_provider, "chat_completion", return_value=raw):
+                    self.assertEqual(ai_provider.classify_medical_intent("тестовый вопрос"), expected)
+
+    def test_ai_classifier_falls_back_safely_on_invalid_output(self):
+        with patch.object(ai_provider, "chat_completion", return_value="not json"):
+            self.assertEqual(ai_provider.classify_medical_intent("тестовый вопрос"), "unknown")
+        with patch.object(ai_provider, "chat_completion", side_effect=RuntimeError("offline")):
+            self.assertEqual(ai_provider.classify_medical_intent("тестовый вопрос"), "unknown")
+
     def test_medical_answer_without_archive_context_calls_provider(self):
         with patch.object(ai_provider, "chat_completion", return_value="Общий медицинский ответ") as call:
             answer = ai_provider.answer_archive_question(
