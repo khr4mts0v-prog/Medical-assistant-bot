@@ -524,8 +524,7 @@ def to_context(snapshot: dict, max_chars: int = 8500) -> str:
             + str(item.get("created_at") or "?") + "; обновлено " + str(item.get("updated_at") or "?")
             + "; статус " + str(item.get("status") or "active") + "; документ-источник отсутствует]"
         )
-    lines.append("Упомянутые диагнозы/состояния (сначала сверить источник):"
-    ]
+    lines.append("Упомянутые диагнозы/состояния (сначала сверить источник):")
     for item in snapshot.get("diagnoses_mentioned", [])[:60]:
         src = item.get("source") or {}
         correction = " [ИСПРАВЛЕНО ПОЛЬЗОВАТЕЛЕМ; исходное извлечение: " + str(item.get("original_text")) + "]" if item.get("user_corrected") else ""
