@@ -4,6 +4,7 @@ This module does not diagnose or infer new medical facts. It stores a compact, v
 snapshot of structured information already extracted from documents and preserves source IDs.
 """
 import hashlib
+import hmac
 import json
 import logging
 from datetime import date, datetime
@@ -145,8 +146,12 @@ def _build_snapshot(fid: int, patient: str, rows: list[dict], profile: dict | No
             for row in rows
         ],
     }
-    fingerprint = hashlib.sha256(
-        json.dumps(fingerprint_payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    fingerprint_bytes = json.dumps(
+        fingerprint_payload, ensure_ascii=False, sort_keys=True, default=str
+    ).encode("utf-8")
+    # A keyed fingerprint avoids exposing a plain hash of low-entropy medical facts in SQLite.
+    fingerprint = hmac.new(
+        tenancy.FERNET_KEY.encode("utf-8"), fingerprint_bytes, hashlib.sha256
     ).hexdigest()
     source_ids = sorted({int(row["id"]) for row in rows})
     return snapshot, source_ids, fingerprint
