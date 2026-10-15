@@ -377,6 +377,13 @@ def _classify_segment(text):
         "рентгенологическое заключение", "заключение КТ", "заключение МРТ",
         "эндоскопическое заключение", "патоморфологическое заключение",
     }
+    if detected_title in report_title_labels and (
+        negative_report_context
+        or ((mention_context or plan_list_context) and not specific_report_context)
+    ):
+        detected_title = None
+    if missing_prescription and detected_title == "назначение или рецепт":
+        detected_title = None
     informational_header = bool(re.search(
         r"^\s*(?:памятка\b|информационн\w+\s+лист\b|информационн\w+\s+материал\b)|(?:упомянут\w*\s+только\s+как\s+пример\w*|ничего\s+не\s+назначен\w*|не\s+оформля\w*\s+этим\s+сообщени\w*|служебное\s+сообщение|запись\s+создана\s+автоматически)",
         title_text,
