@@ -19,6 +19,7 @@ import database as db
 import tenancy
 from ai_provider import answer_archive_question, chat_completion, provider_config
 import patient_memory
+from document_references import discover_referenced_documents
 
 STOP_WORDS = {
     "что", "как", "когда", "где", "почему", "какой", "какая", "какие",
@@ -340,9 +341,28 @@ def install_assistant_routes(app, current_user, family_guard):
                 planner_status = "План построен локально: нейросеть планирования недоступна"
             rows = _retrieve(family_id, patient, plan)
             snapshot = patient_memory.get_snapshot(family_id, patient)
+            all_patient_rows = db.search(family_id, patient, "", limit=1000)
+            references = discover_referenced_documents(rows, all_patient_rows) if rows else {
+                "found_documents": [], "missing_required": []
+            }
+            known_row_ids = {int(row["id"]) for row in rows}
+            for referenced in references["found_documents"]:
+                if int(referenced["id"]) not in known_row_ids:
+                    referenced["_assistant_score"] = 0
+                    rows.append(referenced)
+                    known_row_ids.add(int(referenced["id"]))
+            rows.sort(key=lambda row: (_doc_date(row) or date.min, int(row["id"])), reverse=True)
+            rows = rows[:20]
             if not rows and not snapshot.get("document_count"):
                 return _page("Результаты поиска", '<div class="card"><p>В архиве пациента пока нет документов, на которых можно построить ответ.</p><p class="muted">' + html.escape(planner_status) + '. Добавьте документы или уточните запрос.</p></div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Задать другой вопрос</a></p>')
-            context = patient_memory.to_context(snapshot) + "\\n\\nРЕЛЕВАНТНЫЕ ДОКУМЕНТЫ ПО ЗАПРОСУ:\\n" + _context(rows)
+            context = patient_memory.to_context(snapshot) + "\\n\\nРЕЛЕВАНТНЫЕ ДОКУМЕНТЫ ПО ЗАПРОСУ И ЯВНЫМ ССЫЛКАМ:\\n" + _context(rows)
+            if references["missing_required"]:
+                missing_context = [
+                    "- " + item["target"] + " (упомянуто в источнике ID "
+                    + str(item["source"]["document_id"]) + ": " + str(item["source"]["name"]) + ")"
+                    for item in references["missing_required"]
+                ]
+                context += "\\n\\nОБЯЗАТЕЛЬНЫЕ ДЛЯ ПОЛНОЙ ИНТЕРПРЕТАЦИИ ДОКУМЕНТЫ НЕ НАЙДЕНЫ В АРХИВЕ:\\n" + "\\n".join(missing_context)
             if not rows:
                 planner_status += "; отдельные документы по запросу не найдены, использована память по всей истории"
             answer = answer_archive_question(question, patient, context=context)
@@ -360,9 +380,19 @@ def install_assistant_routes(app, current_user, family_guard):
                 + ' · <a href="/families/' + str(family_id) + '/documents/' + str(r["id"]) + '/edit">Открыть документ</a></div>'
                 for r in list(source_rows.values())[:100]
             )
-            plan_html = '<p class="muted">' + html.escape(planner_status) + '; найдено источников: ' + str(len(rows)) + '.</p>'
+            plan_html = '<p class="muted">' + html.escape(planner_status) + '; источников по запросу и ссылкам: ' + str(len(rows)) + '.</p>'
+            missing_html = ""
+            if references["missing_required"]:
+                missing_items = "".join(
+                    '<li>' + html.escape(str(item["target"])) + ' — упомянуто в документе '
+                    + '<a href="/families/' + str(family_id) + '/documents/' + str(int(item["source"]["document_id"])) + '/edit">'
+                    + html.escape(str(item["source"]["name"])) + '</a>, но подходящий документ не найден. '
+                    + 'Проверьте архив по названию или загрузите документ, если он у вас есть.</li>'
+                    for item in references["missing_required"]
+                )
+                missing_html = '<div class="card"><h2>Для полного анализа не хватает документов</h2><p>В исходных документах есть явные ссылки на следующие материалы:</p><ul>' + missing_items + '</ul></div>'
             answer_html = '<div class="card assistant-answer"><h2>Ответ</h2><pre>' + html.escape(answer) + '</pre></div>'
-            return _page("Ответ ассистента", plan_html + answer_html + '<div class="card"><h2>Источники</h2>' + sources + '</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Задать следующий вопрос</a></p>')
+            return _page("Ответ ассистента", plan_html + missing_html + answer_html + '<div class="card"><h2>Источники</h2>' + sources + '</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Задать следующий вопрос</a></p>')
         except HTTPException:
             raise
         except Exception as exc:
