@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS patient_memory_edits (
     family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
     patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
     fact_key TEXT NOT NULL,
+    source_document_id INTEGER NOT NULL,
     payload_enc BLOB NOT NULL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (family_id, patient_id, fact_key)
@@ -390,11 +391,12 @@ def save_edit(fid: int, patient: str, fact_key: str, action: str,
     now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     with tenancy.connect() as conn:
         conn.execute(
-            """INSERT INTO patient_memory_edits(family_id,patient_id,fact_key,payload_enc,updated_at)
-               VALUES(?,?,?,?,?)
+            """INSERT INTO patient_memory_edits(family_id,patient_id,fact_key,source_document_id,payload_enc,updated_at)
+               VALUES(?,?,?,?,?,?)
                ON CONFLICT(family_id,patient_id,fact_key) DO UPDATE SET
+                 source_document_id=excluded.source_document_id,
                  payload_enc=excluded.payload_enc, updated_at=excluded.updated_at""",
-            (int(fid), int(pid), fact_key, encrypted, now),
+            (int(fid), int(pid), fact_key, int((fact.get("source") or {}).get("document_id") or 0), encrypted, now),
         )
 
 def to_context(snapshot: dict, max_chars: int = 8500) -> str:
