@@ -717,7 +717,7 @@ def install_assistant_routes(app, current_user, family_guard):
         body = (
             '<div class="card"><p>Ассистент сначала планирует поиск, затем ищет только в архиве выбранного пациента и анализирует найденные источники.</p>'
             '<form method="post" action="/assistant">'
-            '<label>Семейный архив</label><select name="family_id" onchange="location.href=\\'/assistant?family_id=\\'+this.value">' + family_options + '</select>'
+            '<label>Семейный архив</label><select name="family_id" onchange="location.href=&quot;/assistant?family_id=&quot;+this.value">' + family_options + '</select>'
             '<label>Пациент</label><select name="patient" required>' + patient_options + '</select>'
             '<p><a href="/patient-memory?family_id=' + str(fid) + '&patient=' + quote(patient, safe="") + '">Открыть память пациента и историю показателей</a></p>'
             '<label>Вопрос</label><textarea name="question" rows="4" required maxlength="1200" placeholder="Например: сравни гемоглобин за последние полгода и покажи динамику"></textarea>'
