@@ -319,9 +319,11 @@ def _classify_segment(text):
         if not re.search(r"\b(?:протокол|заключение|результаты|результат|описание)\s+(?:узи|экг|кт|мрт|рентген|ультразвуков)\b", first_lines):
             specific_report_context = False
     # Allow "результат пока отсутствует" and similar variants.
+    # Keep absence detection local to the same phrase. A wide window can
+    # connect a real report heading with unrelated text such as missing personal data.
     negative_report_context = bool(re.search(
-        r"\b(?:заключени\w*|протокол\w*|результат\w*|описани\w*)\b"
-        r".{0,70}\b(?:отсутств\w*|не\s+указан\w*|не\s+представлен\w*|не\s+приложен\w*)\b",
+        r"\\b(?:заключени\\w*|протокол\\w*|результат\\w*|описани\\w*)\\b"
+        r"[^.!?;:]{0,35}\\b(?:отсутств\\w*|не\\s+указан\\w*|не\\s+представлен\\w*|не\\s+приложен\\w*)\\b",
         normalized))
     plan_list_context = bool(re.search(
         r"\b(?:план\s+(?:обследовани\w*|диагностик\w*|анализ\w*)|"
