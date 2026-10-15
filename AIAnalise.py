@@ -373,7 +373,7 @@ def _classify_segment(text):
         "рентгенологическое заключение", "заключение КТ", "заключение МРТ",
         "эндоскопическое заключение", "патоморфологическое заключение",
     }
-    if negative_report_context and detected_title in report_title_labels:
+    if (negative_report_context or (mention_context and not specific_report_context)) and detected_title in report_title_labels:
         detected_title = None
     # Remove document types named only in an explicit negation. Keep a matching
     # positive title intact (e.g. a diary heading followed by "not an epicrisis").
