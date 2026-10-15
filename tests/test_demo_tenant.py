@@ -54,7 +54,9 @@ class DemoTenantTests(unittest.TestCase):
     def test_http_upload_ai_consent_and_expired_file_cleanup(self):
         import webapp
         client = TestClient(webapp.app, base_url="https://archive.example")
-        with patch.object(webapp, "ocr_file", return_value="Лабораторный анализ крови. Гемоглобин 120 г/л"), \
+        with patch.object(webapp, "DEMO_USERNAME", "test"), \
+             patch.object(webapp, "DEMO_PASSWORD", "test"), \
+             patch.object(webapp, "ocr_file", return_value="Лабораторный анализ крови. Гемоглобин 120 г/л"), \
              patch.object(webapp, "analyze_document", return_value={
                  "primary_type": "лабораторный отчёт", "document_types": ["лабораторный отчёт"],
                  "types": ["лабораторный отчёт"], "confidence": "high", "review_required": True,
