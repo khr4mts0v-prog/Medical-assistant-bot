@@ -83,6 +83,40 @@ class PatientMemoryTests(unittest.TestCase):
         self.assertEqual(snapshot["document_count"], 0)
         self.assertEqual(snapshot["lab_results"], [])
 
+    def test_numeric_lab_trend_uses_matching_units_and_source_dates(self):
+        self._add_document(
+            "Повторный анализ крови",
+            "лабораторный отчёт",
+            "2026-05-10",
+            {
+                "lab_results": [
+                    {"name": "Гемоглобин", "value": "120", "unit": "г/л", "page": 1, "source": "Гемоглобин 120 г/л"}
+                ]
+            },
+        )
+        snapshot = patient_memory.refresh(self.family, self.patient)
+        trend = next(item for item in snapshot["lab_trends"] if item["name"] == "Гемоглобин")
+        self.assertEqual(trend["previous"]["value"], "115")
+        self.assertEqual(trend["latest"]["value"], "120")
+        self.assertEqual(trend["absolute_change"], "5")
+        self.assertEqual(trend["direction"], "increase")
+        self.assertNotEqual(trend["latest"]["source"]["document_id"], trend["previous"]["source"]["document_id"])
+
+    def test_lab_trends_do_not_mix_units_or_qualitative_results(self):
+        self._add_document(
+            "Другой анализ",
+            "лабораторный отчёт",
+            "2026-05-10",
+            {
+                "lab_results": [
+                    {"name": "Гемоглобин", "value": "12", "unit": "g/dL", "page": 1, "source": "Hemoglobin 12 g/dL"},
+                    {"name": "Ферритин", "value": "<5", "unit": "мкг/л", "page": 1, "source": "Ферритин <5 мкг/л"},
+                ]
+            },
+        )
+        snapshot = patient_memory.refresh(self.family, self.patient)
+        self.assertEqual(snapshot["lab_trends"], [])
+
     def test_context_has_caveats_and_source_ids(self):
         snapshot = patient_memory.refresh(self.family, self.patient)
         context = patient_memory.to_context(snapshot)
