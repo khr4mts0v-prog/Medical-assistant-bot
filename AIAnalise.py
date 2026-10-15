@@ -312,7 +312,8 @@ def _classify_segment(text):
         r"(?:узи\b|экг\b|кт\b|мрт\b|рентген\w*|ультразвуков\w+|"
         r"компьютерн\w+\s+томографи\w*|магнитно[- ]резонансн\w+\s+томографи\w*|"
         r"эндоскопическ\w+\s+исследовани\w*)\b|"
-        r"\b(?:протокол\s+ультразвукового\s+исследования|"
+        r"\b(?:узи\s+(?:внутренних\s+органов|органов\s+брюшной\s+полости)|"
+        r"протокол\s+ультразвукового\s+исследования|
         r"протокол\s+рентгенологического\s+исследования)\b", normalized))
     # Allow "результат пока отсутствует" and similar variants.
     negative_report_context = bool(re.search(
@@ -373,6 +374,16 @@ def _classify_segment(text):
         "рентгенологическое заключение", "заключение КТ", "заключение МРТ",
         "эндоскопическое заключение", "патоморфологическое заключение",
     }
+    informational_header = bool(re.search(
+        r"^\s*(?:памятка\b|информационн\w+\s+лист\b|информационн\w+\s+материал\b)",
+        title_text,
+    ))
+    if informational_header:
+        for label in imaging_labels:
+            scores.pop(label, None)
+            evidence.pop(label, None)
+        if detected_title in report_title_labels:
+            detected_title = None
     if (negative_report_context or (mention_context and not specific_report_context)) and detected_title in report_title_labels:
         detected_title = None
     # Remove document types named only in an explicit negation. Keep a matching
