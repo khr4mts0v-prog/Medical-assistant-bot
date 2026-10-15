@@ -25,7 +25,7 @@ jobs:
         continue-on-error: true
       - name: Pin npm to stable 10.x before dependency installation
         run: npm install --global npm@10.9.4
-      - run: npm install --no-package-lock --no-audit --no-fund
+      - run: npm install --no-package-lock --no-audit --no-fund --legacy-peer-deps
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
