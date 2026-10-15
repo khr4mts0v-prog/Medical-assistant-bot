@@ -157,5 +157,30 @@ class WebAuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('"authenticated":true', response.text)
 
+    def test_pwa_manifest_and_icon_endpoints_match_approved_branding(self):
+        import json
+        from io import BytesIO
+        from fastapi.testclient import TestClient
+        from PIL import Image
+        client = TestClient(webapp.app, base_url="https://archive.example")
+        manifest_response = client.get("/manifest.webmanifest")
+        self.assertEqual(manifest_response.status_code, 200)
+        manifest = json.loads(manifest_response.text)
+        self.assertEqual(manifest["start_url"], "/app")
+        self.assertEqual(manifest["theme_color"], "#0755e8")
+        icon_paths = {item["src"] for item in manifest["icons"]}
+        self.assertIn("/app-icon.svg", icon_paths)
+        self.assertIn("/apple-touch-icon.png", icon_paths)
+        svg_response = client.get("/app-icon.svg")
+        self.assertEqual(svg_response.status_code, 200)
+        self.assertIn("linearGradient", svg_response.text)
+        self.assertIn("#0755E8", svg_response.text)
+        png_response = client.get("/apple-touch-icon.png")
+        self.assertEqual(png_response.status_code, 200)
+        self.assertEqual(png_response.headers.get("content-type"), "image/png")
+        image = Image.open(BytesIO(png_response.content))
+        self.assertEqual(image.size, (180, 180))
+        self.assertEqual(image.format, "PNG")
+
 if __name__ == "__main__":
     unittest.main()
