@@ -85,7 +85,7 @@ def _is_archive_related(question):
         r"word|excel|powerpoint|zip|rar|winrar|news|sport\w*|футбол|баскетбол|теннис|travel|"
         r"путешеств\w*|туризм|отел\w*|доллар\w*|евро|валют\w*|финанс\w*|акци\w*|"
         r"бирж\w*|bitcoin|crypto|shopping|купить|покупк\w*|price|цен\w*|скидк\w*|"
-        r"ресторан\w*|кулинар\w*|рецепт\s+(?:борщ\w*|пицц\w*|блюд\w*|торт\w*)|"
+        r"ресторан\w*|кулинар\w*|поесть|пицц\w*|кафе|рецепт\s+(?:борщ\w*|пицц\w*|блюд\w*|торт\w*)|"
         r"автомобил\w*|машин\w*)\b", re.I)
     if clearly_off_topic.search(q):
         return False
