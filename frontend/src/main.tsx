@@ -233,7 +233,6 @@ function App() {
         if (action.pathname === '/search' && form.classList.contains('home-search')) {
           const data = new FormData(form);
           const query = String(data.get('q') || '').trim();
-          const familyId = String(data.get('family_id') || new URLSearchParams(location.search).get('family_id') || '');
           setSmartConversation([]);
           setSmartQuery(query);
           setSmartSearchOpen(true);
