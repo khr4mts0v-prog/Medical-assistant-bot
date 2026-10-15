@@ -698,10 +698,16 @@ def install_assistant_routes(app, current_user, family_guard):
         question = " ".join((question or "").split())[:1200]
         if not question:
             raise HTTPException(400, "Введите вопрос")
-        if not _is_archive_related(question):
-            return _page("Вопрос вне тематики", '<div class="card">' + html.escape(_off_topic_response()) + '</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться к медицинскому вопросу</a></p>', 400)
         if consent != "yes":
             return _page("Требуется согласие", '<div class="card">Вопрос и медицинские фрагменты не отправлялись нейросети. Чтобы продолжить, вернитесь и явно подтвердите согласие.</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться</a></p>', 400)
+        # Classify only after explicit consent; never send the question to an external model before this check.
+        try:
+            from ai_provider import classify_medical_intent
+            intent = classify_medical_intent(question)
+        except Exception:
+            intent = "unknown"
+        if intent == "non_medical" or (intent == "unknown" and not _is_archive_related(question)):
+            return _page("Вопрос вне тематики", '<div class="card">' + html.escape(_off_topic_response()) + '</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться к медицинскому вопросу</a></p>', 400)
         try:
             provider, token, _, model, key_name = provider_config()
         except Exception:
