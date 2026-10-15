@@ -721,9 +721,9 @@ def install_assistant_routes(app, current_user, family_guard):
             '<label>Пациент</label><select name="patient" required>' + patient_options + '</select>'
             '<p><a href="/patient-memory?family_id=' + str(fid) + '&patient=' + quote(patient, safe="") + '">Открыть память пациента и историю показателей</a></p>'
             '<label>Вопрос</label><textarea name="question" rows="4" required maxlength="1200" placeholder="Например: сравни гемоглобин за последние полгода и покажи динамику"></textarea>'
-            ' + consent_html + '
+            + consent_html +
             '<button type="submit">Найти и проанализировать</button></form>'
-            ' + consent_note + '</div>'
+            + consent_note + '</div>'
         )
         return _page("Медицинский ассистент", body)
 
