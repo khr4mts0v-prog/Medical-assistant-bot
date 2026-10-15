@@ -110,8 +110,8 @@ class PatientMemoryValidationTests(unittest.TestCase):
                     ).fetchone()
                 self.assertEqual(row[0], "other")
                 self.assertIsNone(row[3])
-                self.assertNotIn(b"Беременность", row[2])
-                self.assertNotIn(b"Сообщена пользователем", row[2])
+                self.assertNotIn("Беременность".encode("utf-8"), row[2])
+                self.assertNotIn("Сообщена пользователем".encode("utf-8"), row[2])
 
 
 if __name__ == "__main__":
