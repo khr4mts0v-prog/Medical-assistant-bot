@@ -405,6 +405,8 @@ def _classify_segment(text):
     ):
         # Explicit denial that the report is present always wins over a title-like
         # mention (including when the mention occurs inside prose, not a heading).
+        scores.pop(detected_title, None)
+        evidence.pop(detected_title, None)
         detected_title = None
     elif detected_title in report_title_labels and (
         (mention_context or plan_list_context) and not specific_report_context
@@ -417,7 +419,11 @@ def _classify_segment(text):
         ))
         if not explicit_report_heading:
             detected_title = None
-    if missing_prescription and detected_title == "назначение или рецепт":
+    if (missing_prescription or historical_medication_context) and detected_title == "назначение или рецепт":
+        # The title matcher can see "назначение" inside a negated/historical
+        # sentence; do not let that title restore a score deliberately removed above.
+        scores.pop("назначение или рецепт", None)
+        evidence.pop("назначение или рецепт", None)
         detected_title = None
     informational_header = bool(re.search(
         r"^\s*(?:памятка\b|в\s+памятке\s+(?:указано|говорится|сообщается)\b|информационн\w+\s+лист\b|информационн\w+\s+материал\b)|(?:упомянут\w*\s+только\s+как\s+пример\w*|ничего\s+не\s+назначен\w*|не\s+оформля\w*\s+этим\s+сообщени\w*|служебное\s+сообщение|запись\s+создана\s+автоматически)",
