@@ -98,7 +98,7 @@ function App() {
     const history = chatHistoryRef.current;
     if (!history) return;
     const frame = window.requestAnimationFrame(() => {
-      history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' });
+      history.lastElementChild?.scrollIntoView({ block: 'end', behavior: 'smooth' });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [smartConversation, smartBusy, smartResult, smartError, smartSearchOpen]);
