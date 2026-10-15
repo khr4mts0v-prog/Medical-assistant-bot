@@ -384,7 +384,7 @@ def _classify_segment(text):
         # Explicit report headings in the opening lines outrank incidental mentions
         # of referrals, recommendations, or historical studies in the body.
         explicit_report_heading = bool(re.search(
-            r"^\\s*(?:протокол|заключение|результат|описание)\\w*\\s+(?:узи|экг|кт|мрт|фгдс|рентген\\w*|ультразвуков\\w+|компьютерн\\w+\\s+томографи\\w*|магнитно[- ]резонансн\\w+\\s+томографи\\w*|эндоскопическ\\w+\\s+исследовани\\w*)\\b",
+            r"^\s*(?:протокол|заключение|результат|описание)\w*\s+(?:узи|экг|кт|мрт|фгдс|рентген\w*|ультразвуков\w+|компьютерн\w+\s+томографи\w*|магнитно[- ]резонансн\w+\s+томографи\w*|эндоскопическ\w+\s+исследовани\w*)\b",
             title_text,
         ))
         if not explicit_report_heading:
