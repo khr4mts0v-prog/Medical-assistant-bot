@@ -1,5 +1,11 @@
+import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
+from cryptography.fernet import Fernet
+import tenancy
 
 import patient_memory
 
@@ -75,6 +81,37 @@ class PatientMemoryValidationTests(unittest.TestCase):
         result = patient_memory.extract_and_save_facts(1, "Юля", "Юля беременна?", [])
         self.assertEqual(result, [])
         completion.assert_not_called()
+
+
+    def test_saved_memory_is_encrypted_and_scoped_to_family_and_patient(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "memory.sqlite3"
+            with patch.object(tenancy, "DB_PATH", db_path), patch.object(
+                tenancy, "FERNET_KEY", Fernet.generate_key().decode("ascii")
+            ):
+                with tenancy.connect() as conn:
+                    conn.execute(
+                        "CREATE TABLE families(id INTEGER PRIMARY KEY, name TEXT NOT NULL, owner_telegram_id INTEGER NOT NULL)"
+                    )
+                    conn.execute("INSERT INTO families(id,name,owner_telegram_id) VALUES(1,'Family',1)")
+                    conn.execute("INSERT INTO families(id,name,owner_telegram_id) VALUES(2,'Other',2)")
+                fact_id = patient_memory.save_fact(1, "Юля", {
+                    "category": "pregnancy", "key": "Беременность",
+                    "value": "Сообщена пользователем", "status": "user_reported",
+                    "source_type": "conversation", "source_ref": "Сообщение пользователя",
+                })
+                facts = patient_memory.list_facts(1, "Юля")
+                self.assertEqual([f["id"] for f in facts], [fact_id])
+                self.assertEqual(patient_memory.list_facts(2, "Юля"), [])
+                with sqlite3.connect(db_path) as conn:
+                    row = conn.execute(
+                        "SELECT category,fact_key,payload_enc,source_ref FROM patient_memory_facts WHERE id=?",
+                        (fact_id,),
+                    ).fetchone()
+                self.assertEqual(row[0], "other")
+                self.assertIsNone(row[3])
+                self.assertNotIn(b"Беременность", row[2])
+                self.assertNotIn(b"Сообщена пользователем", row[2])
 
 
 if __name__ == "__main__":
