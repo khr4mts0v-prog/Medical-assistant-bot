@@ -58,7 +58,7 @@ ARCHIVE_INTENT_TERMS = re.compile(
     r"гемоглобин|ферритин|лейкоцит\w*|эритроцит\w*|тромбоцит\w*|гематокрит|билирубин|креатинин|"
     r"узи|экг|мрт|кт|флг|флюорограф\w*|рентген\w*|врач\w*|лечени\w*|препарат\w*|лекарств\w*|"
     r"назначени\w*|рецепт\w*|привив\w*|вакцин\w*|беремен\w*|род\w*|реб[её]н\w*|пациент\w*|"
-    r"документ\w*|архив\w*|выписк\w*|эпикриз\w*|медкарт\w*|анем\w*|давлени\w*|пульс|температур\w*)\b", re.I)
+    r"документ\w*|архив\w*|выписк\w*|эпикриз\w*|медкарт\w*|анем\w*|давлени\w*|пульс|температур\w*|метеоризм|вздут\w*|тошнот\w*|рвот\w*|диаре\w*|запор\w*|изжог\w*|кашел\w*|насморк\w*|парацетамол|ибупрофен)\b", re.I)
 
 OFF_TOPIC_TERMS = re.compile(
     r"\b(погод\w*|weather|политик\w*|выбор\w*|парти\w*|геополит\w*|"
@@ -69,11 +69,30 @@ OFF_TOPIC_TERMS = re.compile(
     r"ресторан\w*|кулинар\w*|рецепт\s+(?:борщ\w*|пицц\w*|блюд\w*|торт\w*)|автомобил\w*|машин\w*)\b", re.I)
 
 def _is_archive_related(question):
-    """No provider call is made for clearly unrelated or programming/politics requests."""
+    """Reject clearly off-topic requests while allowing genuine medical questions."""
     q = " ".join(str(question or "").casefold().replace("ё", "е").split())
-    if not q or len(q) > 1200 or OFF_TOPIC_TERMS.search(q):
+    if not q or len(q) > 1200:
         return False
-    return bool(ARCHIVE_INTENT_TERMS.search(q))
+
+    # A strong non-medical domain takes precedence over incidental medical words:
+    # e.g. "write code for blood analysis", "company shares and blood test",
+    # or "where can I eat pizza?". Keep generic politics separate because
+    # public-health/vaccine-policy questions can be genuinely medical.
+    clearly_off_topic = re.compile(
+        r"\b(programmирован\w*|программ\w+ на|programming|python|javascript|typescript|java|c\+\+|"
+        r"code|script|код|скрипт|компилятор|html|css|api|git|linux|windows|сервер|"
+        r"погод\w*|weather|анекдот\w*|joke|мем\w*|фильм\w*|movie|сериал\w*|игр\w*|game|"
+        r"word|excel|powerpoint|zip|rar|winrar|news|sport\w*|футбол|баскетбол|теннис|travel|"
+        r"путешеств\w*|туризм|отел\w*|доллар\w*|евро|валют\w*|финанс\w*|акци\w*|"
+        r"бирж\w*|bitcoin|crypto|shopping|купить|покупк\w*|price|цен\w*|скидк\w*|"
+        r"ресторан\w*|кулинар\w*|поесть|пицц\w*|кафе|рецепт\s+(?:борщ\w*|пицц\w*|блюд\w*|торт\w*)|"
+        r"автомобил\w*|машин\w*)\b", re.I)
+    if clearly_off_topic.search(q):
+        return False
+
+    if ARCHIVE_INTENT_TERMS.search(q):
+        return True
+    return not bool(OFF_TOPIC_TERMS.search(q))
 
 def _off_topic_response():
     return "Я отвечаю только на вопросы о медицинских документах, результатах обследований и анализов, истории здоровья и поиске по семейному архиву. Погоду, политику, программирование и другие посторонние темы я не обрабатываю."
@@ -694,10 +713,16 @@ def install_assistant_routes(app, current_user, family_guard):
         question = " ".join((question or "").split())[:1200]
         if not question:
             raise HTTPException(400, "Введите вопрос")
-        if not _is_archive_related(question):
-            return _page("Вопрос вне тематики", '<div class="card">' + html.escape(_off_topic_response()) + '</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться к медицинскому вопросу</a></p>', 400)
         if consent != "yes":
             return _page("Требуется согласие", '<div class="card">Вопрос и медицинские фрагменты не отправлялись нейросети. Чтобы продолжить, вернитесь и явно подтвердите согласие.</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться</a></p>', 400)
+        # Classify only after explicit consent; never send the question to an external model before this check.
+        try:
+            from ai_provider import classify_medical_intent
+            intent = classify_medical_intent(question)
+        except Exception:
+            intent = "unknown"
+        if intent == "non_medical" or (intent == "unknown" and not _is_archive_related(question)):
+            return _page("Вопрос вне тематики", '<div class="card">' + html.escape(_off_topic_response()) + '</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Вернуться к медицинскому вопросу</a></p>', 400)
         try:
             provider, token, _, model, key_name = provider_config()
         except Exception:
@@ -726,9 +751,10 @@ def install_assistant_routes(app, current_user, family_guard):
                     known_row_ids.add(int(referenced["id"]))
             rows.sort(key=lambda row: (_doc_date(row) or date.min, int(row["id"])), reverse=True)
             rows = rows[:20]
-            if not rows and not snapshot.get("document_count"):
-                return _page("Результаты поиска", '<div class="card"><p>В архиве пациента пока нет документов, на которых можно построить ответ.</p><p class="muted">' + html.escape(planner_status) + '. Добавьте документы или уточните запрос.</p></div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Задать другой вопрос</a></p>')
-            context = patient_memory.to_context(snapshot) + "\\n\\nРЕЛЕВАНТНЫЕ ДОКУМЕНТЫ ПО ЗАПРОСУ И ЯВНЫМ ССЫЛКАМ:\\n" + _context(rows)
+            # General medical questions may be answered without archive matches.
+
+            has_patient_context = bool(rows or snapshot.get("document_count") or snapshot.get("manual_facts") or snapshot.get("diagnoses_mentioned") or snapshot.get("medications_mentioned") or snapshot.get("lab_results") or snapshot.get("profile", {}).get("birth_date"))
+            context = (patient_memory.to_context(snapshot) + "\\n\\nРЕЛЕВАНТНЫЕ ДОКУМЕНТЫ ПО ЗАПРОСУ И ЯВНЫМ ССЫЛКАМ:\\n" + _context(rows)) if has_patient_context else ""
             if references["missing_required"]:
                 missing_context = [
                     "- " + item["target"] + " (упомянуто в источнике ID "
