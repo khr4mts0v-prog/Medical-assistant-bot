@@ -337,18 +337,18 @@ def _retrieve(fid, patient, plan):
     for raw_term in (plan.get("search_terms") or [])[:12]:
         terms.extend(_local_search_terms(str(raw_term), [patient] if patient else []))
     terms = list(dict.fromkeys(terms))[:20]
-    # Search each concrete concept independently. Never turn an empty planner response
-    # into a full-archive query unless the user explicitly asks for the whole history.
+    # Search each concrete concept independently. An explicit full-history request
+    # may start with all local rows, but an empty planner response alone never does.
     found = {}
+    full_history = bool(plan.get("allow_full_history") or _explicit_full_history(plan.get("original_question", "")))
+    if full_history:
+        for row in db.search(fid, patient, "", limit=1000):
+            found[int(row["id"])] = row
     for term in terms:
         for row in db.search(fid, patient, term, limit=100):
             found[int(row["id"])] = row
-    if not terms:
-        if plan.get("allow_full_history") or _explicit_full_history(plan.get("original_question", "")):
-            for row in db.search(fid, patient, "", limit=1000):
-                found[int(row["id"])] = row
-        else:
-            return []
+    if not terms and not full_history:
+        return []
 
     # Apply the date range before the optional type filter. Dates are parsed
     # from the archive's supported formats by _doc_date().
@@ -608,7 +608,7 @@ def install_assistant_routes(app, current_user, family_guard):
         search_terms = _local_search_terms(query, scoped_people)
         rows_by_id = {}
         for person in scoped_people:
-            candidates = db.search(fid, person, "", limit=1000) if (not search_terms and _explicit_full_history(query)) else [
+            candidates = db.search(fid, person, "", limit=1000) if _explicit_full_history(query) else [
                 row for term in search_terms for row in db.search(fid, person, term, limit=100)
             ]
             for row in candidates:
