@@ -316,6 +316,15 @@ def delete_doc(fid, doc_id):
         patient = row["patient"]
         cur=c.execute("DELETE FROM docs WHERE family_id=? AND id=?", (int(fid), int(doc_id)))
         deleted = cur.rowcount == 1
+        if deleted:
+            try:
+                c.execute(
+                    "DELETE FROM patient_memory_edits WHERE family_id=? AND source_document_id=?",
+                    (int(fid), int(doc_id)),
+                )
+            except sqlite3.OperationalError:
+                # Memory feature may not have initialized its optional table yet.
+                pass
     if deleted:
         _refresh_patient_memory(fid, patient)
     return deleted
