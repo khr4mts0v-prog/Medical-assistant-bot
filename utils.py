@@ -1,41 +1,33 @@
-import re
 import datetime
+import re
+from pathlib import Path
 
-# ----------------------
-# Форматирование имени файла
-# ----------------------
-def format_filename(patient_name: str, doc_type: str, date_str: str, extension: str) -> str:
-    """
-    Формирует имя файла в формате:
-    <имя пациента>_<тип документа>_<дата>.<расширение>
-    """
-    safe_patient = re.sub(r'\W+', '_', patient_name.strip())
-    safe_type = re.sub(r'\W+', '_', doc_type.strip())
-    safe_date = re.sub(r'\W+', '-', date_str.strip())
-    return f"{safe_patient}_{safe_type}_{safe_date}.{extension}"
+def safe_name(value, limit=80):
+    value = re.sub(r"[^\w.-]+", "_", (value or "").strip(), flags=re.UNICODE)
+    return re.sub(r"_+", "_", value).strip("._-")[:limit] or "document"
 
-# ----------------------
-# Извлечение даты из текста
-# ----------------------
-def parse_date_from_text(text: str) -> str:
-    """
-    Пытается найти дату в тексте в формате дд-мм-гггг или похожем.
-    Если не находит — возвращает сегодняшнюю дату.
-    """
-    date_patterns = [
-        r'(\d{2})[.\-/](\d{2})[.\-/](\d{4})',  # 17-03-2025, 17.03.2025
-        r'(\d{2})[.\-/](\d{2})[.\-/](\d{2})',  # 17-03-25
+def format_filename(patient_name, doc_type, date_str, extension):
+    ext = (Path(extension or "").suffix or extension or "bin").lstrip(".").lower()
+    return f"{safe_name(patient_name,45)}_{safe_name(doc_type,45)}_{safe_name(date_str or 'date-unknown',20)}.{ext}"
+
+def normalize_extension(filename):
+    return Path(filename or "").suffix.lower().lstrip(".") or "bin"
+
+def parse_date_from_text(text):
+    patterns = [
+        r"\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})\b",
+        r"\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2})\b",
+        r"\b(\d{4})-(\d{2})-(\d{2})\b",
     ]
-    for pattern in date_patterns:
-        match = re.search(pattern, text)
-        if match:
-            day, month, year = match.groups()
-            if len(year) == 2:
-                year = "20" + year
+    for pattern in patterns:
+        for match in re.finditer(pattern, text or ""):
+            a,b,c = match.groups()
             try:
-                date_obj = datetime.date(int(year), int(month), int(day))
-                return date_obj.strftime("%d-%m-%Y")
+                if len(a)==4: year,month,day=map(int,(a,b,c))
+                else:
+                    day,month,year=map(int,(a,b,c))
+                    if year<100: year+=2000
+                return datetime.date(year,month,day).strftime("%d-%m-%Y")
             except ValueError:
-                continue
-    # Если не нашли, возвращаем текущую дату
-    return datetime.date.today().strftime("%d-%m-%Y")
+                pass
+    return "не определена"
