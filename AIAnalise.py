@@ -274,9 +274,13 @@ def _page_chunks(text):
     if not matches:
         return [{"page": 1, "text": text or ""}] if (text or "").strip() else []
     chunks = []
+    preamble = (text or "")[:matches[0].start()].strip()
     for i, match in enumerate(matches):
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        chunks.append({"page": int(match.group(1)), "text": text[match.end():end]})
+        page_text = text[match.end():end]
+        if i == 0 and preamble:
+            page_text = preamble + "\\n" + page_text
+        chunks.append({"page": int(match.group(1)), "text": page_text})
     return chunks
 
 
@@ -374,27 +378,20 @@ def _classify_segment(text):
         "эндоскопическое заключение", "патоморфологическое заключение",
     }
     informational_header = bool(re.search(
-        r"^\s*(?:памятка\b|информационн\w+\s+лист\b|информационн\w+\s+материал\b)",
+        r"^\s*(?:памятка\b|информационн\w+\s+лист\b|информационн\w+\s+материал\b)|(?:упомянут\w*\s+только\s+как\s+пример\w*|ничего\s+не\s+назначен\w*|не\s+оформля\w*\s+этим\s+сообщени\w*|служебное\s+сообщение|запись\s+создана\s+автоматически)",
         title_text,
     ))
     if informational_header:
-        for label in imaging_labels:
-            scores.pop(label, None)
-            evidence.pop(label, None)
-        if detected_title in report_title_labels:
-            detected_title = None
-    # Contextual lists and explicitly missing prescriptions must not be
-    # reclassified by a title-like phrase later in the same text.
-    if plan_list_context and not specific_report_context and detected_title != "направление":
+        scores.clear()
+        evidence.clear()
         detected_title = None
-    if missing_prescription:
-        detected_title = None
-    if (negative_report_context or (mention_context and not specific_report_context)) and detected_title in report_title_labels:
-        detected_title = None
-    # Remove document types named only in an explicit negation. Keep a matching
+
+    # Explicit report headings should not be erased by incidental mentions in the body.
+
+    # Remove document types named only in an explicit negation.
     # positive title intact (e.g. a diary heading followed by "not an epicrisis").
     denial_windows = re.findall(
-        r"\b(?:не\s+является|это\s+не|не\s+представляет(?:\s+собой)?|не\s+оформлял\w*|"
+        r"\b(?:не\s+является|это\s+не|не\s+представляет(?:\s+собой)?|не\s+оформля\w*|не\s+оформлен\w*|не\s+содержит|не\s+относится\s+к)\b([^.!?]{0,260})",
         r"не\s+оформлен\w*|не\s+содержит|не\s+относится\s+к)\b([^.!?]{0,260})",
         normalized,
     )
