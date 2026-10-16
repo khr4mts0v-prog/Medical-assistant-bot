@@ -63,8 +63,12 @@ function extractContent(documentText: string): string {
 
 async function fetchScreen(url: string): Promise<Screen> {
   const response = await fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'MedicalArchiveSPA' } });
-  if (response.status === 401 || response.status === 403) {
-    throw new Error(response.status === 401 ? 'Сессия авторизации требует обновления. Обновите страницу и войдите снова.' : 'Недостаточно прав для просмотра этого раздела.');
+  if (response.status === 401) {
+    window.location.assign('/login?next=' + encodeURIComponent(url));
+    throw new Error('Перенаправление на вход…');
+  }
+  if (response.status === 403) {
+    throw new Error('Недостаточно прав для просмотра этого раздела.');
   }
   const text = await response.text();
   if (!response.ok) throw new Error('Не удалось открыть раздел (' + response.status + ').');
@@ -134,6 +138,29 @@ function App() {
     };
   // Initial load only; popstate is managed by the listener.
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Recover promptly if a session expires while the PWA remains open or returns from the background.
+  useEffect(() => {
+    let active = true;
+    const checkSession = async () => {
+      try {
+        const response = await fetch('/auth/status', { credentials: 'same-origin', cache: 'no-store' });
+        if (active && response.status === 401) {
+          window.location.replace('/login?next=' + encodeURIComponent(location.pathname + location.search));
+        }
+      } catch {
+        // Temporary network errors must not sign the user out.
+      }
+    };
+    const onFocus = () => { void checkSession(); };
+    window.addEventListener('focus', onFocus);
+    const timer = window.setInterval(checkSession, 60000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
   }, []);
 
   useEffect(() => {
@@ -304,6 +331,19 @@ function App() {
   };
 
   return <div className="app-frame">
+    <button
+      type="button"
+      aria-label="Выйти из медицинского архива"
+      title="Выйти"
+      onClick={async () => {
+        try {
+          await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', cache: 'no-store' });
+        } finally {
+          window.location.assign('/login');
+        }
+      }}
+      style={{ position: 'fixed', top: 10, right: 12, zIndex: 60, padding: '7px 11px', minHeight: 36, borderRadius: 10, border: '1px solid #dce7f8', background: '#fff', color: '#526681', fontSize: 12, fontWeight: 650 }}
+    >Выйти</button>
     {toast && <div className="app-toast" role="status" aria-live="polite"><span className="app-toast-check">✓</span><span>{toast}</span></div>}
     {smartSearchOpen && <div className="modal-scrim smart-search-scrim" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !smartBusy) setSmartSearchOpen(false); }}>
       <section className="app-modal smart-search-modal smart-chat-modal" role="dialog" aria-modal="true" aria-label="ИИ-чат по медицинскому архиву">
@@ -369,7 +409,14 @@ function App() {
                 setSmartConsent(false);
               } else {
                 if (smartConsent) {
-                  setAiConsentGranted(true);
+                  // Reflect the server's persisted consent state; a checkbox alone does not grant consent.
+                  try {
+                    const consentResponse = await fetch('/api/ai-consent', {credentials:'same-origin'});
+                    if (consentResponse.ok) {
+                      const consentState = await consentResponse.json();
+                      setAiConsentGranted(consentState.granted === true);
+                    }
+                  } catch {}
                   setSmartConsent(false);
                 }
                 setSmartConversation((previous:any[]) => [...previous,{question:submittedQuestion,result}].slice(-20));

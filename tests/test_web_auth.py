@@ -4,6 +4,7 @@ from fastapi.security import HTTPBasicCredentials
 
 os.environ["WEB_USERNAME"] = "test-admin"
 os.environ["WEB_PASSWORD"] = "test-password-for-unit-tests"
+os.environ["WEB_SESSION_SECRET"] = "unit-test-session-secret-with-more-than-32-chars"
 # Demo credentials default to test/test for the current MVP test phase.
 os.environ["DEMO_USERNAME"] = "test"
 os.environ["DEMO_PASSWORD"] = "test"
@@ -11,6 +12,24 @@ os.environ["DEMO_PASSWORD"] = "test"
 import webapp
 
 class WebAuthTests(unittest.TestCase):
+    def test_browser_page_redirects_to_login_without_basic_challenge(self):
+        from fastapi.testclient import TestClient
+        client = TestClient(webapp.app, base_url="https://archive.example")
+        response = client.get("/?family_id=7", headers={"Accept": "text/html"}, follow_redirects=False)
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers.get("location"), "/login?next=%2F%3Ffamily_id%3D7")
+        self.assertNotIn("WWW-Authenticate", response.headers)
+
+    def test_api_and_auth_status_keep_401_semantics(self):
+        from fastapi.testclient import TestClient
+        client = TestClient(webapp.app, base_url="https://archive.example")
+        api = client.get("/auth/status", headers={"Accept": "text/html"}, follow_redirects=False)
+        self.assertEqual(api.status_code, 401)
+        self.assertNotIn("Location", api.headers)
+        non_html = client.get("/", headers={"Accept": "application/json"}, follow_redirects=False)
+        self.assertEqual(non_html.status_code, 401)
+        self.assertNotIn("Location", non_html.headers)
+
     def test_valid_credentials_map_to_negative_user_id(self):
         uid = webapp.current_user(None, HTTPBasicCredentials(username="test-admin", password="test-password-for-unit-tests"))
         self.assertLess(uid, 0)
@@ -92,6 +111,94 @@ class WebAuthTests(unittest.TestCase):
         response = webapp.page("<script>alert(1)</script>", "safe body")
         self.assertNotIn("<title><script>", response.body.decode())
         self.assertIn("&lt;script&gt;", response.body.decode())
+
+    def test_login_creates_secure_session_and_restores_authentication(self):
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch
+        with patch.object(webapp.tenancy, "ensure_demo_family"), patch.object(webapp.tenancy, "families_for_user", return_value=[]):
+            client = TestClient(webapp.app, base_url="https://archive.example")
+            response = client.post("/auth/login", data={"username": "test", "password": "test", "next": "/app"}, follow_redirects=False)
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers.get("location"), "/app")
+            cookie = client.cookies.get(webapp.SESSION_COOKIE_NAME)
+            self.assertTrue(cookie)
+            cookie_header = response.headers.get("set-cookie", "")
+            self.assertIn("HttpOnly", cookie_header)
+            self.assertIn("Secure", cookie_header)
+            self.assertIn("SameSite=lax", cookie_header)
+            status = client.get("/auth/status")
+            self.assertEqual(status.status_code, 200)
+            self.assertIn('"authenticated":true', status.text)
+
+    def test_missing_or_expired_session_returns_401_without_basic_challenge(self):
+        from fastapi.testclient import TestClient
+        import time
+        from unittest.mock import patch
+        with patch.object(webapp.tenancy, "ensure_demo_family"):
+            client = TestClient(webapp.app, base_url="https://archive.example")
+            response = client.get("/auth/status")
+            self.assertEqual(response.status_code, 401)
+            self.assertNotIn("WWW-Authenticate", response.headers)
+            expired = webapp._make_session(webapp.DEMO_UID, expires_at=int(time.time()) - 1)
+            client.cookies.set(webapp.SESSION_COOKIE_NAME, expired, domain="archive.example", path="/")
+            expired_response = client.get("/auth/status")
+            self.assertEqual(expired_response.status_code, 401)
+
+    def test_logout_clears_session_and_demo_cookies(self):
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch
+        with patch.object(webapp.tenancy, "ensure_demo_family"), patch.object(webapp.tenancy, "families_for_user", return_value=[]):
+            client = TestClient(webapp.app, base_url="https://archive.example")
+            login = client.post("/auth/login", data={"username": "test", "password": "test"}, follow_redirects=False)
+            self.assertEqual(login.status_code, 303)
+            self.assertTrue(client.cookies.get(webapp.SESSION_COOKIE_NAME))
+            logout = client.post("/auth/logout", follow_redirects=False)
+            self.assertEqual(logout.status_code, 303)
+            self.assertEqual(logout.headers.get("location"), "/login")
+            self.assertFalse(client.cookies.get(webapp.SESSION_COOKIE_NAME))
+            status = client.get("/auth/status")
+            self.assertEqual(status.status_code, 401)
+
+    def test_login_rejects_invalid_credentials(self):
+        from fastapi.testclient import TestClient
+        client = TestClient(webapp.app, base_url="https://archive.example")
+        response = client.post("/auth/login", data={"username": "test", "password": "wrong"}, follow_redirects=False)
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("Неверный логин или пароль", response.text)
+        self.assertFalse(client.cookies.get(webapp.SESSION_COOKIE_NAME))
+
+    def test_legacy_basic_auth_remains_supported(self):
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch
+        client = TestClient(webapp.app, base_url="https://archive.example")
+        response = client.get("/auth/status", auth=("test-admin", "test-password-for-unit-tests"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"authenticated":true', response.text)
+
+    def test_pwa_manifest_and_icon_endpoints_match_approved_branding(self):
+        import json
+        from io import BytesIO
+        from fastapi.testclient import TestClient
+        from PIL import Image
+        client = TestClient(webapp.app, base_url="https://archive.example")
+        manifest_response = client.get("/manifest.webmanifest")
+        self.assertEqual(manifest_response.status_code, 200)
+        manifest = json.loads(manifest_response.text)
+        self.assertEqual(manifest["start_url"], "/app")
+        self.assertEqual(manifest["theme_color"], "#0755e8")
+        icon_paths = {item["src"] for item in manifest["icons"]}
+        self.assertIn("/app-icon.svg", icon_paths)
+        self.assertIn("/apple-touch-icon.png", icon_paths)
+        svg_response = client.get("/app-icon.svg")
+        self.assertEqual(svg_response.status_code, 200)
+        self.assertIn("linearGradient", svg_response.text)
+        self.assertIn("#0755E8", svg_response.text)
+        png_response = client.get("/apple-touch-icon.png")
+        self.assertEqual(png_response.status_code, 200)
+        self.assertEqual(png_response.headers.get("content-type"), "image/png")
+        image = Image.open(BytesIO(png_response.content))
+        self.assertEqual(image.size, (180, 180))
+        self.assertEqual(image.format, "PNG")
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,7 +1,7 @@
 """React frontend entry point; legacy FastAPI routes remain available during migration."""
 from pathlib import Path
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 DIST = Path(__file__).resolve().parent / "frontend" / "dist"
