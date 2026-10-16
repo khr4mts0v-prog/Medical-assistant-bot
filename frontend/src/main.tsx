@@ -409,7 +409,14 @@ function App() {
                 setSmartConsent(false);
               } else {
                 if (smartConsent) {
-                  setAiConsentGranted(true);
+                  // Reflect the server's persisted consent state; a checkbox alone does not grant consent.
+                  try {
+                    const consentResponse = await fetch('/api/ai-consent', {credentials:'same-origin'});
+                    if (consentResponse.ok) {
+                      const consentState = await consentResponse.json();
+                      setAiConsentGranted(consentState.granted === true);
+                    }
+                  } catch {}
                   setSmartConsent(false);
                 }
                 setSmartConversation((previous:any[]) => [...previous,{question:submittedQuestion,result}].slice(-20));
