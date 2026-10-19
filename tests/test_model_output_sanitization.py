@@ -52,6 +52,8 @@ class ModelOutputSanitizationTests(unittest.TestCase):
         result = assistant._structured_archive_answer("Вопрос", ["Олег"], [])
         self.assertIn("Часть ответа", result["answer"])
         self.assertIn("Ответ мог быть обрезан лимитом генерации", result["answer"])
+        self.assertEqual(result["generation_status"], "partial")
+        self.assertIn("Ответ модели достиг лимита генерации", result["limitations"])
         self.assertTrue(completion.call_args.kwargs["return_metadata"])
 
     def test_explicit_memory_command_accepts_bare_height_and_approximate_weight(self):
