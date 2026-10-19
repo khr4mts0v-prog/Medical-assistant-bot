@@ -29,10 +29,13 @@ class PatientDetailApiTests(unittest.TestCase):
             "ocr_remote": "/private/family_1/private-original.txt", "text": "private OCR text",
             "analysis": {"review_required": True}, "keywords": [],
         }]
-        with patch.object(webapp, "family"), patch.object(webapp.db, "patients", return_value=["Саша"]), 
-             patch.object(webapp.db, "search", return_value=rows), 
-             patch.object(webapp, "document_card_metadata", return_value={"metadata": "Источник: УЗИ", "finding": "Краткое заключение"}), 
-             patch.object(webapp, "display_document_title", return_value="УЗИ брюшной полости"):
+        with (
+            patch.object(webapp, "family"),
+            patch.object(webapp.db, "patients", return_value=["Саша"]),
+            patch.object(webapp.db, "search", return_value=rows),
+            patch.object(webapp, "document_card_metadata", return_value={"metadata": "Источник: УЗИ", "finding": "Краткое заключение"}),
+            patch.object(webapp, "display_document_title", return_value="УЗИ брюшной полости"),
+        ):
             response = self.client.get("/api/families/1/patients/%D0%A1%D0%B0%D1%88%D0%B0?view=tree")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
