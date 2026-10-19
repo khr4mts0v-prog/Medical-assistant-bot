@@ -481,6 +481,21 @@ def _looks_like_patient_topic_ellipsis(question, mentioned_people):
     ))
 
 
+def _looks_like_contextual_medical_followup(question):
+    """Recognize anaphoric medical follow-ups whose patient/topic comes from prior turns."""
+    q = " ".join(str(question or "").casefold().replace("ё", "е").split())
+    if not q or len(q.split()) > 24:
+        return False
+    patterns = (
+        r"\b(?:по|для|у)\s+(?:такого|такому|такой|этого|этому|этой)\s+(?:реб[её]нк\w*|пациент\w*|малыш\w*)\b",
+        r"\b(?:какие|что|как)\b.{0,90}\b(?:ещ[её]|дополнительно)\b.{0,90}\b(?:рекомендац\w*|совет\w*|вариант\w*|поделать|сделать|попробовать|предпринять)\b",
+        r"\b(?:что|как)\s+ещ[её]\s+можно\s+(?:поделать|сделать|попробовать|предпринять)\b",
+        r"\b(?:какие|что)\s+ещ[её]\s+(?:можно\s+)?(?:рекомендац\w*|вариант\w*|опци\w*|меры)\b",
+        r"\b(?:какие|что)\s+можно\s+ещ[её]\s+(?:дать|посоветовать|предложить)\b",
+    )
+    return any(re.search(pattern, q) for pattern in patterns)
+
+
 def _history_for_current_patient(previous_turn, current_patients, previous_patients):
     """Retain dialogue continuity, but never pass another patient's prior answer as context."""
     if not isinstance(previous_turn, dict):
@@ -649,6 +664,11 @@ def _structured_archive_answer(question, patients, rows, history=None, memory_co
         "Отдельно разделяй текущий план этой консультации и старые сведения из анамнеза; упоминание препарата в анамнезе не превращай в новое назначение. "
         "Не подменяй конкретные назначения общими рекомендациями по диагнозу и не отвечай, что назначения отсутствуют, если они есть в тексте. "
         "Если OCR-фрагмент неоднозначен, передай его как написано и явно отметь, что требуется сверка с оригиналом; не угадывай смысл или дозировку. "
+        "Если пользователь спрашивает, что ещё можно сделать, какие дополнительные рекомендации или варианты есть для конкретного пациента, не ограничивайся повторением архива и фразой «новых назначений нет». "
+        "Структурируй ответ: (1) что конкретно подтверждено документами, с датой и источником; (2) какие дополнительные направления разумно обсудить с лечащим специалистом, зачем они нужны и от чего зависит применимость; (3) конкретные вопросы или следующие шаги для врача. "
+        "Дополнительные направления — это общая информация для обсуждения, а не назначения этому пациенту; не приписывай их врачу и не обещай пользу. Не назначай лекарства, дозировки, процедуры или обследования без достаточных клинических оснований. "
+        "Для ребёнка с двигательными/неврологическими нарушениями, когда это уместно по контексту, можно предложить обсудить индивидуальные цели реабилитации, спастичность, контрактуры и ортопедическое наблюдение, позиционирование и боль, питание/глотание, запоры, сон, судороги, зрение/слух и коммуникацию; не представляй этот перечень как обязательный план. "
+        "Не выводи противопоказания к вакцинации или конкретную схему вакцинации из косвенных формулировок либо предположений; точно отделяй текст документа от актуального медицинского вывода и советуй уточнить необычные ограничения у лечащего педиатра/невролога. "
         "Верни только JSON-объект следующей формы: "
         '{"answer":"полезный ответ; пометь общие сведения отдельно от сведений из памяти/документов","missing_documents":[{"name":"название конкретного документа","reason":"почему он необходим"}],'
         '"limitations":["что нельзя уверенно заключить"],"data_completeness":"insufficient|partial|sufficient|general",'
@@ -1819,7 +1839,22 @@ def install_assistant_routes(app, current_user, family_guard):
         # History is durable. We only decide which parts are relevant to this turn.
         # A complete query naming another patient wins over the old target; a target-only
         # follow-up such as "А что у Олега?" inherits the previous question's topic.
-        followup = bool(previous_turn and not standalone_general and (starts_followup or fact_fragment or patient_topic_ellipsis or explicit_document_addition))
+        contextual_medical_followup = _looks_like_contextual_medical_followup(query)
+        followup = bool(previous_turn and not standalone_general and (
+            starts_followup or fact_fragment or patient_topic_ellipsis
+            or explicit_document_addition or contextual_medical_followup
+        ))
+        ai_trace_log.emit(
+            trace_id, "dialogue.route_decision",
+            query_fp=ai_trace_log.fingerprint(query),
+            previous_question_fp=ai_trace_log.fingerprint(previous_turn.get("question", "")) if previous_turn else None,
+            has_previous_turn=bool(previous_turn), standalone_general=standalone_general,
+            fact_fragment=fact_fragment, patient_topic_ellipsis=patient_topic_ellipsis,
+            contextual_medical_followup=contextual_medical_followup,
+            explicit_document_addition=explicit_document_addition, followup=followup,
+            current_patient_fingerprints=[ai_trace_log.fingerprint(p) for p in current_mentioned],
+            previous_patient_fingerprints=[ai_trace_log.fingerprint(p) for p in previous_turn_people],
+        )
         search_question = query
         history = []
         history_for_model = []
@@ -1895,22 +1930,35 @@ def install_assistant_routes(app, current_user, family_guard):
             r"\b(архив|документ\w*|файл\w*|истори\w*|узи|экг|мрт|кт|выписк\w*|эпикриз\w*|результат\w*|покажи|найди|сравни|сводк\w*|пациент\w*|саш\w*|александр\w*|маш\w*|мар\w*|олег\w*)\b", qfold, re.I))
         if needs_analysis and not mentioned and not history and not explicit_archive_request and not forced_patient:
             # Generic medical education must not retrieve, reveal, or attach any family records.
+            # Route metadata is fingerprinted; the encrypted interaction journal stores the
+            # actual prompt and visible answer for authorized quality review.
+            ai_trace_log.emit(trace_id, "dialogue.route_selected", mode="general_medical", patient_scope_count=0)
             try:
                 from ai_provider import answer_archive_question
+                provider_name, _token, _url, model_name, _key = provider_config()
+                ai_trace_log.emit(trace_id, "model.configured", provider=provider_name,
+                    model=model_name, mode="general_medical")
                 answer = answer_archive_question(query, "не идентифицирован", context="")
                 if answer.startswith("Не удалось получить ответ ИИ") or answer.startswith("Не задан "):
+                    ai_trace_log.emit(trace_id, "response.complete", status="error", mode="general_medical",
+                        error_type="provider_error", answer_chars=len(answer),
+                        duration_ms=int((time.monotonic()-request_started)*1000), source_count=0)
                     return JSONResponse({"error": answer}, status_code=502)
                 try:
-                    provider_name, _token, _url, model_name, _key = provider_config()
                     ai_interaction_log.record(family_id=fid, actor_id=uid, query=query, answer=answer,
                         mode="general_medical", provider=provider_name, model=model_name,
                         duration_ms=int((time.monotonic()-request_started)*1000))
                 except Exception:
                     logging.warning("AI interaction logging skipped")
+                ai_trace_log.emit(trace_id, "response.complete", status="ok", mode="general_medical",
+                    answer_chars=len(answer), answer_fp=ai_trace_log.fingerprint(answer),
+                    duration_ms=int((time.monotonic()-request_started)*1000), source_count=0)
                 return JSONResponse({"mode":"general_medical", "answer":answer,
                     "documents":[], "missing_documents":[], "limitations":[], "data_completeness":"general",
                     "memory_proposals":[]})
             except Exception as exc:
+                ai_trace_log.emit(trace_id, "request.error", mode="general_medical",
+                    error_type=type(exc).__name__, duration_ms=int((time.monotonic()-request_started)*1000))
                 logging.exception("General medical answer failed (%s)", type(exc).__name__)
                 return JSONResponse({"error":"Не удалось подготовить общий медицинский ответ. Попробуйте ещё раз."}, status_code=502)
         if needs_analysis:

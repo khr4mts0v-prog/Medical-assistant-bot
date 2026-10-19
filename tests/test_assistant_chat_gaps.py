@@ -250,6 +250,20 @@ class AssistantChatGapTests(unittest.TestCase):
         self.assertTrue(assistant._looks_like_standalone_general_question("Что такое метеоризм?"))
         self.assertFalse(assistant._looks_like_standalone_general_question("А что это значит для Саши?"))
 
+    def test_contextual_medical_followups_are_recognized(self):
+        for question in (
+            "Какие можно ещё дать рекомендации по такому ребёнку?",
+            "А какие можно ещё дать рекомендации по Саше? Что ещё можно поделать?",
+            "Что ещё можно сделать для этого ребёнка?",
+            "Какие ещё варианты можно обсудить?",
+        ):
+            with self.subTest(question=question):
+                self.assertTrue(assistant._looks_like_contextual_medical_followup(question))
+
+    def test_standalone_definition_is_not_mistaken_for_contextual_followup(self):
+        self.assertFalse(assistant._looks_like_contextual_medical_followup("Что такое метеоризм?"))
+        self.assertFalse(assistant._looks_like_contextual_medical_followup("Сколько будет два плюс два?"))
+
     def test_patient_measurement_statement_is_a_followup_fragment(self):
         self.assertTrue(assistant._looks_like_patient_fact_fragment("Саше, рост ~125 см, вес ~15 кг"))
         found = assistant._extract_memory_measurements("Саше, рост ~125 см, вес ~15 кг")

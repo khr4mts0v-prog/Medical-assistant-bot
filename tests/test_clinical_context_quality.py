@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import assistant_routes as assistant
 
@@ -39,6 +40,21 @@ class ClinicalContextQualityTests(unittest.TestCase):
         }])
         self.assertIn("Фрагмент OCR", context)
         self.assertNotIn("UNIQUE_END_MARKER", context)
+
+    def test_additional_recommendation_prompt_separates_archive_facts_from_options(self):
+        with patch(
+            "assistant_routes.chat_completion",
+            return_value='{"answer":"Обсудите варианты с лечащим врачом.","missing_documents":[],"limitations":[],"data_completeness":"general"}',
+        ) as completion:
+            result = assistant._structured_archive_answer(
+                "Что ещё можно сделать для Саши?", ["Саша"], [],
+                history=["Какие рекомендации по консультации невролога?"],
+            )
+        self.assertIn("Обсудите варианты", result["answer"])
+        system_prompt = completion.call_args.args[0][0]["content"]
+        self.assertIn("не ограничивайся повторением архива", system_prompt)
+        self.assertIn("не приписывай их врачу", system_prompt)
+        self.assertIn("Не выводи противопоказания к вакцинации", system_prompt)
 
     def test_parser_removes_double_encoded_internal_schema_from_answer(self):
         raw = r'{"answer":"Назначено лечение.\\n\\nmissing_documents: []\\nlimitations: []\\ndata_completeness: partial\\nmemory_updates: []"}'
