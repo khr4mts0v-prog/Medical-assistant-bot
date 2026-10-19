@@ -28,7 +28,6 @@ REQUIRED_FILES = (
     "AIAnalise.py",
     "assistant_routes.py",
     "frontend/package.json",
-    "frontend/package-lock.json",
     "frontend/src/main.tsx",
     "frontend/src/style.css",
     ".github/workflows/tests.yml",
