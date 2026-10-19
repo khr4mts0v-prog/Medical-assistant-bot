@@ -2122,13 +2122,13 @@ def install_assistant_routes(app, current_user, family_guard):
                         error_type="provider_error", answer_chars=len(answer),
                         duration_ms=int((time.monotonic()-request_started)*1000), source_count=0)
                     return JSONResponse({"error": answer}, status_code=502)
+                generation_status = "partial" if "Ответ мог быть обрезан лимитом генерации" in answer else "complete"
                 try:
                     ai_interaction_log.record(family_id=fid, actor_id=uid, query=query, answer=answer,
-                        mode="general_medical", provider=provider_name, model=model_name,
+                        mode="general_medical", provider=provider_name, model=model_name, status=generation_status,
                         duration_ms=int((time.monotonic()-request_started)*1000))
                 except Exception:
                     logging.warning("AI interaction logging skipped")
-                generation_status = "partial" if "Ответ мог быть обрезан лимитом генерации" in answer else "complete"
                 ai_trace_log.emit(trace_id, "response.complete", status="partial" if generation_status == "partial" else "ok", generation_status=generation_status, mode="general_medical",
                     answer_chars=len(answer), answer_fp=ai_trace_log.fingerprint(answer),
                     duration_ms=int((time.monotonic()-request_started)*1000), source_count=0)
@@ -2331,7 +2331,7 @@ def install_assistant_routes(app, current_user, family_guard):
                 ai_trace_log.emit_full(trace_id, "response.visible", answer=answer_data["answer"], patient_names=scoped_people, source_documents=[{k: v for k, v in r.items() if not str(k).startswith("_")} for r in rows])
                 try:
                     ai_interaction_log.record(family_id=fid, actor_id=uid, query=query, answer=answer_data["answer"],
-                        mode="analysis", provider=provider_name, model=model,
+                        mode="analysis", provider=provider_name, model=model, status=generation_status,
                         duration_ms=int((time.monotonic()-request_started)*1000))
                 except Exception:
                     logging.warning("AI interaction logging skipped")
