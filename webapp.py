@@ -811,6 +811,45 @@ def save_patient_page(fid:int,patient:str,name:str=Form(...),birth_date:str=Form
         raise HTTPException(500,"Не удалось сохранить изменения пациента; проверьте журнал приложения")
     return RedirectResponse("/families/"+str(fid)+"/patients/"+quote(clean_new_name,safe="")+"?updated=1",status_code=303)
 
+@app.get("/api/families/{fid}/patients/{patient}")
+def patient_detail_api(fid:int,patient:str,q:str="",view:str="timeline",uid:int=Depends(current_user)):
+    """Structured patient profile for the React UI; never expose storage paths or OCR text."""
+    family(fid,uid)
+    if patient not in db.patients(fid):
+        raise HTTPException(404,"Пациент не найден")
+    view = "tree" if view == "tree" else "timeline"
+    rows = db.search(fid,patient,q,limit=1000)
+    documents = []
+    for d in rows:
+        analysis = d.get("analysis") or {}
+        details = document_card_metadata(d, analysis)
+        documents.append({
+            "id": int(d["id"]),
+            "title": str(display_document_title(d, analysis)),
+            "kind": str(d.get("kind") or "не определено"),
+            "date": str(d.get("date") or ""),
+            "added": str(d.get("added") or ""),
+            "metadata": str(details.get("metadata") or ""),
+            "finding": str(details.get("finding") or ""),
+            "review_required": bool(analysis.get("review_required", False)),
+            "url": f"/families/{fid}/documents/{int(d['id'])}/edit",
+        })
+    return {
+        "patient": patient,
+        "family_id": int(fid),
+        "query": q,
+        "view": view,
+        "document_count": len(documents),
+        "documents": documents,
+        "capabilities": {
+            "upload": not (STORAGE_BACKEND == "yandex" and not is_demo_user(uid) and not tenancy.disk_connected(fid)),
+            "patient_memory": True,
+            "document_selection": True,
+            "assistant": True,
+        },
+    }
+
+
 @app.get("/families/{fid}/patients/{patient}",response_class=HTMLResponse)
 def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,cleanup_warning:int=0,uid:int=Depends(current_user)):
     family(fid,uid)
