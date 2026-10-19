@@ -462,6 +462,7 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
 .smart-user-message>span{font-size:11px;color:var(--blue-dark);font-weight:800}
 .smart-chat-turn .smart-answer{margin:0 0 12px;padding:15px;border-color:#dce8f7;box-shadow:0 2px 8px #24466e08}
 .smart-chat-turn .smart-answer h3{display:flex;align-items:center;gap:7px}
+.smart-generation-warning{margin-left:auto;padding:4px 8px;border-radius:8px;background:#fff2d9;color:#82530b;font-size:11px;font-weight:650;line-height:1.3}
 .smart-gaps,.smart-limitations{margin:12px 0;padding:14px;border:1px solid #e3eaf5;border-radius:15px;background:#fff}
 .smart-gaps>h3{display:flex;align-items:center;gap:7px;margin:0 0 8px;font-size:15px}
 .smart-gap-intro{margin:0 0 8px;color:var(--muted);font-size:12px;line-height:1.55}
