@@ -104,7 +104,7 @@ async function fetchScreen(url: string): Promise<Screen> {
 type PatientDocument = { id:number; title:string; kind:string; date:string; metadata:string; finding:string; review_required:boolean; url:string };
 type PatientPayload = { patient:string; family_id:number; query:string; view:string; document_count:number; documents:PatientDocument[]; capabilities:{upload:boolean;patient_memory:boolean;document_selection:boolean;assistant:boolean} };
 
-function PatientReactView({familyId, patient, onAsk}: {familyId:number; patient:string; onAsk:()=>void}) {
+function PatientReactView({familyId, patient, onAsk}: {familyId:number; patient:string; onAsk:(selectedIds?:number[])=>void}) {
   const [query,setQuery] = useState('');
   const [view,setView] = useState<'timeline'|'tree'>('timeline');
   const [payload,setPayload] = useState<PatientPayload|null>(null);
@@ -139,7 +139,7 @@ function PatientReactView({familyId, patient, onAsk}: {familyId:number; patient:
     {!busy && !error && payload?.documents.length===0 && <div className="card"><p>Документы не найдены.</p><p className="muted">Попробуй изменить запрос или загрузить документ.</p></div>}
     {!busy && !error && view==='timeline' && payload && <div className="patient-react-documents">{payload.documents.map(doc=><article className="document-row document-card" key={doc.id}><div className="document-main"><strong>{doc.title}</strong><div className="muted document-meta">{doc.kind} · {doc.date || 'Дата не указана'}</div>{doc.metadata && <div className="document-meta">{doc.metadata}</div>}<p className="document-finding">{doc.finding || 'Открой документ, чтобы посмотреть заключение.'}</p>{doc.review_required && <span className="status-pill">Требуется проверка</span>}</div><a className="button-link" href={doc.url}>Открыть</a></article>)}</div>}
     {!busy && !error && view==='tree' && payload && <div className="patient-react-tree">{Object.entries(grouped).sort(([a],[b])=>a.localeCompare(b,'ru')).map(([kind,docs])=><details className="tree-group" open key={kind}><summary>{kind} <span className="muted">({docs.length})</span></summary>{docs.map(doc=><div className="document-row" key={doc.id}>{selectionMode && <label className="document-select-label"><input type="checkbox" checked={selected.includes(doc.id)} onChange={event=>setSelected(current=>event.target.checked?[...current,doc.id]:current.filter(id=>id!==doc.id))}/></label>}<div className="document-main"><strong>{doc.title}</strong><span className="muted">{doc.date || 'Дата не указана'}</span></div><a className="button-link" href={doc.url}>Открыть</a></div>)}</details>)}</div>}
-    {view==='tree' && selectionMode && selected.length>0 && <div className="patient-react-selection"><span>Отмечено документов: {selected.length}</span><button type="button" onClick={()=>{window.dispatchEvent(new CustomEvent('medical-archive-selected-documents',{detail:{familyId,patient,ids:selected}}));onAsk();}}>Спросить ИИ по выбранным</button></div>}
+    {view==='tree' && selectionMode && selected.length>0 && <div className="patient-react-selection"><span>Отмечено документов: {selected.length}</span><button type="button" onClick={()=>{onAsk(selected);}}>Спросить ИИ по выбранным</button></div>}
   </div>;
 }
 
@@ -674,7 +674,7 @@ function App() {
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : {patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={() => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}}
+        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : {patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}}
         {loading && screen && <div className="loading-line"/>}
       </section>}
     </main>
