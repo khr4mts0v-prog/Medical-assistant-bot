@@ -792,6 +792,11 @@ def _structured_archive_answer(question, patients, rows, history=None, memory_co
         ai_trace_log.emit_full(trace_id, "model.raw_response", raw_response=raw)
         ai_trace_log.emit(trace_id, "model.completion_metadata", **metadata)
     answer_data = _parse_structured_answer(raw)
+    # Keep a stable schema even when a token limit leaves the JSON incomplete.
+    answer_data.setdefault("missing_documents", [])
+    answer_data.setdefault("limitations", [])
+    answer_data.setdefault("data_completeness", "unknown")
+    answer_data.setdefault("memory_updates", [])
     truncated = metadata.get("finish_reason") in {"length", "max_tokens", "token_limit", "max_output_tokens"}
     answer_data["generation_status"] = "partial" if truncated else "complete"
     if truncated:
