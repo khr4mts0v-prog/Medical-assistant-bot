@@ -590,8 +590,8 @@ function App() {
     <aside className={'sidebar ' + (menuOpen ? 'sidebar-open' : '')}>
       <div className="brand"><span className="brand-icon"><HeartPulse size={22}/></span><span>Семейный медицинский архив</span><button className="icon-button sidebar-close" onClick={() => setMenuOpen(false)} aria-label="Закрыть"><X size={20}/></button></div>
       <button className={'nav-item ' + (isHome ? 'active' : '')} onClick={() => navigate(HOME)}><Home size={19}/>Главная</button>
-      <button className={'nav-item ' + (patientsExpanded ? 'active' : '')} aria-expanded={patientsExpanded} onClick={() => { if (!patientMenuItems.length) { void navigate(HOME); setPatientsExpanded(true); } else setPatientsExpanded(value => !value); }}><Users size={19}/>Пациенты <ChevronRight className={patientsExpanded ? 'submenu-chevron expanded' : 'submenu-chevron'} size={16}/></button>
-      {patientsExpanded && <div className="patient-submenu">{patientMenuItems.length ? patientMenuItems.map((patient, index) => <button className="nav-subitem" key={patient.href + index} onClick={() => navigate(patient.href)}>{patient.label}</button>) : <span className="nav-subitem-empty">Открываем список пациентов…</span>}<button className="nav-subitem nav-subitem-all" onClick={() => navigate(HOME)}>Все пациенты</button></div>}
+      <button className={'nav-item ' + (patientsExpanded ? 'active' : '')} aria-expanded={patientsExpanded} onClick={() => setPatientsExpanded(value => !value)}><Users size={19}/>Пациенты <ChevronRight className={patientsExpanded ? 'submenu-chevron expanded' : 'submenu-chevron'} size={16}/></button>
+      {patientsExpanded && <div className="patient-submenu">{patientMenuItems.length ? patientMenuItems.map((patient, index) => <button className="nav-subitem" key={patient.href + index} onClick={() => navigate(patient.href)}>{patient.label}</button>) : <span className="nav-subitem-empty">Открываем список пациентов…</span>}</div>}
       {hasPendingInbox && <button className="nav-item" onClick={() => { const link = document.querySelector<HTMLAnchorElement>('.app-content a[href*="/inbox"]'); navigate(link?.getAttribute('href') || '/search'); }}><ClipboardCheck size={19}/>Требуют проверки</button>}
       <button className="nav-item" onClick={() => navigate('/search')}><Search size={19}/>Поиск</button>
       <button className="nav-item" onClick={() => navigate('/assistant')}><BrainCircuit size={19}/>Ассистент</button>
@@ -602,8 +602,7 @@ function App() {
     <main className="main-area">
       <header className="topbar">
         <button className="icon-button menu-button" onClick={() => setMenuOpen(true)} aria-label="Открыть меню"><Menu size={23}/></button>
-        <button className={'home-button ' + (isHome ? 'home-button-active' : '')} onClick={() => navigate(HOME)} aria-label="На главную" title="Домой"><Home size={18}/>Домой</button>
-        {!isHome && <button className="back-button" onClick={back}><ArrowLeft size={18}/> Назад</button>}
+        {!isHome && <button className="home-button" onClick={() => navigate(HOME)} aria-label="На главную" title="Домой"><Home size={18}/>Домой</button>}
         <div className="topbar-title">Семейный медицинский архив</div>
       </header>
       {settingsOpen ? <section className="settings-view">
