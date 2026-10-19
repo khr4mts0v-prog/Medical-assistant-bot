@@ -779,7 +779,7 @@ def _structured_archive_answer(question, patients, rows, history=None, memory_co
         ai_trace_log.emit_full(trace_id, "model.request", provider="configured_provider", system_prompt=system, user_prompt=user)
     completion = chat_completion(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        max_tokens=1200, temperature=0.1, timeout=90, return_metadata=True,
+        max_tokens=2400, temperature=0.1, timeout=90, return_metadata=True,
     )
     if isinstance(completion, dict) and isinstance(completion.get("content"), str):
         raw = completion["content"]
@@ -792,11 +792,19 @@ def _structured_archive_answer(question, patients, rows, history=None, memory_co
         ai_trace_log.emit_full(trace_id, "model.raw_response", raw_response=raw)
         ai_trace_log.emit(trace_id, "model.completion_metadata", **metadata)
     answer_data = _parse_structured_answer(raw)
-    if metadata.get("finish_reason") in {"length", "max_tokens", "token_limit", "max_output_tokens"}:
-        answer_data["answer"] += (
-            "\n\n⚠️ Ответ мог быть обрезан лимитом генерации. "
-            "Попросите продолжить ответ, чтобы получить оставшуюся часть."
+    truncated = metadata.get("finish_reason") in {"length", "max_tokens", "token_limit", "max_output_tokens"}
+    answer_data["generation_status"] = "partial" if truncated else "complete"
+    if truncated:
+        warning = (
+            "⚠️ Ответ мог быть обрезан лимитом генерации; провайдер не завершил вывод. "
+            "Не считайте этот ответ исчерпывающим; повторите запрос с более узким вопросом."
         )
+        answer_data["answer"] = (answer_data.get("answer", "").rstrip() + "\n\n" + warning).strip()
+        answer_data["limitations"] = list(dict.fromkeys(
+            list(answer_data.get("limitations") or []) + ["Ответ модели достиг лимита генерации и может быть неполным."]
+        ))[:6]
+        if answer_data.get("data_completeness") == "sufficient":
+            answer_data["data_completeness"] = "partial"
     return answer_data
 
 
@@ -2120,10 +2128,12 @@ def install_assistant_routes(app, current_user, family_guard):
                         duration_ms=int((time.monotonic()-request_started)*1000))
                 except Exception:
                     logging.warning("AI interaction logging skipped")
-                ai_trace_log.emit(trace_id, "response.complete", status="ok", mode="general_medical",
+                generation_status = "partial" if "Ответ мог быть обрезан лимитом генерации" in answer else "complete"
+                ai_trace_log.emit(trace_id, "response.complete", status="partial" if generation_status == "partial" else "ok", generation_status=generation_status, mode="general_medical",
                     answer_chars=len(answer), answer_fp=ai_trace_log.fingerprint(answer),
                     duration_ms=int((time.monotonic()-request_started)*1000), source_count=0)
                 return JSONResponse({"mode":"general_medical", "answer":answer,
+                    "generation_status":generation_status,
                     "documents":[], "missing_documents":[], "limitations":[], "data_completeness":"general",
                     "memory_proposals":[]})
             except Exception as exc:
@@ -2316,7 +2326,8 @@ def install_assistant_routes(app, current_user, family_guard):
                     limitations.append("Анализ выполнен только по документам, отмеченным пользователем, и памяти выбранного пациента. Другие документы архива не искались и не добавлялись.")
                 if len(rows) >= 15 and not selection_mode:
                     limitations.append("В анализ включён ограниченный набор наиболее релевантных документов. Если нужен исчерпывающий обзор, уточните период или тип исследования.")
-                ai_trace_log.emit(trace_id, "response.complete", status="ok", duration_ms=int((time.monotonic()-request_started)*1000), source_count=len(rows), source_document_ids=[int(r["id"]) for r in rows], missing_document_count=len(final_gaps))
+                generation_status = answer_data.get("generation_status", "complete")
+                ai_trace_log.emit(trace_id, "response.complete", status="partial" if generation_status == "partial" else "ok", generation_status=generation_status, duration_ms=int((time.monotonic()-request_started)*1000), source_count=len(rows), source_document_ids=[int(r["id"]) for r in rows], missing_document_count=len(final_gaps))
                 ai_trace_log.emit_full(trace_id, "response.visible", answer=answer_data["answer"], patient_names=scoped_people, source_documents=[{k: v for k, v in r.items() if not str(k).startswith("_")} for r in rows])
                 try:
                     ai_interaction_log.record(family_id=fid, actor_id=uid, query=query, answer=answer_data["answer"],
@@ -2325,6 +2336,7 @@ def install_assistant_routes(app, current_user, family_guard):
                 except Exception:
                     logging.warning("AI interaction logging skipped")
                 return JSONResponse({"mode": "analysis", "answer": answer_data["answer"],
+                    "generation_status": answer_data.get("generation_status", "complete"),
                     "missing_documents": final_gaps, "limitations": list(dict.fromkeys(limitations))[:6],
                     "data_completeness": answer_data.get("data_completeness", "partial"),
                     "memory_proposals": memory_proposals,
