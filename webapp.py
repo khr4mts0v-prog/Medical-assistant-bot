@@ -1164,6 +1164,23 @@ def assign_selected_pending(fid:int,patient:str=Form(...),pending_ids:list[int]=
     body='<p><a href="/families/'+str(fid)+'/inbox">← Ко входящим</a></p><h2>Результат массового назначения</h2><div class="card"><ul>'+''.join(results)+'</ul></div>'
     return page("Массовое назначение",body)
 
+def _pdf_page_count(file_bytes):
+    import fitz
+    with fitz.open(stream=bytes(file_bytes), filetype="pdf") as document:
+        return len(document)
+
+
+def _render_pdf_page(file_bytes, page_number):
+    """Render one 1-based PDF page as a PNG for reliable mobile multi-page previews."""
+    import fitz
+    with fitz.open(stream=bytes(file_bytes), filetype="pdf") as document:
+        if page_number < 1 or page_number > len(document):
+            raise IndexError("PDF page out of range")
+        page = document.load_page(page_number - 1)
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(1.35, 1.35), alpha=False)
+        return pixmap.tobytes("png")
+
+
 @app.get("/families/{fid}/inbox/{pending_id}/preview")
 def preview_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)):
     family(fid,uid)
@@ -1172,7 +1189,23 @@ def preview_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user
     ext=Path(d["name"]).suffix.lower()
     media={".pdf":"application/pdf",".jpg":"image/jpeg",".jpeg":"image/jpeg",".png":"image/png",".webp":"image/webp",".bmp":"image/bmp",".tif":"image/tiff",".tiff":"image/tiff"}.get(ext)
     if not media: raise HTTPException(415,"Предпросмотр формата недоступен")
-    return Response(content=d["file_bytes"],media_type=media,headers={"Content-Disposition":"inline; filename*=UTF-8''"+__import__("urllib.parse",fromlist=["quote"]).quote(d["name"])})
+    return Response(content=d["file_bytes"],media_type=media,headers={"Content-Disposition":"inline; filename*=UTF-8''"+__import__("urllib.parse",fromlist=["quote"]).quote(d["name"]),"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
+
+
+@app.get("/families/{fid}/inbox/{pending_id}/preview/page/{page_number}")
+def preview_pending_document_page(fid:int,pending_id:int,page_number:int,uid:int=Depends(current_user)):
+    family(fid,uid)
+    d=db.get_pending_doc(fid,pending_id)
+    if not d: raise HTTPException(404,"Документ не найден")
+    if Path(d["name"]).suffix.lower() != ".pdf": raise HTTPException(415,"Предпросмотр страниц доступен только для PDF")
+    try:
+        image_bytes = _render_pdf_page(d["file_bytes"], page_number)
+    except IndexError:
+        raise HTTPException(404,"Страница PDF не найдена")
+    except Exception as exc:
+        logging.warning("Pending PDF page render failed (%s)", type(exc).__name__)
+        raise HTTPException(422,"Не удалось отобразить страницу PDF")
+    return Response(content=image_bytes,media_type="image/png",headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
 
 @app.get("/families/{fid}/inbox/{pending_id}", response_class=HTMLResponse)
 def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)):
@@ -1190,7 +1223,17 @@ def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)
     if ext in {".jpg",".jpeg",".png",".webp",".bmp",".tif",".tiff"}:
         preview=f'<a class="document-preview-link" href="{preview_url}" target="_blank" rel="noopener" aria-label="Открыть изображение в полном размере"><img class="preview-image" src="{preview_url}" alt="Предпросмотр документа"><span>Нажмите, чтобы открыть полностью ↗</span></a>'
     elif ext==".pdf":
-        preview=f'<div class="pdf-preview"><div class="pdf-preview-toolbar">Предпросмотр PDF · прокрутите документ ниже</div><iframe src="{preview_url}#view=FitH" title="Предпросмотр PDF" loading="lazy"></iframe><p><a href="{preview_url}" target="_blank" rel="noopener">Открыть PDF отдельно ↗</a></p></div>'
+        try:
+            page_count = _pdf_page_count(d["file_bytes"])
+            page_cards = "".join(
+                f'<section class="pdf-preview-page"><div class="pdf-preview-page-label">Страница {page_number} из {page_count}</div>'
+                f'<img src="{preview_url}/page/{page_number}" alt="Страница {page_number} из {page_count}" loading="lazy" decoding="async"></section>'
+                for page_number in range(1, page_count + 1)
+            )
+            preview=f'<div class="pdf-preview pdf-preview-multipage"><div class="pdf-preview-toolbar">Предпросмотр PDF · {page_count} стр. · прокрутите все страницы</div><div class="pdf-preview-pages">{page_cards}</div><p><a href="{preview_url}" target="_blank" rel="noopener">Открыть исходный PDF отдельно ↗</a></p></div>'
+        except Exception as exc:
+            logging.warning("Pending PDF preview initialization failed (%s)", type(exc).__name__)
+            preview=f'<div class="pdf-preview"><div class="pdf-preview-toolbar">Предпросмотр PDF · встроенный просмотрщик</div><iframe src="{preview_url}#toolbar=1&navpanes=0&scrollbar=1" title="Предпросмотр PDF" loading="lazy"></iframe><p><a href="{preview_url}" target="_blank" rel="noopener">Открыть PDF отдельно ↗</a></p></div>'
     else:
         preview=""
     body=f'<p><a href="/families/{fid}/inbox">← К входящим</a></p><h2>Классификация документа</h2><div class="card pending-review-card"><strong>Файл:</strong> {html.escape(d["name"])}{preview}<details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape(d["text"][:12000])}</pre></details></div>'

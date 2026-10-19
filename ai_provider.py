@@ -1,6 +1,29 @@
 """Provider adapter for OpenAI-compatible chat completion APIs."""
 import os
+import re
 import requests
+
+
+_SERVICE_TOKEN_RE = re.compile(r"<\|[a-zA-Z][a-zA-Z0-9_:-]*\|>|</?s>", re.I)
+_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think\s*>", re.I | re.S)
+_ROLE_LINE_RE = re.compile(r"(?im)^\s*(?:assistant|analysis|final|commentary|json)\s*(?::\s*|\n|$)")
+
+
+def sanitize_model_text(value):
+    """Remove leaked model control tokens/role labels from user-visible text."""
+    text = str(value or "")
+    # Remove common chat-template headers before stripping their individual tokens.
+    text = re.sub(r"<\|im_start\|>\s*(?:assistant|system|user|developer|tool)(?:\s*<\|channel\|>\s*[a-z_-]+)?", "", text, flags=re.I)
+    text = re.sub(r"<\|start_header_id\|>\s*(?:assistant|system|user|developer|tool)(?:\s*<\|[^>]+\|>\s*[a-z_-]+)?", "", text, flags=re.I)
+    # Reasoning blocks are never user-facing. Also drop an unclosed block rather than leak it.
+    text = _THINK_BLOCK_RE.sub("", text)
+    text = re.sub(r"<think\b[^>]*>.*$", "", text, flags=re.I | re.S)
+    text = _SERVICE_TOKEN_RE.sub(" ", text)
+    text = re.sub(r"(?im)^\s*(?:assistant|analysis|final|commentary|json)\s*$", "", text)
+    text = _ROLE_LINE_RE.sub("", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return "\n".join(line.rstrip() for line in text.splitlines()).strip()
 
 
 def provider_config():
@@ -86,9 +109,9 @@ def answer_archive_question(query, patient, context=""):
     else:
         user += "Подходящие документы и сохранённая память не найдены. Ответь в общем медицинско-образовательном формате; не утверждай ничего о личной истории пациента."
     try:
-        return chat_completion([
+        return sanitize_model_text(chat_completion([
             {"role": "system", "content": system},
             {"role": "user", "content": user},
-        ], max_tokens=1200, temperature=0.1, timeout=90)
+        ], max_tokens=1200, temperature=0.1, timeout=90))
     except Exception as exc:
         return f"Не удалось получить ответ ИИ ({type(exc).__name__}). Проверьте настройки провайдера и модели."

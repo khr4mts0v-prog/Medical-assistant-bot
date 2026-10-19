@@ -302,6 +302,10 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
 .legacy-content .pdf-preview{width:100%;min-width:0;overflow:hidden;border:1px solid #e0e7f1;border-radius:13px;background:#f4f7fb}
 .legacy-content .pdf-preview-toolbar{padding:9px 12px;border-bottom:1px solid #e0e7f1;background:#fff;color:#66768c;font-size:12px;font-weight:650}
 .legacy-content .pdf-preview iframe{display:block;width:100%;height:min(68vh,720px);min-height:360px;border:0;background:#fff}
+.legacy-content .pdf-preview-pages{display:grid;gap:12px;padding:12px;background:#e9eef6}
+.legacy-content .pdf-preview-page{min-width:0;overflow:hidden;border:1px solid #dce4f0;border-radius:9px;background:#fff;box-shadow:0 2px 8px #213c5c12}
+.legacy-content .pdf-preview-page-label{padding:6px 10px;border-bottom:1px solid #e7ecf4;color:#73829a;background:#fbfcfe;font-size:11px;font-weight:650}
+.legacy-content .pdf-preview-page img{display:block;width:100%;height:auto;min-height:80px;object-fit:contain;background:#fff}
 .legacy-content .pdf-preview p{margin:0;padding:10px 12px;background:#fff;border-top:1px solid #e0e7f1;font-size:13px}
 .legacy-content .pending-classification-form{display:grid;gap:11px;margin-top:14px;padding:16px;border:1px solid #e3eaf4;border-radius:16px;background:#fff}
 .legacy-content .pending-classification-form label{display:grid;gap:5px;margin:0}

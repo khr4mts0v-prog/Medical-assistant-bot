@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 import database as db
 import tenancy
 import ai_consent
-from ai_provider import answer_archive_question, chat_completion, provider_config
+from ai_provider import answer_archive_question, chat_completion, provider_config, sanitize_model_text
 import patient_memory
 import ai_interaction_log
 import ai_trace_log
@@ -530,7 +530,7 @@ def _extract_memory_measurements(question):
 
 def _parse_structured_answer(raw):
     """Parse the constrained response format while preserving a plain-text fallback."""
-    text = re.sub(r"^\s*\`\`\`(?:json)?\s*|\s*\`\`\`\s*$", "", str(raw or ""), flags=re.I)
+    text = sanitize_model_text(re.sub(r"^\s*\`\`\`(?:json)?\s*|\s*\`\`\`\s*$", "", str(raw or ""), flags=re.I))
     data = None
     # Providers may wrap JSON in commentary or fenced output. Decode the first complete object.
     decoder = json.JSONDecoder()
@@ -551,17 +551,17 @@ def _parse_structured_answer(raw):
                 data = candidate
         except Exception:
             data = None
-    if not isinstance(data, dict) or not str(data.get("answer") or "").strip():
-        return {"answer": text.strip()[:8000] or str(raw or "").strip()[:8000],
+    if not isinstance(data, dict) or not sanitize_model_text(data.get("answer") or ""):
+        return {"answer": sanitize_model_text(text)[:8000] or sanitize_model_text(raw)[:8000],
                 "missing_documents": [], "limitations": [],
                 "data_completeness": "unknown"}
     gaps = []
     for item in data.get("missing_documents", [])[:4] if isinstance(data.get("missing_documents"), list) else []:
         if isinstance(item, str):
-            name, reason = item.strip(), "На этот документ есть ссылка в найденных материалах."
+            name, reason = sanitize_model_text(item), "На этот документ есть ссылка в найденных материалах."
         elif isinstance(item, dict):
-            name = str(item.get("name") or "").strip()
-            reason = str(item.get("reason") or "Этот источник может уточнить ответ.").strip()
+            name = sanitize_model_text(item.get("name"))
+            reason = sanitize_model_text(item.get("reason") or "Этот источник может уточнить ответ.")
         else:
             continue
         if name:
@@ -569,7 +569,7 @@ def _parse_structured_answer(raw):
     limits = data.get("limitations", [])
     if not isinstance(limits, list):
         limits = [str(limits)]
-    limits = list(dict.fromkeys(str(x).strip()[:400] for x in limits if str(x).strip()))[:5]
+    limits = list(dict.fromkeys(sanitize_model_text(x)[:400] for x in limits if sanitize_model_text(x)))[:5]
     completeness = str(data.get("data_completeness") or "partial").casefold()
     if completeness not in {"insufficient", "partial", "sufficient", "unknown", "general"}:
         completeness = "partial"
@@ -581,11 +581,11 @@ def _parse_structured_answer(raw):
         for item in raw_updates[:6]:
             if not isinstance(item, dict):
                 continue
-            text_value = " ".join(str(item.get("text") or "").split())[:500]
-            reason = " ".join(str(item.get("reason") or "").split())[:400]
+            text_value = " ".join(sanitize_model_text(item.get("text")).split())[:500]
+            reason = " ".join(sanitize_model_text(item.get("reason")).split())[:400]
             category = str(item.get("category") or "note").strip()
             memory_key = str(item.get("memory_key") or "").strip()
-            patient_name = " ".join(str(item.get("patient") or "").split())[:100]
+            patient_name = " ".join(sanitize_model_text(item.get("patient")).split())[:100]
             try:
                 source_id = int(item.get("source_document_id") or 0)
             except (TypeError, ValueError):
@@ -596,9 +596,9 @@ def _parse_structured_answer(raw):
                 "text": text_value, "reason": reason, "category": category,
                 "memory_key": memory_key, "patient": patient_name,
                 "source_document_id": source_id,
-                "date": " ".join(str(item.get("fact_date") or "").split())[:40],
+                "date": " ".join(sanitize_model_text(item.get("fact_date")).split())[:40],
             })
-    return {"answer": str(data.get("answer")).strip()[:8000], "missing_documents": gaps,
+    return {"answer": sanitize_model_text(data.get("answer"))[:8000], "missing_documents": gaps,
             "limitations": limits, "data_completeness": completeness, "memory_updates": updates}
 
 
