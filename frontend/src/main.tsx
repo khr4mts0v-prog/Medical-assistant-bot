@@ -406,7 +406,7 @@ function App() {
   const patientMenuItems = React.useMemo(() => {
     if (!screen?.html) return [];
     const parsed = new DOMParser().parseFromString(screen.html, 'text/html');
-    return Array.from(parsed.querySelectorAll<HTMLAnchorElement>('.patient-card[href]')).map(a => ({ href: a.getAttribute('href') || '/', label: (a.querySelector('strong')?.textContent || a.textContent || '').trim().replace(/\\s+/g, ' ') })).filter(item => item.label && item.href.startsWith('/'));
+    return Array.from(parsed.querySelectorAll<HTMLAnchorElement>('.patient-card[href]')).map(a => ({ href: a.getAttribute('href') || '/', label: (a.querySelector('strong')?.textContent || a.textContent || '').trim().replace(/\s+/g, ' ') })).filter(item => item.label && item.href.startsWith('/'));
   }, [screen]);
   const hasPendingInbox = !isHome || Boolean(screen?.html && /href=["']\/families\/\d+\/inbox/.test(screen.html));
   useEffect(() => {
