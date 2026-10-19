@@ -462,6 +462,7 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
 .smart-user-message>span{font-size:11px;color:var(--blue-dark);font-weight:800}
 .smart-chat-turn .smart-answer{margin:0 0 12px;padding:15px;border-color:#dce8f7;box-shadow:0 2px 8px #24466e08}
 .smart-chat-turn .smart-answer h3{display:flex;align-items:center;gap:7px}
+.smart-generation-warning{margin-left:auto;padding:4px 8px;border-radius:8px;background:#fff2d9;color:#82530b;font-size:11px;font-weight:650;line-height:1.3}
 .smart-gaps,.smart-limitations{margin:12px 0;padding:14px;border:1px solid #e3eaf5;border-radius:15px;background:#fff}
 .smart-gaps>h3{display:flex;align-items:center;gap:7px;margin:0 0 8px;font-size:15px}
 .smart-gap-intro{margin:0 0 8px;color:var(--muted);font-size:12px;line-height:1.55}
@@ -606,3 +607,29 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
 .legacy-content .patient-document-tree .document-selection-active-note[hidden]{display:none}
 .smart-selected-sources-note{display:flex;flex-direction:column;gap:5px;padding:12px 14px;margin-bottom:12px;border:1px solid #bcd4fb;border-radius:12px;background:#edf5ff;color:#244c86;font-size:13px;line-height:1.45}
 @media(max-width:600px){.legacy-content .patient-document-tree .document-selection-toolbar{flex-direction:column}.legacy-content .patient-document-tree .document-selection-toolbar button{width:100%}.legacy-content .patient-document-tree .document-row{align-items:stretch}.legacy-content .patient-document-tree .document-select-label{align-items:flex-start}.legacy-content .patient-document-tree .document-selection-active .document-select-checkbox{margin-top:3px}}
+
+/* Keep diagnostic metadata available without crowding the conversational answer. */
+.smart-extra-details{padding:10px 13px;border:1px solid #e3eaf4;border-radius:12px;background:#fbfcfe;color:var(--muted);font-size:12px}
+.smart-extra-details>summary{cursor:pointer;color:#50647f;font-weight:650;list-style-position:outside}
+.smart-extra-details[open]>summary{margin-bottom:10px}
+.smart-extra-details .smart-completeness{margin-top:8px}
+.smart-extra-details.smart-documents{display:block}
+.smart-extra-details.smart-documents .smart-document{margin-top:8px}
+.smart-extra-details.smart-limitations ul{margin:8px 0 0;padding-left:18px}
+.smart-extra-details.smart-limitations li{margin:5px 0;line-height:1.45}
+
+/* Patient page actions: fixed 2×2 layout, with AI as the primary action. */
+.legacy-content .patient-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;margin-top:4px}
+.legacy-content .patient-actions .button-link{width:100%;min-width:0;min-height:48px;padding:10px 8px;white-space:normal;word-break:normal;overflow-wrap:normal;text-align:center;line-height:1.25;font-size:14px}
+.legacy-content .patient-actions .patient-action-primary{background:var(--blue)!important;border-color:var(--blue)!important;color:#fff!important;font-weight:800;box-shadow:0 5px 13px #3478e526}
+.legacy-content .patient-actions .patient-action-primary:hover{background:var(--blue-dark)!important;color:#fff!important}
+.legacy-content .patient-actions a[href*="patient-memory"],.legacy-content .patient-actions a[href*="/edit"],.legacy-content .patient-actions a[href="#patient-upload"]{background:#fff!important;border:1px solid #dfe7f2!important;color:#315b98!important}
+.legacy-content .document-card{flex-direction:row!important;align-items:flex-start!important;gap:12px}
+.legacy-content .document-card .document-main{flex:1 1 auto;width:100%;min-width:0;overflow-wrap:anywhere}
+.legacy-content .document-card>.button-link{flex:0 0 auto;white-space:nowrap}
+.legacy-content .document-meta{font-size:13px;color:var(--muted);margin-top:3px}
+.legacy-content .document-finding{font-size:14px;line-height:1.45;margin:7px 0 2px;color:#314763}
+.legacy-content .document-source-name{margin-top:6px;font-size:12px;color:var(--muted)}
+.legacy-content .document-source-name summary{cursor:pointer}
+.legacy-content .document-source-name span{display:block;overflow-wrap:anywhere;margin-top:4px}
+@media(max-width:420px){.legacy-content .patient-actions .button-link{font-size:13px;padding:9px 5px}.legacy-content .document-card{gap:7px;padding:11px}.legacy-content .document-card>.button-link{font-size:12px;padding:8px}}
