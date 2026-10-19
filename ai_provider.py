@@ -169,7 +169,7 @@ def answer_archive_question(query, patient, context="", history=None, trace_id=N
         ai_trace_log.emit_full(trace_id, "general_medical.model_request", provider="configured_provider", model_input=messages)
     try:
         completion = chat_completion(
-            messages, max_tokens=750, temperature=0.1, timeout=90, return_metadata=True
+            messages, max_tokens=1200, temperature=0.1, timeout=90, return_metadata=True
         )
         if isinstance(completion, dict) and isinstance(completion.get("content"), str):
             raw = completion["content"]
