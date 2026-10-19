@@ -16,6 +16,8 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements.txt pytest
       - run: python -m compileall -q .
+      - name: Check clean-clone portability prerequisites
+        run: python scripts/check_portability.py
       - name: Validate deployment script syntax
         run: bash -n scripts/deploy_web_release.sh
       - name: Independent synthetic classifier holdout (diagnostic; no accuracy gate)
