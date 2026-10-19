@@ -112,10 +112,10 @@ def _safe_next_path(value):
     value=str(value or "/")
     return value if value.startswith("/") and not value.startswith("//") and "\r" not in value and "\n" not in value else "/"
 
-def _login_html(next_path="/", error="", status=200):
+def _login_html(next_path="/", error="", status=200, consent_checked=False):
     target=html.escape(_safe_next_path(next_path),quote=True)
     message=f'<p class="error" role="alert">{html.escape(error)}</p>' if error else ""
-    body='''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0755e8"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/app-icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>Вход · Медицинский архив</title><style>:root{color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f2f6ff;color:#172b4d}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px}.card{width:min(100%,420px);padding:28px;border:1px solid #dce7f8;border-radius:24px;background:#fff;box-shadow:0 18px 60px #153b7814}.brand{display:flex;align-items:center;gap:12px;margin-bottom:24px;font-weight:750;font-size:1.1rem}.brand img{width:52px;height:52px;border-radius:14px;background:#0755e8}h1{font-size:1.65rem;letter-spacing:-.04em;margin:0 0 8px}p{color:#60718d;line-height:1.5}label{display:block;font-weight:650;margin:16px 0 6px}input{width:100%;padding:13px 14px;border:1px solid #d5e0f0;border-radius:12px;font:inherit;min-height:48px}button{width:100%;margin-top:22px;padding:13px;border:0;border-radius:12px;background:#0755e8;color:#fff;font:inherit;font-weight:700;min-height:48px}.error{padding:12px;border-radius:10px;background:#fff0f0;color:#a32424}</style></head><body><main class="card"><div class="brand"><img src="/app-icon.svg" alt=""><span>Medical Assistant</span></div><h1>Войти в архив</h1><p>Войдите, чтобы открыть семейный медицинский архив.</p>'''+message+'''<form method="post" action="/auth/login"><input type="hidden" name="next" value="'''+target+'''"><label for="username">Логин</label><input id="username" name="username" autocomplete="username" required autofocus><label for="password">Пароль</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">Войти</button></form></main></body></html>'''
+    body='''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0755e8"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/app-icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>Вход · Медицинский архив</title><style>:root{color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f2f6ff;color:#172b4d}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px}.card{width:min(100%,420px);padding:28px;border:1px solid #dce7f8;border-radius:24px;background:#fff;box-shadow:0 18px 60px #153b7814}.brand{display:flex;align-items:center;gap:12px;margin-bottom:24px;font-weight:750;font-size:1.1rem}.brand img{width:52px;height:52px;border-radius:14px;background:#0755e8}h1{font-size:1.65rem;letter-spacing:-.04em;margin:0 0 8px}p{color:#60718d;line-height:1.5}label{display:block;font-weight:650;margin:16px 0 6px}input{width:100%;padding:13px 14px;border:1px solid #d5e0f0;border-radius:12px;font:inherit;min-height:48px}button{width:100%;margin-top:22px;padding:13px;border:0;border-radius:12px;background:#0755e8;color:#fff;font:inherit;font-weight:700;min-height:48px}.error{padding:12px;border-radius:10px;background:#fff0f0;color:#a32424}</style></head><body><main class="card"><div class="brand"><img src="/app-icon.svg" alt=""><span>Medical Assistant</span></div><h1>Войти в архив</h1><p>Войдите, чтобы открыть семейный медицинский архив.</p>'''+message+'''<form method="post" action="/auth/login"><input type="hidden" name="next" value="'''+target+'''"><label for="username">Логин</label><input id="username" name="username" autocomplete="username" required autofocus><label for="password">Пароль</label><input id="password" name="password" type="password" autocomplete="current-password" required><label style="display:flex;gap:10px;align-items:flex-start;font-weight:500;line-height:1.45"><input type="checkbox" name="ai_consent" value="yes" style="width:20px;min-height:20px;flex:0 0 20px;margin-top:2px">Разрешаю передавать мой вопрос и релевантные медицинские фрагменты внешнему ИИ для подготовки ответа. Согласие можно отозвать в настройках. Без отметки общий вход в архив также доступен.</label><button type="submit">Войти</button></form></main></body></html>'''
     return HTMLResponse(body,status_code=status,headers={"Cache-Control":"no-store"})
 WEB_USERNAME=os.getenv("WEB_USERNAME","").strip()
 WEB_PASSWORD=os.getenv("WEB_PASSWORD","")
@@ -237,7 +237,7 @@ def login_page(request:Request,next_path:str="/"):
     return _login_html(next_path)
 
 @app.post("/auth/login",include_in_schema=False)
-def create_login_session(request:Request,username:str=Form(...),password:str=Form(...),next_path:str=Form("/",alias="next")):
+def create_login_session(request:Request,username:str=Form(...),password:str=Form(...),next_path:str=Form("/",alias="next"),ai_consent_granted:str=Form("",alias="ai_consent")):
     if not _session_signing_key():
         return _login_html(next_path,"Сессии не настроены. Администратору необходимо задать WEB_SESSION_SECRET длиной не менее 32 символов.",503)
     credentials=HTTPBasicCredentials(username=username,password=password)
@@ -250,6 +250,9 @@ def create_login_session(request:Request,username:str=Form(...),password:str=For
         uid=current_user(request,credentials)
     except HTTPException:
         return _login_html(next_path,"Неверный логин или пароль.",401)
+    if ai_consent_granted == "yes":
+        import ai_consent
+        ai_consent.set_consent(uid, True)
     try:
         token=_make_session(uid)
     except RuntimeError:
@@ -476,16 +479,16 @@ def home(request:Request,family_id:int|None=None,uid:int=Depends(current_user)):
         )
         b.append(
             '<div class="card upload-dropzone" id="quick-upload"><div style="font-size:42px;color:#3478df">⇧</div><h2>Добавить документы</h2><p class="muted">PDF, фотографии и сканы. Можно выбрать несколько файлов сразу.</p>'
-            '<p class="muted">Статус обновляется после передачи файла и завершения распознавания и классификации.</p><label style="display:block;font-weight:400"><input id="ai-classification-consent" type="checkbox" style="width:auto;min-height:auto"> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label>'
+            '<p class="muted">Статус обновляется после передачи файла и завершения распознавания и классификации.</p><label id="upload-consent-label" style="display:block;font-weight:400"><input id="ai-classification-consent" type="checkbox" style="width:auto;min-height:auto"> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label>'
             '<select id="upload-family" hidden aria-hidden="true">' + upload_options + '</select>'
             '<input id="upload-files" type="file" accept="image/*,application/pdf,.tif,.tiff,.bmp" multiple hidden>' '<button type="button" id="choose-files">＋ Выбрать документы</button>'
             '<div id="upload-queue" aria-live="polite"></div>'
             '<small>До ' + str(upload_ui_limit_mb) + ' МБ на файл. OCR и классификация выполняются на сервере после передачи.</small></div>'
-            '<script>(function(){const input=document.getElementById("upload-files"),queue=document.getElementById("upload-queue"),family=document.getElementById("upload-family");let items=[],seq=0;document.getElementById("home-upload-trigger").addEventListener("click",function(){input.click()});'
+            '<script>(function(){const input=document.getElementById("upload-files"),queue=document.getElementById("upload-queue"),family=document.getElementById("upload-family");let items=[],seq=0;document.getElementById("choose-files").addEventListener("click",function(){input.click()});'
             'function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c]})}'
             'function render(){queue.innerHTML=items.map(function(x){return \'<div class="upload-item"><div class="upload-top"><div class="upload-name"><strong>\'+esc(x.file.name)+\'</strong><div class="upload-status">\'+(x.file.size/1048576).toFixed(2)+\' МБ · \'+esc(x.status)+\'</div></div><button class="upload-remove" type="button" data-remove="\'+x.id+\'" aria-label="Убрать файл из списка">×</button></div><div class="upload-track"><div class="upload-fill" style="width:\'+x.progress+\'%"></div></div><small>\'+x.progress+\'%</small></div>\'}).join("");queue.querySelectorAll("[data-remove]").forEach(function(b){b.addEventListener("click",function(){const id=Number(b.dataset.remove),item=items.find(function(x){return x.id===id});if(item&&item.xhr){item.cancelled=true;item.status="Отменено в браузере; результат сервера неизвестен";item.xhr.abort()}items=items.filter(function(x){return x.id!==id});render()})})}window.addEventListener("beforeunload",function(e){if(items.some(function(x){return x.xhr&&!x.cancelled})){e.preventDefault();e.returnValue=""}});'
             'function upload(item){item.status="Загрузка";const xhr=new XMLHttpRequest(),form=new FormData();item.xhr=xhr;form.append("family_id",family.value);form.append("files",item.file,item.file.name);form.append("ai_consent",document.getElementById("ai-classification-consent")?.checked?"true":"false");xhr.open("POST","/upload");xhr.upload.onprogress=function(e){if(e.lengthComputable){item.progress=Math.round(e.loaded/e.total*100);item.status=item.progress>=100?"Передан · обработка на сервере":"Загрузка";render()}};xhr.onload=function(){item.xhr=null;if(item.cancelled)return;item.progress=100;const body=(xhr.responseText||"").toLowerCase();if(xhr.status>=200&&xhr.status<300){if(body.includes("добавлен во входящие"))item.status="100% · OCR завершён · нужна ручная проверка";else if(body.includes("документ сохранён")||body.includes("файл уже есть в индексе"))item.status="100% · OCR и классификация завершены";else if(body.includes("дубликат")||body.includes("уже сохранён в архиве"))item.status="100% · дубликат";else {item.progress=95;item.status="Передан серверу · результат обработки не подтверждён"}}else {item.progress=Math.min(item.progress,95);item.status="Ошибка HTTP "+xhr.status}render()};xhr.onerror=function(){item.xhr=null;if(!item.cancelled){item.status="Ошибка сети";render()}};xhr.onabort=function(){item.xhr=null};xhr.send(form)}'
-            'document.getElementById("choose-files").addEventListener("click",function(){input.click()});input.addEventListener("change",function(){const selected=Array.from(input.files||[]);input.value="";selected.forEach(function(file){const item={id:++seq,file:file,status:"В очереди",progress:0,xhr:null,cancelled:false};if(!/\\.(pdf|png|jpe?g|webp|tiff?|bmp)$/i.test(file.name)){item.status="Формат не поддерживается";item.progress=0;items.push(item);render();return}if(file.size>'+str(upload_ui_limit_mb*1024*1024)+'){item.status="Превышен лимит размера";items.push(item);render();return}items.push(item);render();upload(item)})});'
+            r'input.addEventListener("change",function(){const selected=Array.from(input.files||[]);input.value="";selected.forEach(function(file){const item={id:++seq,file:file,status:"В очереди",progress:0,xhr:null,cancelled:false};if(!/\.(pdf|png|jpe?g|webp|tiff?|bmp)$/i.test(file.name)){item.status="Формат не поддерживается";item.progress=0;items.push(item);render();return}if(file.size>'+str(upload_ui_limit_mb*1024*1024)+'){item.status="Превышен лимит размера";items.push(item);render();return}items.push(item);render();upload(item)})});'
             '})();</script>'
         )
     if f:
@@ -701,7 +704,7 @@ def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,
     from urllib.parse import quote
     safe_patient=quote(patient,safe="")
     base=f"/families/{fid}/patients/{safe_patient}"
-    b=[f'<p><a href="/?family_id={fid}">← К архиву</a></p>',f'<div class="patient-heading"><div><h2>{html.escape(patient)}</h2><p class="muted">Документов: {len(rows)}</p></div><div class="row"><a class="button-link" href="/families/{fid}/patients/{safe_patient}/edit">✎ Редактировать</a><a class="button-link" href="#patient-upload">＋ Добавить документы</a></div></div>']
+    b=[f'<p><a href="/?family_id={fid}">← К архиву</a></p>',f'<div class="patient-heading"><div><h2>{html.escape(patient)}</h2><p class="muted">Документов: {len(rows)}</p></div><div class="row"><a class="button-link" href="#patient-assistant" data-patient-assistant="1" data-family-id="{fid}" data-patient="{html.escape(patient,quote=True)}">✦ Спросить ИИ по пациенту</a><a class="button-link" href="/patient-memory?family_id={fid}&patient={safe_patient}">Память пациента</a><a class="button-link" href="/families/{fid}/patients/{safe_patient}/edit">✎ Редактировать</a><a class="button-link" href="#patient-upload">＋ Добавить документы</a></div></div>']
     if deleted: b.append('<div class="notice-success" role="status">Документ удалён из архива.</div>')
     if cleanup_warning: b.append('<div class="notice-warning" role="status">Запись удалена, но временный файл не удалось окончательно очистить. Проверьте журнал приложения.</div>')
     b.append(f'<form class="card patient-search" method="get" action="{base}"><label for="patient-q">Поиск по документам пациента</label><div class="row"><input id="patient-q" type="search" name="q" value="{html.escape(q,quote=True)}" placeholder="Например: анализы, УЗИ, выписка"><input type="hidden" name="view" value="{view}"><button type="submit">Найти</button>')
@@ -727,14 +730,16 @@ def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,
                 title=display_document_title(d,d.get("analysis") or {}); did=int(d["id"])
                 b.append(f'<article class="document-row"><div class="document-main"><strong>{html.escape(str(title))}</strong><div class="muted">{html.escape(str(d.get("kind") or "не определено"))} · {html.escape(str(d.get("name") or ""))}</div></div><a class="button-link" href="/families/{fid}/documents/{did}/edit">Открыть</a></article>')
     else:
+        b.append('<section class="patient-document-tree" data-patient-document-tree><div class="document-selection-toolbar"><div><strong>Выбор документов для ИИ</strong><p class="muted">По умолчанию ИИ сам ищет подходящие документы этого пациента. Включите выбор, чтобы ограничить анализ только отмеченными файлами и памятью пациента.</p></div><button type="button" class="button-link" data-toggle-document-selection aria-pressed="false">Выбрать документы</button></div><div class="document-selection-active-note" data-selection-note hidden><strong>Режим выбора включён.</strong> ИИ будет анализировать только отмеченные документы и память этого пациента.</div>')
         grouped={}
         for d in rows: grouped.setdefault(str(d.get("kind") or "Не определено"),[]).append(d)
         for kind,docs in sorted(grouped.items(),key=lambda x:x[0].casefold()):
             b.append(f'<details class="tree-group" open><summary>{html.escape(kind)} <span class="muted">({len(docs)})</span></summary>')
             for d in sorted(docs,key=lambda x:str(x.get("date") or ""),reverse=True):
                 title=display_document_title(d,d.get("analysis") or {}); did=int(d["id"])
-                b.append(f'<div class="document-row"><div class="document-main"><strong>{html.escape(str(title))}</strong><div class="muted">{html.escape(str(d.get("date") or "Дата не указана"))}</div></div><a class="button-link" href="/families/{fid}/documents/{did}/edit">Открыть</a></div>')
+                b.append(f'<div class="document-row"><label class="document-select-label"><input type="checkbox" class="document-select-checkbox" data-document-id="{did}" aria-label="Выбрать документ {html.escape(str(title),quote=True)}"><span class="document-main"><strong>{html.escape(str(title))}</strong><span class="muted">{html.escape(str(d.get("date") or "Дата не указана"))}</span></span></label><a class="button-link" href="/families/{fid}/documents/{did}/edit">Открыть</a></div>')
             b.append('</details>')
+        b.append('</section>')
     return page("Пациент","".join(b))
 
 @app.post("/families/{fid}/documents/{doc_id}/delete",response_class=HTMLResponse)
@@ -842,8 +847,7 @@ def view_document_original(fid: int, doc_id: int, uid: int = Depends(current_use
         resolved = raw.resolve(strict=True)
         if resolved.parent != expected or root not in resolved.parents or not resolved.is_file():
             raise HTTPException(404, "Оригинал PDF не найден")
-    except (OSError, ValueError):
-        raise HTTPException(404, "Оригинал PDF не найден")
+    except (OSError, ValueError):        raise HTTPException(404, "Оригинал PDF не найден")
     return FileResponse(
         resolved,
         media_type="application/pdf",
@@ -853,6 +857,49 @@ def view_document_original(fid: int, doc_id: int, uid: int = Depends(current_use
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+@app.get("/families/{fid}/documents/{doc_id}/preview")
+def preview_document(fid: int, doc_id: int, uid: int = Depends(current_user)):
+    """Serve an authenticated image preview from local storage or a temporary Yandex download."""
+    family(fid, uid)
+    d = db.get_doc(fid, doc_id)
+    if not d:
+        raise HTTPException(404, "Документ не найден")
+    suffix = Path(str(d.get("name") or "")).suffix.lower()
+    media_types = {".png":"image/png", ".jpg":"image/jpeg", ".jpeg":"image/jpeg", ".webp":"image/webp", ".bmp":"image/bmp", ".tif":"image/tiff", ".tiff":"image/tiff"}
+    if suffix not in media_types:
+        raise HTTPException(415, "Предпросмотр доступен только для изображений")
+    from local_storage import DATA_ROOT, _component
+    import tempfile
+    patient = str(d.get("patient") or "")
+    if STORAGE_BACKEND == "local" or is_demo_user(uid):
+        root = DATA_ROOT.resolve()
+        expected = (root / f"family_{int(fid)}" / _component(patient)).resolve()
+        raw = Path(str(d.get("remote") or ""))
+        try:
+            resolved = raw.resolve(strict=True)
+            if root not in expected.parents or resolved.parent != expected or not resolved.is_file() or raw.is_symlink():
+                raise HTTPException(404, "Оригинал изображения не найден")
+        except OSError:
+            raise HTTPException(404, "Оригинал изображения не найден")
+        return FileResponse(resolved, media_type=media_types[suffix], headers={"Cache-Control":"private, no-store", "X-Content-Type-Options":"nosniff"})
+    token = os.getenv("YANDEX_TOKEN", "").strip()
+    if not token or not d.get("remote"):
+        raise HTTPException(503, "Предпросмотр из облачного хранилища пока недоступен")
+    from cloud import YaDiskClient
+    temp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    temp_path = Path(temp.name); temp.close()
+    try:
+        YaDiskClient(token).download_file(str(d["remote"]), str(temp_path))
+        from fastapi.responses import FileResponse as _FileResponse
+        response = _FileResponse(temp_path, media_type=media_types[suffix], headers={"Cache-Control":"private, no-store", "X-Content-Type-Options":"nosniff"})
+        response.background = __import__("starlette.background", fromlist=["BackgroundTask"]).BackgroundTask(lambda: temp_path.unlink(missing_ok=True))
+        return response
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        logging.exception("Could not fetch private image preview")
+        raise HTTPException(502, "Не удалось получить оригинал изображения из хранилища")
 
 
 @app.get("/families/{fid}/documents/{doc_id}/edit", response_class=HTMLResponse)
@@ -877,15 +924,21 @@ def edit_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
             'style="display:block;width:100%;height:75vh;min-height:420px;border:1px solid #d8e2f0;border-radius:12px;background:#fff"></iframe>'
             '<p><a target="_blank" rel="noopener" href="' + viewer_url + '">Открыть PDF отдельно</a></p></section>'
         )
+    suffix = Path(str(d.get("name") or "")).suffix.lower()
+    if suffix in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}:
+        preview_url = f"/families/{fid}/documents/{doc_id}/preview"
+        body += ('<section class="card"><h3>Предпросмотр оригинала</h3><a href="' + preview_url + '" target="_blank" rel="noopener">Открыть изображение отдельно для увеличения</a>'
+                 '<img src="' + preview_url + '" alt="Оригинал документа" loading="lazy" style="display:block;width:100%;height:auto;max-height:75vh;object-fit:contain;margin-top:12px;border:1px solid #d8e2f0;border-radius:12px;background:#fff"></section>')
     body+="<form method=\"post\" action=\"/families/"+str(fid)+"/documents/"+str(doc_id)+"/edit\"><label>Тип обследования<br><select name=\"kind\" required>"+options+"</select></label><br>"
     body+="<label>Название для архива<br><input type=\"text\" name=\"title\" maxlength=\"180\" value=\""+html.escape(str(title),quote=True)+"\" required></label><br>"
     body+="<label>Дата документа (ДД-ММ-ГГГГ)<br><input type=\"text\" name=\"date\" maxlength=\"10\" placeholder=\"17-03-2025\" value=\""+html.escape(str(d.get("date") or ""),quote=True)+"\"></label>"
-    body+="<p class=\"muted\">Оригинал и первоначальный OCR-текст останутся без изменений.</p><button type=\"submit\">Сохранить изменения</button></form>"
+    body+="<label>Распознанный текст (OCR)<br><textarea name=\"ocr_text\" rows=\"12\" maxlength=\"100000\" style=\"width:100%;min-height:260px;resize:vertical;font:inherit;padding:12px;border:1px solid #d5e0f0;border-radius:12px;box-sizing:border-box\">"+html.escape(str(d.get("text") or ""))+"</textarea></label>"
+    body+="<p class=\"muted\">Исходный файл не изменяется. Исправленный OCR будет использоваться для поиска и последующего анализа.</p><button type=\"submit\">Сохранить изменения</button></form>"
     body+='<form method="post" action="/families/'+str(fid)+'/documents/'+str(doc_id)+'/delete" onsubmit="return confirm(\'Удалить документ и его OCR-файл из архива? Это действие нельзя отменить.\')"><input type="hidden" name="confirm" value="yes"><button class="danger" type="submit">Удалить документ</button></form>'
     return page("Редактирование документа",body)
 
 @app.post("/families/{fid}/documents/{doc_id}/edit", response_class=HTMLResponse)
-def save_document_edit(fid:int,doc_id:int,kind:str=Form(...),title:str=Form(...),date:str=Form(""),uid:int=Depends(current_user)):
+def save_document_edit(fid:int,doc_id:int,kind:str=Form(...),title:str=Form(...),date:str=Form(""),ocr_text:str=Form("", max_length=100000),uid:int=Depends(current_user)):
     family(fid,uid)
     d=db.get_doc(fid,doc_id)
     if not d: raise HTTPException(404,"Документ не найден")
@@ -899,6 +952,34 @@ def save_document_edit(fid:int,doc_id:int,kind:str=Form(...),title:str=Form(...)
         try: date=datetime.strptime(date,"%d-%m-%Y").strftime("%d-%m-%Y")
         except ValueError: raise HTTPException(400,"Дата должна быть в формате ДД-ММ-ГГГГ")
     analysis=d.get("analysis") or {}
+    ocr_text = str(ocr_text or "")
+    if ocr_text != str(d.get("text") or ""):
+        if not db.update_doc_text(fid, doc_id, ocr_text):
+            raise HTTPException(500, "Не удалось сохранить исправленный OCR-текст")
+        try:
+            if d.get("ocr_remote"):
+                if STORAGE_BACKEND == "local" or is_demo_user(uid):
+                    from local_storage import DATA_ROOT, _component
+                    root = DATA_ROOT.resolve()
+                    expected = (root / f"family_{int(fid)}" / _component(str(d.get("patient") or ""))).resolve()
+                    ocr_path = Path(str(d.get("ocr_remote")))
+                    resolved = ocr_path.resolve()
+                    if root not in expected.parents or resolved.parent != expected or ocr_path.is_symlink():
+                        raise ValueError("OCR path outside patient storage")
+                    resolved.write_text(ocr_text, encoding="utf-8")
+                else:
+                    token = os.getenv("YANDEX_TOKEN", "").strip()
+                    if token:
+                        import tempfile
+                        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tmp:
+                            tmp.write(ocr_text); temp_name = tmp.name
+                        try:
+                            YaDiskClient(token).upload_file(temp_name, str(d["ocr_remote"]))
+                        finally:
+                            Path(temp_name).unlink(missing_ok=True)
+        except Exception:
+            logging.exception("Updated OCR index but failed to update OCR sidecar for document %s", doc_id)
+            raise HTTPException(502, "Текст сохранён в индексе, но не удалось обновить OCR-файл в хранилище. Проверьте соединение и повторите сохранение.")
     analysis["primary_type"]=kind
     analysis["primary_category"]=DOCUMENT_TAXONOMY.get(kind,{}).get("category","не определено")
     analysis["taxonomy_path"]=[analysis["primary_category"],kind] if kind in DOCUMENT_TAXONOMY else []

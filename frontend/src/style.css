@@ -568,3 +568,37 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
   .smart-gap-actions button{width:100%}
   .smart-chat-compose{padding:10px!important}
 }
+
+
+/* Upload-card regression fix: keep the native file input hidden and the consent row compact. */
+.legacy-content #quick-upload #upload-files[hidden]{display:none!important;visibility:hidden!important;width:0!important;height:0!important;padding:0!important;margin:0!important}
+.legacy-content #quick-upload #choose-files{display:none!important}
+.legacy-content #quick-upload>label#upload-consent-label{grid-column:1/-1;display:flex!important;flex-direction:row;align-items:flex-start;justify-content:flex-start;gap:9px;min-height:0!important;height:auto;padding:7px 0!important;margin:0;border:0;background:transparent!important;color:var(--muted)!important;text-align:left!important;font-size:12px;font-weight:500!important;line-height:1.4}
+.legacy-content #quick-upload>label#upload-consent-label:before,.legacy-content #quick-upload>label#upload-consent-label:after{display:none!important;content:none!important}
+.legacy-content #quick-upload>label#upload-consent-label input[type=checkbox]{display:block;flex:0 0 18px;width:18px;min-width:18px;height:18px;min-height:18px;padding:0;margin:2px 0 0}
+.legacy-content #quick-upload #upload-queue:empty{display:none!important}
+.smart-memory-proposals{margin:18px 0;padding:15px;border:1px solid #dbe7fa;border-radius:16px;background:#f8fbff}
+.smart-memory-proposals>h3{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:16px}
+.smart-memory-proposals>p{margin:0 0 12px;color:#6b7d96;font-size:13px}
+.smart-memory-proposal{padding:13px;margin:10px 0;border:1px solid #e1eaf7;border-radius:13px;background:#fff}
+.smart-memory-proposal>strong{display:block;color:#223652;font-size:14px}
+.smart-memory-proposal>p{margin:7px 0;color:#536781;font-size:13px}
+.smart-memory-proposal>small{display:block;color:#7b8ca4;font-size:11px}
+.smart-memory-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.smart-memory-actions button{min-height:38px;padding:8px 12px;border:1px solid #dce6f6;border-radius:10px;background:#f1f6ff;color:#285eb2;font-size:13px;font-weight:700}
+.smart-memory-actions button:first-child{background:#3478df;border-color:#3478df;color:#fff}
+.smart-memory-actions button:disabled{opacity:.55}
+@media(max-width:480px){.smart-memory-actions{display:grid;grid-template-columns:1fr}.smart-memory-actions button{width:100%}}
+
+/* Optional source selection inside a patient's document tree. */
+.legacy-content .patient-document-tree .document-selection-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:14px 15px;margin:12px 0;border:1px solid #dce8f8;border-radius:15px;background:#f7faff}
+.legacy-content .patient-document-tree .document-selection-toolbar p{margin:5px 0 0;max-width:650px;font-size:13px;line-height:1.45}
+.legacy-content .patient-document-tree .document-selection-toolbar button{flex:0 0 auto;white-space:nowrap;background:#fff}
+.legacy-content .patient-document-tree .document-selection-active-note{padding:12px 14px;margin:10px 0;border:1px solid #bcd4fb;border-radius:12px;background:#edf5ff;color:#244c86;font-size:13px}
+.legacy-content .patient-document-tree .document-select-label{display:flex;align-items:center;gap:11px;flex:1;min-width:0;cursor:pointer}
+.legacy-content .patient-document-tree .document-select-label .document-main{display:flex;flex-direction:column;gap:4px;min-width:0}
+.legacy-content .patient-document-tree .document-select-checkbox{display:none;width:20px;min-width:20px;height:20px;min-height:20px;margin:0;accent-color:#2868d7}
+.legacy-content .patient-document-tree.document-selection-active .document-select-checkbox{display:block}
+.legacy-content .patient-document-tree .document-selection-active-note[hidden]{display:none}
+.smart-selected-sources-note{display:flex;flex-direction:column;gap:5px;padding:12px 14px;margin-bottom:12px;border:1px solid #bcd4fb;border-radius:12px;background:#edf5ff;color:#244c86;font-size:13px;line-height:1.45}
+@media(max-width:600px){.legacy-content .patient-document-tree .document-selection-toolbar{flex-direction:column}.legacy-content .patient-document-tree .document-selection-toolbar button{width:100%}.legacy-content .patient-document-tree .document-row{align-items:stretch}.legacy-content .patient-document-tree .document-select-label{align-items:flex-start}.legacy-content .patient-document-tree .document-selection-active .document-select-checkbox{margin-top:3px}}

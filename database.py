@@ -189,6 +189,22 @@ def get_doc(fid, doc_id):
         return None
     return d
 
+def update_doc_text(fid, doc_id, text):
+    """Persist manually corrected OCR text, encrypted at rest, and refresh derived patient memory."""
+    text = str(text or "")[:100000]
+    with connect() as c:
+        row = c.execute("SELECT patient FROM docs WHERE family_id=? AND id=?", (int(fid), int(doc_id))).fetchone()
+        if not row:
+            return False
+        patient = row["patient"]
+        encrypted = cipher().encrypt(text.encode("utf-8"))
+        cur = c.execute("UPDATE docs SET text=? WHERE family_id=? AND id=?", (encrypted, int(fid), int(doc_id)))
+        updated = cur.rowcount == 1
+    if updated:
+        _refresh_patient_memory(fid, patient)
+    return updated
+
+
 def update_doc_metadata(fid, doc_id, kind, date, analysis):
     """Update display metadata while preserving the original and OCR text."""
     with connect() as c:
@@ -239,6 +255,35 @@ def search(fid,p,query="",limit=10):
     if terms:
         out.sort(key=lambda d:(d["_search_score"],d.get("added") or ""),reverse=True)
     return out[:max(1,min(int(limit),1000))]
+
+
+def get_documents_by_ids(fid, patient, document_ids):
+    """Fetch exact document IDs within one family and patient, without search-result limits."""
+    ids = list(dict.fromkeys(int(value) for value in document_ids))
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    with connect() as c:
+        rows = c.execute(
+            "SELECT * FROM docs WHERE family_id=? AND patient=? COLLATE NOCASE AND id IN (" + placeholders + ")",
+            (int(fid), patient, *ids),
+        ).fetchall()
+    out = []
+    for row in rows:
+        d = dict(row)
+        try:
+            d["text"] = cipher().decrypt(d["text"]).decode("utf-8") if d.get("text") else ""
+            raw_keywords = cipher().decrypt(d["keywords"]).decode("utf-8") if d.get("keywords") else "[]"
+            d["keywords"] = json.loads(raw_keywords)
+            raw_analysis = cipher().decrypt(d["analysis"]).decode("utf-8") if d.get("analysis") else "{}"
+            d["analysis"] = json.loads(raw_analysis)
+        except Exception:
+            logging.exception("Cannot decrypt selected family document")
+            continue
+        out.append(d)
+    by_id = {int(row["id"]): row for row in out if row.get("id") is not None}
+    return [by_id[doc_id] for doc_id in ids if doc_id in by_id]
+
 
 def context(fid,p,query,limit=8):
     rows=search(fid,p,query,limit)

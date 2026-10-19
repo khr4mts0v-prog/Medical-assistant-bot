@@ -52,6 +52,18 @@ class DocumentMetadataEditTests(unittest.TestCase):
         self.assertEqual(doc["remote"],"/tmp/original.jpg")
         self.assertEqual(doc["ocr_remote"],"/tmp/ocr.txt")
 
+    def test_manual_ocr_edit_is_encrypted_and_used_for_search(self):
+        corrected = "Заключение УЗИ: умеренное расширение лоханки"
+        self.assertTrue(self.db.update_doc_text(self.fid, self.doc_id, corrected))
+        doc = self.db.get_doc(self.fid, self.doc_id)
+        self.assertEqual(doc["text"], corrected)
+        self.assertEqual(doc["remote"], "/tmp/original.jpg")
+        self.assertEqual(doc["ocr_remote"], "/tmp/ocr.txt")
+        self.assertTrue(self.db.search(self.fid, "Тестовый пациент", "расширение"))
+        with self.db.connect() as connection:
+            raw = connection.execute("SELECT text FROM docs WHERE family_id=? AND id=?", (self.fid, self.doc_id)).fetchone()["text"]
+        self.assertNotIn(corrected.encode("utf-8"), raw)
+
     def test_update_is_scoped_to_family_and_document(self):
         self.assertFalse(self.db.update_doc_metadata(self.fid+999,self.doc_id,"заключение УЗИ","17-03-2025",{}))
         self.assertFalse(self.db.update_doc_metadata(self.fid,self.doc_id+999,"заключение УЗИ","17-03-2025",{}))

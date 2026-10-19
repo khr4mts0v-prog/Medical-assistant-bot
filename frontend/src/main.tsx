@@ -9,6 +9,20 @@ import './style.css';
 type Screen = { url: string; html: string; title: string };
 const HOME = '/';
 
+// Last-resort presentation guard: never render a serialized structured answer as chat prose.
+function readableAnswer(value: unknown): string {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (parsed && typeof parsed === 'object' && typeof parsed.answer === 'string' && parsed.answer.trim()) {
+      return parsed.answer.trim();
+    }
+  } catch { /* ordinary prose */ }
+  return raw;
+}
+
 function extractContent(documentText: string): string {
   const parsed = new DOMParser().parseFromString(documentText, 'text/html');
   const main = parsed.querySelector('.app-content') || parsed.querySelector('main') || parsed.body;
@@ -87,6 +101,9 @@ function App() {
   const [modalError, setModalError] = useState('');
   const [modalBusy, setModalBusy] = useState(false);
   const [smartSearchOpen, setSmartSearchOpen] = useState(false);
+  const [patientAssistantScope, setPatientAssistantScope] = useState<{familyId:number; patient:string} | null>(null);
+  const [documentSelectionActive, setDocumentSelectionActive] = useState(false);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<number[]>([]);
   const [smartQuery, setSmartQuery] = useState('');
   const [smartConsent, setSmartConsent] = useState(false);
   const [aiConsentGranted, setAiConsentGranted] = useState(false);
@@ -203,7 +220,7 @@ function App() {
     const queue = root.querySelector<HTMLElement>('#upload-queue');
     const choose = root.querySelector<HTMLButtonElement>('#choose-files');
     const openPicker = (event: MouseEvent) => {
-      if ((event.target as HTMLElement).closest('button,input,a,select')) return;
+      if ((event.target as HTMLElement).closest('button,input,a,select,label')) return;
       input?.click();
     };
     const chooseFiles = () => input?.click();
@@ -250,6 +267,43 @@ function App() {
     patientFileInput?.addEventListener('change', submitPatientUploadOnSelect);
     const onClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
+      const patientAssistant = target.closest<HTMLAnchorElement>('[data-patient-assistant]');
+      if (patientAssistant) {
+        event.preventDefault();
+        const familyId = Number(patientAssistant.dataset.familyId || '');
+        const patient = String(patientAssistant.dataset.patient || '').trim();
+        if (!Number.isInteger(familyId) || familyId <= 0 || !patient) return;
+        setPatientAssistantScope({familyId, patient});
+        setSmartConversation([]); setSmartQuery(''); setSmartResult(null); setSmartError(''); setSmartConsent(false);
+        setSmartSearchOpen(true);
+        return;
+      }
+      const selectionToggle = target.closest<HTMLButtonElement>('[data-toggle-document-selection]');
+      if (selectionToggle) {
+        event.preventDefault();
+        const tree = selectionToggle.closest<HTMLElement>('[data-patient-document-tree]');
+        if (!tree) return;
+        const enabled = !tree.classList.contains('document-selection-active');
+        tree.classList.toggle('document-selection-active', enabled);
+        selectionToggle.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        selectionToggle.textContent = enabled ? 'Отменить выбор' : 'Выбрать документы';
+        const note = tree.querySelector<HTMLElement>('[data-selection-note]');
+        if (note) note.hidden = !enabled;
+        if (!enabled) {
+          tree.querySelectorAll<HTMLInputElement>('[data-document-id]').forEach(input => { input.checked = false; });
+          setSelectedDocumentIds([]);
+        }
+        setDocumentSelectionActive(enabled);
+        return;
+      }
+      const clearSelection = target.closest<HTMLButtonElement>('[data-clear-document-selection]');
+      if (clearSelection) {
+        event.preventDefault();
+        const tree = clearSelection.closest<HTMLElement>('[data-patient-document-tree]');
+        tree?.querySelectorAll<HTMLInputElement>('[data-document-id]').forEach(input => { input.checked = false; });
+        setSelectedDocumentIds([]);
+        return;
+      }
       const anchor = target.closest('a') as HTMLAnchorElement | null;
       if (!anchor || anchor.target === '_blank' || anchor.hasAttribute('download')) return;
       const href = anchor.getAttribute('href');
@@ -276,6 +330,9 @@ function App() {
         if (action.pathname === '/search' && form.classList.contains('home-search')) {
           const data = new FormData(form);
           const query = String(data.get('q') || '').trim();
+          setPatientAssistantScope(null);
+          setDocumentSelectionActive(false);
+          setSelectedDocumentIds([]);
           setSmartConversation([]);
           setSmartQuery(query);
           setSmartSearchOpen(true);
@@ -319,15 +376,59 @@ function App() {
       } catch (e) { setError(e instanceof Error ? e.message : 'Ошибка отправки формы'); }
       finally { setLoading(false); }
     };
+    const onDocumentSelectionChange = (event: Event) => {
+      const input = event.target as HTMLInputElement;
+      if (!input.matches('[data-document-id]')) return;
+      setSelectedDocumentIds(previous => {
+        const id = Number(input.dataset.documentId || '');
+        if (!Number.isInteger(id) || id <= 0) return previous;
+        return input.checked ? Array.from(new Set([...previous, id])) : previous.filter(value => value !== id);
+      });
+    };
     root.addEventListener('click', onClick);
+    root.addEventListener('change', onDocumentSelectionChange);
     root.addEventListener('submit', onSubmit);
-    return () => { zone?.removeEventListener('click', openPicker); choose?.removeEventListener('click', chooseFiles); input?.removeEventListener('change', changeFiles); root.removeEventListener('click', openPatientUpload); patientFileInput?.removeEventListener('change', submitPatientUploadOnSelect); root.removeEventListener('click', onClick); root.removeEventListener('submit', onSubmit); };
+    return () => { zone?.removeEventListener('click', openPicker); choose?.removeEventListener('click', chooseFiles); input?.removeEventListener('change', changeFiles); root.removeEventListener('click', openPatientUpload); patientFileInput?.removeEventListener('change', submitPatientUploadOnSelect); root.removeEventListener('click', onClick); root.removeEventListener('change', onDocumentSelectionChange); root.removeEventListener('submit', onSubmit); };
   }, [screen, navigate]);
 
   const isHome = path === '/' || path === '/app' || path.startsWith('/?');
+  useEffect(() => {
+    setDocumentSelectionActive(false);
+    setSelectedDocumentIds([]);
+    setPatientAssistantScope(null);
+    setSmartSearchOpen(false);
+  }, [path]);
+
   const back = () => {
     if (historyRef.current.length) { const previous = historyRef.current.pop()!; window.history.back(); navigate(previous, false); }
     else navigate(HOME);
+  };
+
+  const handleMemoryProposal = async (proposal: any, action: 'accept' | 'reject', turnIndex: number) => {
+    setSmartError('');
+    try {
+      const response = await fetch('/api/patient-memory/proposal-action', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          proposal_id: proposal.id,
+          family_id: proposal.family_id,
+          patient: proposal.patient,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || 'Не удалось обновить память пациента.');
+      setSmartConversation((previous: any[]) => previous.map((turn: any, index: number) =>
+        index === turnIndex
+          ? { ...turn, result: { ...turn.result, memory_proposals: (turn.result?.memory_proposals || []).filter((item: any) => item.id !== proposal.id) } }
+          : turn
+      ));
+      setToast(action === 'accept' ? 'Запись добавлена в память пациента' : 'Предложение отклонено');
+    } catch (e) {
+      setSmartError(e instanceof Error ? e.message : 'Не удалось изменить память пациента');
+    }
   };
 
   return <div className="app-frame">
@@ -348,13 +449,14 @@ function App() {
     {smartSearchOpen && <div className="modal-scrim smart-search-scrim" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !smartBusy) setSmartSearchOpen(false); }}>
       <section className="app-modal smart-search-modal smart-chat-modal" role="dialog" aria-modal="true" aria-label="ИИ-чат по медицинскому архиву">
         <header className="app-modal-header">
-          <div><span className="modal-eyebrow">СЕМЕЙНЫЙ АРХИВ</span><h2>ИИ-ассистент</h2><p className="smart-search-subtitle">Задавай вопросы обычным языком. Сначала ответ, ниже — документы, на которых он основан.</p></div>
+          <div><span className="modal-eyebrow">{patientAssistantScope ? 'КАРТОЧКА ПАЦИЕНТА' : 'СЕМЕЙНЫЙ АРХИВ'}</span><h2>{patientAssistantScope ? 'ИИ по пациенту: ' + patientAssistantScope.patient : 'ИИ-ассистент'}</h2><p className="smart-search-subtitle">{patientAssistantScope ? (documentSelectionActive ? 'Режим выбора: анализирую только отмеченные документы и память этого пациента.' : 'Поиск и анализ ограничены этим пациентом; по умолчанию ИИ сам подберёт релевантные документы и учтёт его память.') : 'Задавай вопросы обычным языком. Сначала ответ, ниже — документы, на которых он основан.'}</p></div>
           <div className="smart-chat-head-actions">
             <button type="button" className="icon-button" aria-label="Новый диалог" title="Новый диалог" disabled={smartBusy} onClick={() => {setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);}}><Plus size={19}/></button>
             <button type="button" className="icon-button" aria-label="Закрыть чат" onClick={() => setSmartSearchOpen(false)}><X size={20}/></button>
           </div>
         </header>
         <div className="smart-search-body smart-chat-body">
+          {patientAssistantScope && documentSelectionActive && <div className="smart-selected-sources-note"><strong>Выбрано документов: {selectedDocumentIds.length}</strong><span>Будут использованы только эти файлы и память пациента. Чтобы изменить набор, закрой чат и отметь нужные файлы в дереве.</span></div>}
           {smartConversation.length === 0 && !smartResult?.needs_consent && <section className="smart-chat-welcome">
             <h3>Что разберём?</h3><p>Я найду подходящие документы, подготовлю сводку и укажу, если важных источников не хватает.</p>
             <div className="smart-chat-suggestions">
@@ -366,9 +468,9 @@ function App() {
           <div className="smart-chat-history">
             {smartConversation.map((turn:any, index:number) => <article className="smart-chat-turn" key={index}>
               <div className="smart-user-message"><span>Вы</span><div>{turn.question}</div></div>
-              {turn.result?.answer && <article className="smart-answer"><h3><BrainCircuit size={17}/> Ответ ассистента</h3><pre>{turn.result.answer}</pre></article>}
+              {turn.result?.answer && <article className="smart-answer"><h3><BrainCircuit size={17}/> Ответ ассистента</h3><pre>{readableAnswer(turn.result.answer)}</pre></article>}
               {turn.result?.data_completeness && <div className={"smart-completeness completeness-" + turn.result.data_completeness}>
-                <span>Полнота данных</span><strong>{turn.result.data_completeness === 'sufficient' ? 'Достаточно для краткой сводки' : turn.result.data_completeness === 'insufficient' ? 'Данных недостаточно' : turn.result.data_completeness === 'partial' ? 'Частичная картина' : 'Не удалось оценить'}</strong>
+                <span>{turn.result.data_completeness === 'general' || turn.result.mode === 'general_medical' ? 'Тип ответа' : 'Полнота данных'}</span><strong>{turn.result.data_completeness === 'general' || turn.result.mode === 'general_medical' ? 'Общие медицинские сведения' : turn.result.data_completeness === 'sufficient' ? 'Достаточно для краткой сводки' : turn.result.data_completeness === 'insufficient' ? 'Данных недостаточно' : turn.result.data_completeness === 'partial' ? 'Частичная картина' : 'Не удалось оценить'}</strong>
               </div>}
               {turn.result?.missing_documents?.length > 0 && <section className="smart-gaps">
                 <h3><FilePlus2 size={17}/> Что может не хватать</h3>
@@ -383,7 +485,20 @@ function App() {
                 </div>)}
               </section>}
               {turn.result?.limitations?.length > 0 && <section className="smart-limitations"><strong>Ограничения вывода</strong><ul>{turn.result.limitations.map((item:string, i:number)=><li key={i}>{item}</li>)}</ul></section>}
-              {turn.result?.documents && <section className="smart-documents"><h3>{turn.result.mode === 'analysis' ? 'Документы-источники' : 'Найденные документы'} <span>{turn.result.documents.length}</span></h3>
+              {turn.result?.memory_proposals?.length > 0 && <section className="smart-memory-proposals">
+                <h3><BrainCircuit size={17}/> Предлагаю сохранить в память пациента</h3>
+                <p>Эти записи пока не сохранены. Проверь содержание и подтверди только то, что действительно нужно помнить.</p>
+                {turn.result.memory_proposals.map((proposal:any) => <article className="smart-memory-proposal" key={proposal.id}>
+                  <strong>{proposal.text}</strong>
+                  {proposal.reason && <p>{proposal.reason}</p>}
+                  <small>{proposal.source?.document_id ? ('Источник: ' + (proposal.source.name || 'документ') + (proposal.source.date ? ' · ' + proposal.source.date : '')) : 'Источник: сообщение пользователя'}</small>
+                  <div className="smart-memory-actions">
+                    <button type="button" onClick={() => handleMemoryProposal(proposal, 'accept', index)} disabled={smartBusy}>Добавить в память</button>
+                    <button type="button" onClick={() => handleMemoryProposal(proposal, 'reject', index)} disabled={smartBusy}>Не сохранять</button>
+                  </div>
+                </article>)}
+              </section>}
+              {turn.result?.documents && turn.result.mode !== 'general_medical' && <section className="smart-documents"><h3>{turn.result.mode === 'analysis' ? 'Документы-источники' : 'Найденные документы'} <span>{turn.result.documents.length}</span></h3>
                 {turn.result.documents.length === 0 ? <p className="muted">Подходящих документов не найдено.</p> : turn.result.documents.map((doc:any) => <a className="smart-document" href={doc.url} key={doc.id} onClick={event => {event.preventDefault();setSmartSearchOpen(false);navigate(doc.url);}}>
                   <span className="smart-document-date">{doc.date || 'Дата не указана'}</span><strong>{doc.name}</strong><span>{doc.patient} · {doc.kind}</span><span className="smart-document-open">Открыть документ <ChevronRight size={16}/></span>
                 </a>)}
@@ -399,9 +514,17 @@ function App() {
             if (!submittedQuestion) return;
             setSmartBusy(true);setSmartError('');
             try {
-              const familyId = new URLSearchParams(location.search).get('family_id');
-              const history = smartConversation.map((turn:any) => String(turn.question || '')).slice(-5);
-              const response = await fetch('/api/intelligent-search', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:submittedQuestion,history,family_id:familyId ? Number(familyId) : undefined,consent:smartConsent})});
+              const familyId = patientAssistantScope?.familyId || Number(new URLSearchParams(location.search).get('family_id') || 0) || undefined;
+              const selectionMode = Boolean(patientAssistantScope && documentSelectionActive);
+              if (selectionMode && selectedDocumentIds.length === 0) throw new Error('Отметьте документы в дереве пациента или отключите режим выбора.');
+              if (selectionMode && selectedDocumentIds.length > 40) throw new Error('Выбрано слишком много документов. Максимум — 40 за один запрос.');
+              const conversation = (selectionMode ? [] : smartConversation.slice(-5)).map((turn:any) => ({
+                question: String(turn.question || ''),
+                answer: String(turn.result?.answer || '').slice(0, 900),
+                mode: String(turn.result?.mode || ''),
+              }));
+              const history = conversation.map((turn:any) => turn.question);
+              const response = await fetch('/api/intelligent-search', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:submittedQuestion,history,conversation,family_id:familyId,patient_scope:patientAssistantScope?.patient,document_selection_mode:selectionMode,selected_document_ids:selectionMode ? selectedDocumentIds : [],consent:smartConsent})});
               const result = await response.json();
               if (!response.ok) throw new Error(result.detail || result.error || 'Не удалось выполнить запрос.');
               if (result.needs_consent) {
