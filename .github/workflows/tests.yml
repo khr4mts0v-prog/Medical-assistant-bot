@@ -45,3 +45,24 @@ jobs:
           cp .env.example .env
           docker compose config --quiet
           rm -f .env
+      - name: Start isolated web app against an empty temporary database
+        run: |
+          docker run -d --name medical-archive-web-smoke \
+            --entrypoint uvicorn \
+            -p 127.0.0.1:8000:8000 \
+            -e DB_PATH=/tmp/medical-archive-smoke.sqlite3 \
+            -e WEB_SESSION_SECRET=ci-only-not-a-real-secret-value-123456789 \
+            -e WEB_USERNAME=smoke-test \
+            -e WEB_PASSWORD=ci-only-password \
+            medical-assistant:clean-clone-test webapp:app --host 0.0.0.0 --port 8000
+          cleanup() { docker logs medical-archive-web-smoke || true; docker rm -f medical-archive-web-smoke || true; }
+          trap cleanup EXIT
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8000/login >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --silent --show-error --fail http://127.0.0.1:8000/login >/dev/null
+          curl --silent --show-error --fail http://127.0.0.1:8000/manifest.webmanifest >/dev/null
+          curl --silent --show-error --fail http://127.0.0.1:8000/app-icon.svg >/dev/null
+          curl --silent --show-error --fail http://127.0.0.1:8000/apple-touch-icon.png >/dev/null
+          curl --silent --show-error --fail http://127.0.0.1:8000/ | grep -q 'id="root"'
