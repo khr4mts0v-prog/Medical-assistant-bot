@@ -106,6 +106,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [patientsExpanded, setPatientsExpanded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modal, setModal] = useState<Screen | null>(null);
   const [modalError, setModalError] = useState('');
@@ -402,6 +403,11 @@ function App() {
   }, [screen, navigate]);
 
   const isHome = path === '/' || path === '/app' || path.startsWith('/?');
+  const patientMenuItems = React.useMemo(() => {
+    if (!screen?.html) return [];
+    const parsed = new DOMParser().parseFromString(screen.html, 'text/html');
+    return Array.from(parsed.querySelectorAll<HTMLAnchorElement>('.patient-card[href]')).map(a => ({ href: a.getAttribute('href') || '/', label: (a.querySelector('strong')?.textContent || a.textContent || '').trim().replace(/\s+/g, ' ') })).filter(item => item.label && item.href.startsWith('/'));
+  }, [screen]);
   const hasPendingInbox = !isHome || Boolean(screen?.html && /href=["']\/families\/\d+\/inbox/.test(screen.html));
   useEffect(() => {
     setDocumentSelectionActive(false);
@@ -443,19 +449,6 @@ function App() {
   };
 
   return <div className="app-frame">
-    <button
-      type="button"
-      aria-label="Выйти из медицинского архива"
-      title="Выйти"
-      onClick={async () => {
-        try {
-          await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', cache: 'no-store' });
-        } finally {
-          window.location.assign('/login');
-        }
-      }}
-      style={{ position: 'fixed', top: 10, right: 12, zIndex: 60, padding: '7px 11px', minHeight: 36, borderRadius: 10, border: '1px solid #dce7f8', background: '#fff', color: '#526681', fontSize: 12, fontWeight: 650 }}
-    >Выйти</button>
     {toast && <div className="app-toast" role="status" aria-live="polite"><span className="app-toast-check">✓</span><span>{toast}</span></div>}
     {smartSearchOpen && <div className="modal-scrim smart-search-scrim" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !smartBusy) setSmartSearchOpen(false); }}>
       <section className="app-modal smart-search-modal smart-chat-modal" role="dialog" aria-modal="true" aria-label="ИИ-чат по медицинскому архиву">
@@ -597,6 +590,8 @@ function App() {
     <aside className={'sidebar ' + (menuOpen ? 'sidebar-open' : '')}>
       <div className="brand"><span className="brand-icon"><HeartPulse size={22}/></span><span>Семейный медицинский архив</span><button className="icon-button sidebar-close" onClick={() => setMenuOpen(false)} aria-label="Закрыть"><X size={20}/></button></div>
       <button className={'nav-item ' + (isHome ? 'active' : '')} onClick={() => navigate(HOME)}><Home size={19}/>Главная</button>
+      <button className={'nav-item ' + (patientsExpanded ? 'active' : '')} aria-expanded={patientsExpanded} onClick={() => { if (!patientMenuItems.length) { void navigate(HOME); setPatientsExpanded(true); } else setPatientsExpanded(value => !value); }}><Users size={19}/>Пациенты <ChevronRight className={patientsExpanded ? 'submenu-chevron expanded' : 'submenu-chevron'} size={16}/></button>
+      {patientsExpanded && <div className="patient-submenu">{patientMenuItems.length ? patientMenuItems.map((patient, index) => <button className="nav-subitem" key={patient.href + index} onClick={() => navigate(patient.href)}>{patient.label}</button>) : <span className="nav-subitem-empty">Открываем список пациентов…</span>}<button className="nav-subitem nav-subitem-all" onClick={() => navigate(HOME)}>Все пациенты</button></div>}
       {hasPendingInbox && <button className="nav-item" onClick={() => { const link = document.querySelector<HTMLAnchorElement>('.app-content a[href*="/inbox"]'); navigate(link?.getAttribute('href') || '/search'); }}><ClipboardCheck size={19}/>Требуют проверки</button>}
       <button className="nav-item" onClick={() => navigate('/search')}><Search size={19}/>Поиск</button>
       <button className="nav-item" onClick={() => navigate('/assistant')}><BrainCircuit size={19}/>Ассистент</button>
@@ -607,6 +602,7 @@ function App() {
     <main className="main-area">
       <header className="topbar">
         <button className="icon-button menu-button" onClick={() => setMenuOpen(true)} aria-label="Открыть меню"><Menu size={23}/></button>
+        <button className={'home-button ' + (isHome ? 'home-button-active' : '')} onClick={() => navigate(HOME)} aria-label="На главную" title="Домой"><Home size={18}/>Домой</button>
         {!isHome && <button className="back-button" onClick={back}><ArrowLeft size={18}/> Назад</button>}
         <div className="topbar-title">Семейный медицинский архив</div>
       </header>
