@@ -847,7 +847,8 @@ def view_document_original(fid: int, doc_id: int, uid: int = Depends(current_use
         resolved = raw.resolve(strict=True)
         if resolved.parent != expected or root not in resolved.parents or not resolved.is_file():
             raise HTTPException(404, "Оригинал PDF не найден")
-    except (OSError, ValueError):        raise HTTPException(404, "Оригинал PDF не найден")
+    except (OSError, ValueError):
+        raise HTTPException(404, "Оригинал PDF не найден")
     return FileResponse(
         resolved,
         media_type="application/pdf",

@@ -847,7 +847,8 @@ def _summary_document_class(row):
         ("endocrinology", r"эндокринолог|эндокринологическ"),
         ("other", r"консультаци|прием врач|приём врач|заключение врач|осмотр врач"),
     )
-    if any(re.search(pattern, identity, re.I) for _, pattern in specialties):        specialty = next((label for label, pattern in specialties if re.search(pattern, identity, re.I)), "other")
+    if any(re.search(pattern, identity, re.I) for _, pattern in specialties):
+        specialty = next((label for label, pattern in specialties if re.search(pattern, identity, re.I)), "other")
         return "doctor", "doctor:" + specialty, 1
 
     # Fall back to OCR only when the indexed type/name did not establish a better class.
@@ -1696,7 +1697,8 @@ def install_assistant_routes(app, current_user, family_guard):
                     + html.escape(str(item["source"]["name"])) + '</a>, но подходящий документ не найден. '
                     + 'Проверьте архив по названию или загрузите документ, если он у вас есть.</li>'
                     for item in references["missing_required"]
-                )                missing_html = '<div class="card"><h2>Для полного анализа не хватает документов</h2><p>В исходных документах есть явные ссылки на следующие материалы:</p><ul>' + missing_items + '</ul></div>'
+                )
+                missing_html = '<div class="card"><h2>Для полного анализа не хватает документов</h2><p>В исходных документах есть явные ссылки на следующие материалы:</p><ul>' + missing_items + '</ul></div>'
             answer_html = '<div class="card assistant-answer"><h2>Ответ</h2><pre>' + html.escape(answer) + '</pre></div>'
             return _page("Ответ ассистента", plan_html + missing_html + answer_html + '<div class="card"><h2>Источники</h2>' + sources + '</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Задать следующий вопрос</a></p>')
         except HTTPException:
