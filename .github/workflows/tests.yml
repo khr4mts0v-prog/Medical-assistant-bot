@@ -33,3 +33,15 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+
+  clean-clone-container-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build application image from clean checkout
+        run: docker build --pull -t medical-assistant:clean-clone-test .
+      - name: Validate Compose configuration with placeholder environment
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+          rm -f .env
