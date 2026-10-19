@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  ArrowLeft, ChevronRight, ClipboardCheck, FilePlus2, Home, Menu, Search, Plus,
+  ChevronRight, ClipboardCheck, FilePlus2, Home, Menu, Search, Plus,
   Settings, Users, X, HeartPulse, Cloud, ShieldCheck, PanelLeftClose, BrainCircuit
 } from 'lucide-react';
 import './style.css';
@@ -415,11 +415,6 @@ function App() {
     setPatientAssistantScope(null);
     setSmartSearchOpen(false);
   }, [path]);
-
-  const back = () => {
-    if (historyRef.current.length) { const previous = historyRef.current.pop()!; window.history.back(); navigate(previous, false); }
-    else navigate(HOME);
-  };
 
   const handleMemoryProposal = async (proposal: any, action: 'accept' | 'reject', turnIndex: number) => {
     setSmartError('');
