@@ -479,7 +479,7 @@ function App() {
           <div className="smart-chat-history">
             {smartConversation.map((turn:any, index:number) => <article className="smart-chat-turn" key={index}>
               <div className="smart-user-message"><span>Вы</span><div>{turn.question}</div></div>
-              {turn.result?.answer && <article className="smart-answer"><h3><BrainCircuit size={17}/> Ответ ассистента</h3><pre>{readableAnswer(turn.result.answer)}</pre></article>}
+              {turn.result?.answer && <article className="smart-answer"><h3><BrainCircuit size={17}/> Ответ ассистента {turn.result.generation_status === 'partial' && <span className="smart-generation-warning" role="status">Ответ может быть неполным</span>}</h3><pre>{readableAnswer(turn.result.answer)}</pre></article>}
               {turn.result?.data_completeness && turn.result.mode !== 'general_medical' && <details className="smart-extra-details">
                 <summary>Полнота исходных данных</summary>
                 <div className={"smart-completeness completeness-" + turn.result.data_completeness}>
