@@ -100,8 +100,53 @@ async function fetchScreen(url: string): Promise<Screen> {
   return { url: response.url, html: extractContent(text), title: parsed.title || 'Медицинский архив' };
 }
 
+
+type PatientDocument = { id:number; title:string; kind:string; date:string; metadata:string; finding:string; review_required:boolean; url:string };
+type PatientPayload = { patient:string; family_id:number; query:string; view:string; document_count:number; documents:PatientDocument[]; capabilities:{upload:boolean;patient_memory:boolean;document_selection:boolean;assistant:boolean} };
+
+function PatientReactView({familyId, patient, onAsk}: {familyId:number; patient:string; onAsk:()=>void}) {
+  const [query,setQuery] = useState('');
+  const [view,setView] = useState<'timeline'|'tree'>('timeline');
+  const [payload,setPayload] = useState<PatientPayload|null>(null);
+  const [busy,setBusy] = useState(true);
+  const [error,setError] = useState('');
+  const [selectionMode,setSelectionMode] = useState(false);
+  const [selected,setSelected] = useState<number[]>([]);
+  useEffect(() => {
+    let active = true;
+    setBusy(true); setError('');
+    const params = new URLSearchParams({q:query,view});
+    fetch('/api/families/'+familyId+'/patients/'+encodeURIComponent(patient)+'?'+params.toString(), {credentials:'same-origin',headers:{Accept:'application/json'}})
+      .then(async response => { const data = await response.json().catch(()=>({})); if (!response.ok) throw new Error(data.detail || 'Не удалось загрузить документы пациента'); return data as PatientPayload; })
+      .then(data => { if(active) setPayload(data); })
+      .catch(e => { if(active) setError(e instanceof Error ? e.message : 'Ошибка загрузки'); })
+      .finally(() => { if(active) setBusy(false); });
+    return () => { active = false; };
+  },[familyId,patient,query,view]);
+  useEffect(()=>{setSelected([]);setSelectionMode(false);},[familyId,patient]);
+  const base='/families/'+familyId+'/patients/'+encodeURIComponent(patient);
+  const grouped = payload?.documents.reduce<Record<string,PatientDocument[]>>((acc,doc)=>{(acc[doc.kind || 'Не определено'] ||= []).push(doc);return acc;},{}) || {};
+  return <div className="patient-react-screen">
+    <div className="patient-react-header"><div><div className="eyebrow">КАРТОЧКА ПАЦИЕНТА</div><h1>{patient}</h1><p className="lead">{payload ? payload.document_count+' документов в архиве' : 'Документы и медицинская история'}</p></div>
+      <div className="patient-react-actions"><button type="button" className="patient-action-primary" onClick={onAsk}><BrainCircuit size={17}/> Спросить ИИ</button><a className="button-link" href={'/patient-memory?family_id='+familyId+'&patient='+encodeURIComponent(patient)}>Память пациента</a><a className="button-link" href={base+'/edit'}>Редактировать</a></div>
+    </div>
+    <form className="card patient-react-search" onSubmit={event=>event.preventDefault()}><label htmlFor="patient-react-q">Поиск по документам пациента</label><div className="row"><input id="patient-react-q" type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Например: анализы, УЗИ, выписка"/>{query && <button type="button" onClick={()=>setQuery('')}>Сбросить</button>}</div></form>
+    {payload?.capabilities.upload && <section className="card patient-react-upload"><h2>Добавить документы</h2><form method="post" encType="multipart/form-data" action={base+'/upload'}><input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" required/><label><input type="checkbox" name="ai_consent" value="true"/> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label><button type="submit">Загрузить и распознать</button></form></section>}
+    <div className="patient-react-tabs" role="tablist" aria-label="Вид документов"><button type="button" role="tab" aria-selected={view==='timeline'} className={view==='timeline'?'active':''} onClick={()=>setView('timeline')}>Хронология</button><button type="button" role="tab" aria-selected={view==='tree'} className={view==='tree'?'active':''} onClick={()=>setView('tree')}>Дерево документов</button></div>
+    {view==='tree' && <div className="patient-react-selection"><div><strong>Выбор документов для ИИ</strong><p>По умолчанию ассистент сам ищет подходящие документы. Включи выбор, чтобы ограничить запрос отмеченными файлами.</p></div><button type="button" onClick={()=>{setSelectionMode(v=>!v);setSelected([]);}}>{selectionMode?'Отменить выбор':'Выбрать документы'}</button>{selectionMode && <span>{selected.length} выбрано</span>}</div>}
+    {busy && <div className="skeleton"><div/><div/><div/></div>}
+    {error && <div className="error-banner" role="alert">{error}<button type="button" onClick={()=>window.location.reload()}>Повторить</button></div>}
+    {!busy && !error && payload?.documents.length===0 && <div className="card"><p>Документы не найдены.</p><p className="muted">Попробуй изменить запрос или загрузить документ.</p></div>}
+    {!busy && !error && view==='timeline' && payload && <div className="patient-react-documents">{payload.documents.map(doc=><article className="document-row document-card" key={doc.id}><div className="document-main"><strong>{doc.title}</strong><div className="muted document-meta">{doc.kind} · {doc.date || 'Дата не указана'}</div>{doc.metadata && <div className="document-meta">{doc.metadata}</div>}<p className="document-finding">{doc.finding || 'Открой документ, чтобы посмотреть заключение.'}</p>{doc.review_required && <span className="status-pill">Требуется проверка</span>}</div><a className="button-link" href={doc.url}>Открыть</a></article>)}</div>}
+    {!busy && !error && view==='tree' && payload && <div className="patient-react-tree">{Object.entries(grouped).sort(([a],[b])=>a.localeCompare(b,'ru')).map(([kind,docs])=><details className="tree-group" open key={kind}><summary>{kind} <span className="muted">({docs.length})</span></summary>{docs.map(doc=><div className="document-row" key={doc.id}>{selectionMode && <label className="document-select-label"><input type="checkbox" checked={selected.includes(doc.id)} onChange={event=>setSelected(current=>event.target.checked?[...current,doc.id]:current.filter(id=>id!==doc.id))}/></label>}<div className="document-main"><strong>{doc.title}</strong><span className="muted">{doc.date || 'Дата не указана'}</span></div><a className="button-link" href={doc.url}>Открыть</a></div>)}</details>)}</div>}
+    {view==='tree' && selectionMode && selected.length>0 && <div className="patient-react-selection"><span>Отмечено документов: {selected.length}</span><button type="button" onClick={()=>{window.dispatchEvent(new CustomEvent('medical-archive-selected-documents',{detail:{familyId,patient,ids:selected}}));onAsk();}}>Спросить ИИ по выбранным</button></div>}
+  </div>;
+}
+
 function App() {
   const [path, setPath] = useState(location.pathname + location.search);
+  const patientRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)(?:\?[^#]*)?$/);
+  const patientRouteData = patientRoute ? {familyId:Number(patientRoute[1]), patient:decodeURIComponent(patientRoute[2])} : null;
   const [screen, setScreen] = useState<Screen | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -629,7 +674,7 @@ function App() {
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
+        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : {patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={() => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}}
         {loading && screen && <div className="loading-line"/>}
       </section>}
     </main>
