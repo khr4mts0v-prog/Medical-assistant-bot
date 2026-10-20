@@ -46,7 +46,7 @@ def provider_config():
     return provider, token, url, model, key_name
 
 
-def chat_completion(messages, max_tokens=1200, temperature=0.1, timeout=90, return_metadata=False):
+def chat_completion(messages, max_tokens=1200, temperature=0.1, timeout=90, return_metadata=False, trace_id=None):
     """Call an OpenAI-compatible provider; optionally return completion/usage metadata."""
     provider, token, url, model, key_name = provider_config()
     if not token:
@@ -81,7 +81,7 @@ def chat_completion(messages, max_tokens=1200, temperature=0.1, timeout=90, retu
         except (ValueError, TypeError):
             pass
         ai_trace_log.emit(
-            "provider-http-error",
+            trace_id or "provider-http-error",
             "provider.http_error",
             provider=provider,
             model=model,
@@ -207,7 +207,7 @@ def answer_archive_question(query, patient, context="", history=None, trace_id=N
         ai_trace_log.emit_full(trace_id, "general_medical.model_request", provider="configured_provider", model_input=messages)
     try:
         completion = chat_completion(
-            messages, max_tokens=1200, temperature=0.1, timeout=90, return_metadata=True
+            messages, max_tokens=1200, temperature=0.1, timeout=90, return_metadata=True, trace_id=trace_id
         )
         if isinstance(completion, dict) and isinstance(completion.get("content"), str):
             raw = completion["content"]
