@@ -531,8 +531,11 @@ def _normalize_conversation(raw, family_id, patient_scope):
     for turn in raw[-5:]:
         if not isinstance(turn, dict):
             continue
+        raw_family_id = turn.get("family_id")
+        if isinstance(raw_family_id, bool):
+            continue
         try:
-            turn_family_id = int(turn.get("family_id"))
+            turn_family_id = int(raw_family_id)
         except (TypeError, ValueError):
             continue
         if turn_family_id != int(family_id):
