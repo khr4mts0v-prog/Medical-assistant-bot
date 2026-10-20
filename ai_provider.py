@@ -57,7 +57,33 @@ def chat_completion(messages, max_tokens=1200, temperature=0.1, timeout=90, retu
         json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
         timeout=timeout,
     )
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        # Provider error bodies are useful for diagnosing auth/quota/request failures,
+        # but must be bounded and must never include our outbound authorization header.
+        status = int(response.status_code)
+        body = ""
+        try:
+            body = response.text or ""
+        except Exception:
+            body = ""
+        body = re.sub(r"(?i)(bearer\\s+)[^\\s\"']+", r"\\1[REDACTED]", body)
+        body = re.sub(r"(?i)(api[_ -]?key|token|authorization)(\\s*[:=]\\s*[\"']?)[^\\s,\"'}]+", r"\\1\\2[REDACTED]", body)
+        body = " ".join(body.split())[:800]
+        ai_trace_log.emit(
+            "provider-http-error",
+            "provider.http_error",
+            provider=provider,
+            model=model,
+            http_status=status,
+            response_excerpt=body,
+        )
+        # Preserve the HTTPError type for existing callers while making its message
+        # actionable without exposing the provider response body to end users.
+        raise requests.HTTPError(
+            f"AI provider HTTP {status} ({provider}/{model})", response=response
+        ) from exc
     payload = response.json()
     choice = payload["choices"][0]
     content = choice["message"]["content"]
