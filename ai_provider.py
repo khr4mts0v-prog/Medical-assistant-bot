@@ -60,24 +60,36 @@ def chat_completion(messages, max_tokens=1200, temperature=0.1, timeout=90, retu
     try:
         response.raise_for_status()
     except requests.HTTPError as exc:
-        # Provider error bodies are useful for diagnosing auth/quota/request failures,
-        # but must be bounded and must never include our outbound authorization header.
+        # Keep diagnostics useful without logging provider response text, which could
+        # echo prompt fragments or other sensitive medical information.
         status = int(response.status_code)
+        error_code = None
         body = ""
         try:
             body = response.text or ""
-        except Exception:
-            body = ""
-        body = re.sub(r"(?i)(bearer\s+)[^\s\"']+", r"\1[REDACTED]", body)
-        body = re.sub(r"(?i)(api[_ -]?key|token|authorization)(\s*[:=]\s*[\"']?)[^\s,\"'}]+", r"\1\2[REDACTED]", body)
-        body = " ".join(body.split())[:800]
+            parsed_error = json.loads(body)
+            if isinstance(parsed_error, dict):
+                details = parsed_error.get("error")
+                if isinstance(details, dict):
+                    candidate = details.get("code") or details.get("type")
+                elif isinstance(details, str):
+                    candidate = None
+                else:
+                    candidate = parsed_error.get("code") or parsed_error.get("type")
+                if isinstance(candidate, str):
+                    error_code = re.sub(r"[^a-zA-Z0-9_.-]", "", candidate)[:80] or None
+        except (ValueError, TypeError):
+            pass
         ai_trace_log.emit(
             "provider-http-error",
             "provider.http_error",
             provider=provider,
             model=model,
             http_status=status,
-            response_excerpt=body,
+            error_code=error_code,
+            response_chars=len(body),
+            content_type=(response.headers.get("Content-Type", "")[:100]
+                          if getattr(response, "headers", None) else ""),
         )
         # Preserve the HTTPError type for existing callers while making its message
         # actionable without exposing the provider response body to end users.
