@@ -733,6 +733,18 @@ function App() {
   const inboxRoute = path.match(/^\/families\/(\d+)\/inbox(?:\?[^#]*)?$/);
   const documentEditRoute = path.match(/^\/families\/(\d+)\/documents\/(\d+)\/edit(?:\?[^#]*)?$/);
   const patientRouteData = patientRoute ? {familyId:Number(patientRoute[1]), patient:decodeURIComponent(patientRoute[2])} : null;
+  const pagePath = path.split('?')[0];
+  const pageTitle = patientRouteData ? patientRouteData.patient
+    : settingsRoute ? 'Настройки архива'
+    : searchRoute ? 'Поиск документов'
+    : memoryRoute ? 'Память пациента'
+    : assistantRoute ? 'Медицинский помощник'
+    : inboxDetailRoute ? 'Проверка документа'
+    : inboxRoute ? 'Входящие документы'
+    : patientEditRoute ? 'Редактирование пациента'
+    : patientNewRoute ? 'Новый пациент'
+    : documentEditRoute ? 'Редактирование документа'
+    : 'Семейный медицинский архив';
   const [screen, setScreen] = useState<Screen | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -1302,7 +1314,7 @@ function App() {
     <main className="main-area">
       <header className="topbar">
         <button className="icon-button menu-button" onClick={() => setMenuOpen(true)} aria-label="Открыть меню"><Menu size={23}/></button>
-        <div className="topbar-title">{patientRouteData ? patientRouteData.patient : 'Семейный медицинский архив'}</div>
+        <div className="topbar-title">{pageTitle}</div>
         {!isHome ? <button className="home-button" onClick={() => navigate(HOME)} aria-label="На главную" title="Домой"><Home size={18}/></button> : <span className="home-button-placeholder" aria-hidden="true" />}
       </header>
       {settingsOpen ? <section className="settings-view">
