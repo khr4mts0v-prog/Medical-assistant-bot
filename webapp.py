@@ -1325,6 +1325,25 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), ai_c
 
 
 
+@app.get("/api/families/{fid}/inbox")
+def pending_inbox_api(fid:int,uid:int=Depends(current_user)):
+    """Safe metadata for pending documents; never expose OCR text, file bytes, or storage paths."""
+    family(fid,uid)
+    rows=db.pending_documents(fid)
+    documents=[]
+    for row in rows:
+        analysis=row.get("analysis") or {}
+        documents.append({
+            "id":int(row["id"]),
+            "title":str(analysis.get("display_title") or row.get("name") or "Документ"),
+            "created":str(row.get("created") or ""),
+            "kind":str(analysis.get("primary_type") or "не определено"),
+            "review_required":bool(analysis.get("review_required",True)),
+            "url":f"/families/{fid}/inbox/{int(row['id'])}",
+        })
+    return {"family_id":int(fid),"documents":documents,"patients":[str(p) for p in db.patients(fid)],"count":len(documents)}
+
+
 @app.get("/families/{fid}/inbox", response_class=HTMLResponse)
 def review_inbox(fid:int,uid:int=Depends(current_user)):
     family(fid,uid)
