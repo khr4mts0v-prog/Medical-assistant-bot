@@ -112,12 +112,13 @@ def update_patient_profile(
         # Prefixes are supplied only for a successful local directory move.
         if old_storage_prefix and new_storage_prefix and old_storage_prefix != new_storage_prefix:
             c.execute(
-                "UPDATE docs SET remote=CASE WHEN remote LIKE ? THEN ? || substr(remote, ?) ELSE remote END, "
-                "ocr_remote=CASE WHEN ocr_remote LIKE ? THEN ? || substr(ocr_remote, ?) ELSE ocr_remote END "
+                "UPDATE docs SET "
+                "remote=CASE WHEN substr(remote, 1, ?) = ? THEN ? || substr(remote, ?) ELSE remote END, "
+                "ocr_remote=CASE WHEN substr(ocr_remote, 1, ?) = ? THEN ? || substr(ocr_remote, ?) ELSE ocr_remote END "
                 "WHERE family_id=?",
                 (
-                    old_storage_prefix + "%", new_storage_prefix, len(old_storage_prefix) + 1,
-                    old_storage_prefix + "%", new_storage_prefix, len(old_storage_prefix) + 1,
+                    len(old_storage_prefix), old_storage_prefix, new_storage_prefix, len(old_storage_prefix) + 1,
+                    len(old_storage_prefix), old_storage_prefix, new_storage_prefix, len(old_storage_prefix) + 1,
                     int(fid),
                 ),
             )
