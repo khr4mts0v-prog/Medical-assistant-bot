@@ -553,10 +553,70 @@ function SearchReactView({familyId,onNavigate}: {familyId:number|null;onNavigate
   </div>;
 }
 
+
+type PatientMemoryPayload = {
+  family_id:number; patient:string; profile?:Record<string,any>; document_count?:number;
+  documents?:any[]; diagnoses_mentioned?:any[]; medications_mentioned?:any[];
+  lab_results?:any[]; lab_trends?:any[]; manual_facts?:any[]; pending_proposals?:any[];
+};
+function PatientMemoryReactView({familyId,patient,onNavigate}: {familyId:number;patient:string;onNavigate:(url:string)=>void}) {
+  const [payload,setPayload]=useState<PatientMemoryPayload|null>(null);
+  const [busy,setBusy]=useState(true); const [actionId,setActionId]=useState<number|null>(null);
+  const [error,setError]=useState(''); const [notice,setNotice]=useState('');
+  const load=useCallback(async()=>{
+    setBusy(true);setError('');
+    try {
+      const response=await fetch('/api/patient-memory?family_id='+familyId+'&patient='+encodeURIComponent(patient),{credentials:'same-origin',cache:'no-store'});
+      const data=await response.json();
+      if(!response.ok) throw new Error(data.detail||'Не удалось загрузить память пациента');
+      setPayload(data);
+    } catch(e){setError(e instanceof Error?e.message:'Не удалось загрузить память пациента');}
+    finally{setBusy(false);}
+  },[familyId,patient]);
+  useEffect(()=>{void load();},[load]);
+  const act=async(proposal:any,action:'accept'|'reject')=>{
+    setActionId(Number(proposal.id));setError('');setNotice('');
+    try{
+      const response=await fetch('/api/patient-memory/proposal-action',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({family_id:familyId,patient,proposal_id:proposal.id,action})});
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.detail||'Не удалось обработать предложение');
+      setPayload(previous=>previous?{...previous,pending_proposals:(previous.pending_proposals||[]).filter(item=>item.id!==proposal.id)}:previous);
+      setNotice(action==='accept'?'Запись подтверждена и добавлена в память пациента':'Предложение отклонено');
+    }catch(e){setError(e instanceof Error?e.message:'Не удалось обработать предложение');}
+    finally{setActionId(null);}
+  };
+  const sourceLink=(source:any)=>source?.document_id?'/families/'+familyId+'/documents/'+source.document_id+'/edit':null;
+  const Source=({source}: {source:any})=>source?.document_id?<a className="memory-source-link" href={sourceLink(source)!} onClick={e=>{e.preventDefault();onNavigate(sourceLink(source)!);}}>Источник: {source.name||('документ №'+source.document_id)}{source.date?' · '+source.date:''}</a>:<span className="muted">Источник: {source?.name||'не указан'}</span>;
+  const list=(items:any[],render:(item:any,index:number)=>React.ReactNode,empty:string)=>items?.length?<div className="memory-item-list">{items.map((item,index)=><article className="memory-item" key={String(item.id??item.key??item.name??index)}>{render(item,index)}</article>)}</div>:<p className="muted">{empty}</p>;
+  return <div className="memory-react-screen">
+    <div className="memory-react-header"><div><div className="eyebrow">МЕДИЦИНСКАЯ ИСТОРИЯ</div><h1>Память пациента</h1><p className="lead">{patient} · {payload?.document_count??'—'} документов учтено</p></div><div className="memory-header-actions"><button type="button" onClick={()=>onNavigate('/families/'+familyId+'/patients/'+encodeURIComponent(patient))}>К карточке пациента</button><button type="button" onClick={()=>onNavigate('/assistant?family_id='+familyId+'&patient='+encodeURIComponent(patient))}>Спросить ИИ</button><button type="button" onClick={()=>onNavigate('/patient-memory?family_id='+familyId+'&patient='+encodeURIComponent(patient))}>Обновить</button></div></div>
+    {notice&&<div className="memory-notice" role="status">{notice}</div>}
+    {error&&<div className="error-banner" role="alert">{error}<button type="button" onClick={()=>void load()}>Повторить</button></div>}
+    {busy&&<div className="skeleton"><div/><div/><div/></div>}
+    {!busy&&payload&&<>
+      <section className="card memory-section"><h2>Профиль</h2><div className="memory-profile-grid">
+        {Object.entries(payload.profile||{}).filter(([key,value])=>value!==null&&value!==undefined&&value!=='').map(([key,value])=><div key={key}><span>{({'birth_date':'Дата рождения','age_years':'Возраст','height_cm':'Рост','weight_kg':'Вес'} as Record<string,string>)[key]||key.replaceAll('_',' ')}</span><strong>{String(value)}{key==='height_cm'?' см':key==='weight_kg'?' кг':''}</strong></div>)}
+      </div><p className="muted">Память формируется по документам и подтверждённым пользовательским записям. Упоминание диагноза в документе само по себе не означает, что диагноз подтверждён.</p></section>
+      <section className="card memory-section"><h2>Предложения на подтверждение <span className="memory-count">{payload.pending_proposals?.length||0}</span></h2><p className="muted">Новые факты не попадут в подтверждённую память, пока ты явно не примешь их. Проверяй текст и источник перед подтверждением.</p>
+        {list(payload.pending_proposals||[],proposal=><><strong>{proposal.text}</strong>{proposal.reason&&<p>{proposal.reason}</p>}<Source source={proposal.source}/><div className="memory-proposal-actions"><button type="button" disabled={actionId!==null} onClick={()=>void act(proposal,'accept')}>{actionId===proposal.id?'Сохраняем…':'Подтвердить факт'}</button><button type="button" className="secondary" disabled={actionId!==null} onClick={()=>void act(proposal,'reject')}>Отклонить</button></div></>,'Нет ожидающих подтверждения предложений.') }
+      </section>
+      <section className="card memory-section"><h2>Лабораторные результаты</h2>{list(payload.lab_results||[],item=><><strong>{item.name||item.test||'Показатель'}</strong><div>{item.value??'Значение не извлечено'} {item.unit||''}</div><div className="muted">{item.date||'Дата не указана'}{item.reference_range?' · Референс: '+item.reference_range:''}</div><Source source={item.source}/></>,'Лабораторные результаты не найдены.')}</section>
+      <section className="card memory-section"><h2>Диагнозы, упомянутые в документах</h2>{list(payload.diagnoses_mentioned||[],item=><><strong>{item.text||item.name||'Упоминание'}</strong><p className="muted">{item.date||'Дата не указана'}{item.evidence_type?' · '+item.evidence_type.replaceAll('_',' '):''}</p><Source source={item.source}/></>,'Упоминаний диагнозов нет.')}</section>
+      <section className="card memory-section"><h2>Лекарства и назначения</h2>{list(payload.medications_mentioned||[],item=><><strong>{item.name||item.text||'Упоминание препарата'}</strong><p className="muted">{[item.dose,item.date,item.status].filter(Boolean).join(' · ')||'Подробности не указаны'}</p><Source source={item.source}/></>,'Упоминаний лекарств нет.')}</section>
+      <section className="card memory-section"><h2>Ручные записи</h2>{list(payload.manual_facts||[],item=><><strong>{item.text||item.value||'Запись'}</strong><p className="muted">{[item.category,item.date].filter(Boolean).join(' · ')}</p><Source source={item.source}/></>,'Ручных записей пока нет.')}</section>
+      <section className="card memory-section"><h2>Документы, вошедшие в память</h2>{list(payload.documents||[],item=><><strong>{item.name||item.title||'Документ'}</strong><p className="muted">{item.date||'Дата не указана'}{item.kind?' · '+item.kind:''}</p>{item.id&&<button type="button" className="secondary" onClick={()=>onNavigate('/families/'+familyId+'/documents/'+item.id+'/edit')}>Открыть документ</button>}</>,'Документы не найдены.')}</section>
+      <p className="memory-disclaimer">Это навигационная сводка по архиву, а не медицинское заключение. Проверяй исходные документы; при расхождениях приоритет у оригинала и врача.</p>
+    </>}
+  </div>;
+}
+
 function App() {
   const [path, setPath] = useState(location.pathname + location.search);
   const settingsRoute = path.split('?')[0] === '/settings';
   const searchRoute = path.split('?')[0] === '/search';
+  const memoryRoute = path.split('?')[0] === '/patient-memory';
+  const memoryParams = new URLSearchParams(path.split('?')[1] || '');
+  const memoryRouteData = memoryRoute ? {familyId:Number(memoryParams.get('family_id')||0),patient:memoryParams.get('patient')||''} : null;
   const assistantRoute = path.split('?')[0] === '/assistant';
   const patientRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)(?:\?[^#]*)?$/);
   const patientNewRoute = path.match(/^\/families\/(\d+)\/patients\/new(?:\?[^#]*)?$/);
@@ -1104,7 +1164,7 @@ function App() {
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')} style={assistantRoute ? {display:'none'} : undefined}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : searchRoute ? <SearchReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
+        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : searchRoute ? <SearchReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : memoryRouteData && memoryRouteData.familyId>0 && memoryRouteData.patient ? <PatientMemoryReactView familyId={memoryRouteData.familyId} patient={memoryRouteData.patient} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
         {loading && screen && <div className="loading-line"/>}
       </section>}
     </main>
