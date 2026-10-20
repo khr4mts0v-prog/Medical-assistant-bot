@@ -1277,7 +1277,7 @@ function App() {
     <main className="main-area">
       <header className="topbar">
         <button className="icon-button menu-button" onClick={() => setMenuOpen(true)} aria-label="Открыть меню"><Menu size={23}/></button>
-        {!isHome && <button className="home-button" onClick={() => navigate(HOME)} aria-label="На главную" title="Домой"><Home size={18}/>Домой</button>}
+        {!isHome && <button className="home-button" onClick={() => navigate(HOME)} aria-label="На главную" title="Домой"><Home size={18}/></button>}
         <div className="topbar-title">{patientRouteData ? patientRouteData.patient : 'Семейный медицинский архив'}</div>
       </header>
       {settingsOpen ? <section className="settings-view">
