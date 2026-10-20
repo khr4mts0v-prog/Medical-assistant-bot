@@ -521,42 +521,45 @@ def explicit_document_date(text):
     return ""
 
 @app.get("/api/home")
-def home_dashboard_api(uid:int=Depends(current_user)):
+def home_dashboard_api(family_id:int|None=None,uid:int=Depends(current_user)):
     """Structured data for the native React home screen; never expose document contents or storage paths."""
     fs=tenancy.families_for_user(uid)
     if is_demo_user(uid) and not fs:
         _ensure_demo_tenant(uid)
         fs=tenancy.families_for_user(uid)
-    upload_ui_limit_mb=min(MAX_UPLOAD_MB, DEMO_MAX_UPLOAD_MB) if is_demo_user(uid) else MAX_UPLOAD_MB
-    families=[]
-    for item in fs:
-        fid=int(item["id"])
-        patients=[]
-        for patient_name in db.patients(fid):
+    if family_id is not None and not tenancy.role_for_user(family_id,uid):
+        raise HTTPException(403,"Нет доступа к семейному архиву")
+    selected = next((item for item in fs if int(item["id"])==family_id),None) if family_id is not None else (fs[0] if fs else None)
+    families=[{"id":int(item["id"]),"name":str(item["name"]),"selected":bool(selected and int(item["id"])==int(selected["id"]))} for item in fs]
+    patients=[]
+    pending_count=0
+    disk_connected=False
+    family_name=""
+    selected_id=None
+    if selected:
+        selected_id=int(selected["id"])
+        family_name=str(selected["name"])
+        pending_count=len(db.pending_documents(selected_id))
+        disk_connected=bool(tenancy.disk_connected(selected_id))
+        for patient_name in db.patients(selected_id):
+            parts=patient_name.split()
+            short_name=parts[1] if len(parts)>=2 else (parts[0] if parts else patient_name)
             patients.append({
-                "name": patient_name,
-                "document_count": int(db.document_count(fid,patient_name)),
-                "url": f"/families/{fid}/patients/{patient_name}",
+                "name":str(patient_name),
+                "short_name":str(short_name),
+                "document_count":int(db.document_count(selected_id,patient_name)),
+                "url":f"/families/{selected_id}/patients/{patient_name}",
             })
-        families.append({
-            "id": fid,
-            "name": str(item["name"]),
-            "patients": patients,
-            "patient_count": len(patients),
-            "pending_count": len(db.pending_documents(fid)),
-            "disk_connected": bool(tenancy.disk_connected(fid)),
-            "url": f"/?family_id={fid}",
-            "inbox_url": f"/families/{fid}/inbox",
-            "new_patient_url": f"/families/{fid}/patients/new",
-            "connect_disk_url": f"/families/{fid}/connect-disk",
-        })
     return {
-        "families": families,
-        "demo_mode": bool(is_demo_user(uid)),
-        "storage_backend": str(STORAGE_BACKEND),
-        "upload_limit_mb": int(upload_ui_limit_mb),
-        "can_create_family": not is_demo_user(uid),
-        "warning": "Не загружайте реальные медицинские документы до настройки резервного копирования и полной проверки прав доступа.",
+        "families":families,
+        "selected_family_id":selected_id,
+        "family_name":family_name,
+        "patients":patients,
+        "pending_count":int(pending_count),
+        "storage_label":"локально во временном демо-хранилище" if is_demo_user(uid) else ("локально на сервере" if STORAGE_BACKEND=="local" else "Яндекс Диск"),
+        "disk_connected":disk_connected,
+        "is_demo":bool(is_demo_user(uid)),
+        "upload_limit_mb":int(min(MAX_UPLOAD_MB,DEMO_MAX_UPLOAD_MB) if is_demo_user(uid) else MAX_UPLOAD_MB),
     }
 
 
