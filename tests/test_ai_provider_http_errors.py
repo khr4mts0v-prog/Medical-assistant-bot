@@ -12,7 +12,7 @@ import ai_provider
 class ProviderHttpErrorTests(unittest.TestCase):
     def test_http_error_is_actionable_and_logs_bounded_redacted_details(self):
         response = Mock()
-        response.status_code = 429
+        response.status_code = 429\n        response.headers = {"Content-Type": "application/json"}
         response.text = '{"error":{"code":"rate_limit","message":"secret-value"}}'
         response.raise_for_status.side_effect = ai_provider.requests.HTTPError("429 Client Error")
 
