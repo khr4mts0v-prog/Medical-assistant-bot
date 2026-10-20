@@ -737,6 +737,24 @@ def new_patient_page(fid:int,uid:int=Depends(current_user)):
     return page("Новый пациент",body)
 
 
+
+@app.get("/api/families/{fid}/patients/{patient}/edit")
+def patient_editor_api(fid:int,patient:str,uid:int=Depends(current_user)):
+    """Return only the authorized patient fields needed by the React metadata editor."""
+    family(fid,uid)
+    record=next((p for p in db.patient_records(fid) if p["name"].casefold()==patient.casefold()),None)
+    if not record:
+        raise HTTPException(404,"Член семьи не найден")
+    from datetime import datetime
+    birth_date=""
+    try:
+        birth_date=datetime.strptime(record.get("birth_date") or "", "%d-%m-%Y").strftime("%Y-%m-%d")
+    except ValueError:
+        pass
+    aliases=[str(value) for value in (record.get("aliases") or []) if str(value).casefold()!=str(record.get("name") or "").casefold()]
+    return {"family_id":int(fid),"patient":str(record["name"]),"name":str(record["name"]),"birth_date":birth_date,"aliases":aliases}
+
+
 @app.get("/families/{fid}/patients/{patient}/edit",response_class=HTMLResponse)
 def edit_patient_page(fid:int,patient:str,uid:int=Depends(current_user)):
     family(fid,uid)

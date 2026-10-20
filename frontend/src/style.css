@@ -784,3 +784,17 @@ button.home-react-stat{cursor:pointer}
 .inbox-react-empty h2,.inbox-react-empty p{margin:0}
 .notice-success{padding:14px 16px;border:1px solid #b7e4cb;border-radius:13px;background:#f0fbf5;color:#1f7047;overflow-wrap:anywhere}
 @media(max-width:680px){.inbox-react-header{flex-direction:column}.inbox-react-bulk-tools{grid-template-columns:1fr;align-items:stretch}.inbox-react-document{align-items:flex-start;flex-wrap:wrap}.inbox-react-document-copy{flex-basis:calc(100% - 50px)}.inbox-react-document>.button-link{margin-left:34px}.inbox-react-document-check{padding-top:3px}}
+
+
+/* Native React patient create/edit form */
+.patient-editor-screen{display:flex;flex-direction:column;gap:18px;max-width:860px;width:100%;margin:0 auto}
+.patient-editor-header{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
+.patient-editor-header h1{margin:5px 0 8px;font-size:clamp(26px,4vw,34px);letter-spacing:-.035em}
+.patient-editor-header p{margin:0;max-width:620px;line-height:1.5}
+.patient-editor-form{display:flex;flex-direction:column;align-items:stretch;gap:9px}
+.patient-editor-form label{margin-top:8px;font-size:13px;font-weight:650;color:var(--text,#1d2939)}
+.patient-editor-form input{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line,#dbe3ee);border-radius:10px;background:var(--surface,#fff);color:inherit;font:inherit}
+.patient-editor-form p{margin:4px 0 8px;font-size:13px;line-height:1.5}
+.patient-editor-form-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px}
+.patient-editor-form-actions button{min-height:42px}
+@media(max-width:600px){.patient-editor-header{flex-direction:column}.patient-editor-header>.button-link{align-self:flex-start}.patient-editor-form-actions{flex-direction:column;align-items:stretch}.patient-editor-form-actions>*{width:100%;justify-content:center}}
