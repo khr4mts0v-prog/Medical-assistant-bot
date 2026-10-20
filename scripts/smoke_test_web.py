@@ -143,7 +143,7 @@ def main():
     require(status == 200, f"React-приложение недоступно: GET /app/ вернул HTTP {status}.")
     app_text = app_html.decode("utf-8", errors="replace")
     js_paths = re.findall(r'(?:src|href)="([^"]+\.js(?:\?[^"]*)?)"', app_text)
-    css_paths = re.findall(r'href="([^"]+\\.css(?:\?[^"]*)?)"', app_text)
+    css_paths = re.findall(r'href="([^"]+\.css(?:\?[^"]*)?)"', app_text)
     require(bool(js_paths), "В React shell не найден JavaScript bundle; возможна проблема сборки frontend/dist.")
     for asset in dict.fromkeys(js_paths + css_paths):
         asset_status, _, _ = request(urljoin(base, asset))
