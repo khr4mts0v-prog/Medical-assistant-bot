@@ -238,4 +238,4 @@ def answer_archive_question(query, patient, context="", history=None, trace_id=N
     except Exception as exc:
         if trace_id:
             ai_trace_log.emit(trace_id, "general_medical.provider_error", error_type=type(exc).__name__)
-        return f"Не удалось получить ответ ИИ ({type(exc).__name__}). Проверьте настройки провайдера и модели."
+        return "Сервис ИИ временно не смог обработать запрос. Попробуйте ещё раз позже."
