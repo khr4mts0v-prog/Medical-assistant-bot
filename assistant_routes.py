@@ -560,7 +560,7 @@ def _resolve_patient_reference_with_ai(question, patient_records, trace_id=None)
             continue
         raw_aliases = record.get("aliases") or [name]
         aliases = []
-        for alias in raw_aliases if isinstance(raw_aliases, (list, tuple)) else [name]:
+        for alias in (raw_aliases if isinstance(raw_aliases, (list, tuple)) else [name]):
             alias = " ".join(str(alias or "").split())[:160]
             if alias and alias.casefold() != name.casefold() and alias not in aliases:
                 aliases.append(alias)
