@@ -1059,6 +1059,8 @@ function App() {
                 question: String(turn.question || ''),
                 answer: readableAnswer(turn.result?.answer || '').slice(0, 900),
                 mode: String(turn.result?.mode || ''),
+                family_id: Number(turn.familyId || 0),
+                patient_scope: turn.patientScope || null,
               }));
               const history = conversation.map((turn:any) => turn.question);
               const response = await fetch('/api/intelligent-search', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:submittedQuestion,history,conversation,family_id:familyId,patient_scope:patientAssistantScope?.patient,document_selection_mode:selectionMode,selected_document_ids:selectionMode ? selectedDocumentIds : [],consent:smartConsent})});
@@ -1079,7 +1081,12 @@ function App() {
                   } catch {}
                   setSmartConsent(false);
                 }
-                setSmartConversation((previous:any[]) => [...previous,{question:submittedQuestion,result}].slice(-20));
+                setSmartConversation((previous:any[]) => [...previous,{
+                  question:submittedQuestion,
+                  result,
+                  familyId: familyId || null,
+                  patientScope: patientAssistantScope?.patient || null,
+                }].slice(-20));
                 setSmartResult(null);
                 setSmartQuery('');
               }
