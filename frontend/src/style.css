@@ -643,3 +643,41 @@ body{color:#1c2c45;overscroll-behavior-y:contain}
 .legacy-content .document-source-name summary{cursor:pointer}
 .legacy-content .document-source-name span{display:block;overflow-wrap:anywhere;margin-top:4px}
 @media(max-width:420px){.legacy-content .patient-actions .button-link{font-size:13px;padding:9px 5px}.legacy-content .document-card{gap:7px;padding:11px}.legacy-content .document-card>.button-link{font-size:12px;padding:8px}}
+
+
+/* Native React patient profile */
+.patient-react-screen { display:flex; flex-direction:column; gap:18px; max-width:1100px; margin:0 auto; width:100%; }
+.patient-react-header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; flex-wrap:wrap; }
+.patient-react-header h1 { margin:4px 0 6px; font-size:clamp(1.55rem,4vw,2.1rem); }
+.patient-react-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.patient-react-actions button, .patient-react-actions a, .patient-react-selection button, .patient-react-upload button, .patient-react-search button { min-height:40px; }
+.patient-react-actions .patient-action-primary { display:inline-flex; align-items:center; gap:8px; }
+.patient-react-search { margin:0; }
+.patient-react-search .row { display:flex; gap:8px; align-items:center; }
+.patient-react-search input[type="search"] { flex:1; min-width:0; }
+.patient-react-upload h2 { font-size:1.05rem; margin:0 0 12px; }
+.patient-react-upload form { display:flex; flex-direction:column; align-items:flex-start; gap:12px; }
+.patient-react-upload label { display:flex; gap:8px; align-items:flex-start; font-weight:400; }
+.patient-react-upload label input { margin-top:4px; }
+.patient-react-tabs { display:flex; gap:8px; border-bottom:1px solid var(--border,#dbe3ee); }
+.patient-react-tabs button { border:0; background:transparent; padding:10px 14px; border-bottom:2px solid transparent; color:inherit; cursor:pointer; }
+.patient-react-tabs button.active { border-bottom-color:var(--accent,#2563eb); color:var(--accent,#2563eb); font-weight:650; }
+.patient-react-selection { display:flex; align-items:center; flex-wrap:wrap; gap:12px; justify-content:space-between; border:1px solid var(--border,#dbe3ee); border-radius:14px; padding:14px; }
+.patient-react-selection p { margin:4px 0 0; color:var(--muted,#64748b); font-size:.9rem; }
+.patient-react-documents { display:flex; flex-direction:column; gap:10px; }
+.patient-react-tree { display:flex; flex-direction:column; gap:10px; }
+.patient-react-tree .tree-group { border:1px solid var(--border,#dbe3ee); border-radius:12px; padding:12px 14px; }
+.patient-react-tree .tree-group summary { cursor:pointer; font-weight:650; }
+.patient-react-tree .document-row { display:flex; align-items:center; gap:10px; padding:12px 0; border-bottom:1px solid var(--border,#e5eaf1); }
+.patient-react-tree .document-row:last-child { border-bottom:0; }
+.patient-react-tree .document-main { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.patient-react-tree .document-select-label { display:flex; align-items:center; }
+.patient-react-tree .document-select-label input { width:18px; height:18px; }
+@media (max-width:640px) {
+  .patient-react-header { flex-direction:column; }
+  .patient-react-actions { width:100%; }
+  .patient-react-actions > * { flex:1 1 auto; justify-content:center; }
+  .patient-react-search .row { align-items:stretch; flex-wrap:wrap; }
+  .patient-react-search input[type="search"] { flex-basis:100%; }
+  .patient-react-tree .document-row { align-items:flex-start; }
+}
