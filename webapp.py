@@ -547,6 +547,8 @@ def document_card_metadata(document, analysis):
             r"(?:заключение|вывод|результат исследования|итог)\s*[:—-]\s*([^\n]{3,240})",
             r"(?:диагноз)\s*[:—-]\s*([^\n]{3,240})",
         ])
+    if finding:
+        finding = _format_ocr_preview(finding)
     finding = re.sub(r"\s+", " ", finding).strip(" :;,—-")[:180] if finding else ""
     parts = []
     if doctor: parts.append("Врач: " + doctor)
