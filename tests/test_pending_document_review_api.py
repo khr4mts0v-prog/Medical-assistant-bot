@@ -25,7 +25,7 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
     def test_review_api_returns_editor_metadata_without_file_bytes(self):
         pending = {
             "id": 12, "name": "scan.pdf", "created": "2026-10-20", "text": "private OCR",
-            "file_bytes": b"secret file bytes", "analysis": {"primary_type": "заключение УЗИ", "display_title": "УЗИ брюшной полости"},
+            "file_bytes": b"secret file bytes", "analysis": {"primary_type": "заключение УЗИ", "display_title": "УЗИ брюшной полости", "suggested_patient_name": "Иванова Мария Сергеевна"},
         }
         with (
             patch.object(webapp, "family"),
