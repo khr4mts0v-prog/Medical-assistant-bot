@@ -506,11 +506,12 @@ class AssistantChatGapTests(unittest.TestCase):
                 self.assertEqual(assistant._mentioned_people(records, f"Расскажи про {form}"), expected)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
     def test_structured_answer_extracts_json_wrapped_in_commentary(self):
         raw = 'Результат анализа:\n```json\n{"answer":"Саша: обследования за 2025 год.","missing_documents":[],"limitations":[],"data_completeness":"partial","memory_updates":[{"text":"не показывать это"}]}\n```\nГотово.'
         parsed = assistant._parse_structured_answer(raw)
         self.assertEqual(parsed["answer"], "Саша: обследования за 2025 год.")
         self.assertNotIn("memory_updates", parsed["answer"])
+
+if __name__ == "__main__":
+    unittest.main()
