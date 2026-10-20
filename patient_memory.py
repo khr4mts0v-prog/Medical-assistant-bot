@@ -572,3 +572,414 @@ def to_context(snapshot: dict, max_chars: int = 8500) -> str:
         )
     lines.extend(snapshot.get("limitations", []))
     return "\n".join(lines)[:max(500, int(max_chars))]
+
+
+# Approved, encrypted memory suggestions. Suggestions remain pending until a user accepts them.
+_PROPOSAL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS patient_memory_proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    family_id INTEGER NOT NULL REFERENCES families(id) ON DELETE CASCADE,
+    patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    payload_enc BLOB NOT NULL,
+    source_document_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected')),
+    created_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS patient_memory_proposals_patient
+    ON patient_memory_proposals(family_id, patient_id, status, created_at);
+"""
+
+_legacy_init = init
+_legacy_manual_payload = _manual_payload
+_legacy_get_snapshot = get_snapshot
+_legacy_to_context = to_context
+_MEMORY_KEYS = {
+    "", "weight_kg", "height_cm", "age_years", "allergy", "diagnosis",
+    "condition", "medication", "restriction", "note"
+}
+
+
+def init() -> None:
+    _legacy_init()
+    with tenancy.connect() as conn:
+        conn.executescript(_PROPOSAL_SCHEMA)
+
+
+def _clean_source(source):
+    if not isinstance(source, dict):
+        return None
+    try:
+        doc_id = int(source.get("document_id") or 0)
+    except (TypeError, ValueError):
+        return None
+    if doc_id <= 0:
+        return None
+    return {
+        "document_id": doc_id,
+        "name": _clean_text(source.get("name") or "Документ без названия", 255),
+        "date": _clean_text(source.get("date"), 40) or None,
+        "kind": _clean_text(source.get("kind") or "не определён", 100),
+    }
+
+
+def _encode_payload(payload: dict) -> bytes:
+    return tenancy.cipher().encrypt(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+
+
+def _decode_payload(raw):
+    return json.loads(tenancy.cipher().decrypt(raw).decode("utf-8"))
+
+
+def _proposal_view(row, payload):
+    return {
+        "id": int(row["id"]),
+        "family_id": int(row["family_id"]),
+        "patient_id": int(row["patient_id"]),
+        "patient": payload.get("patient") or "",
+        "text": payload.get("text") or "",
+        "category": payload.get("category") or "note",
+        "date": payload.get("date"),
+        "memory_key": payload.get("memory_key") or "",
+        "reason": payload.get("reason") or "",
+        "source": payload.get("source"),
+        "origin": payload.get("origin") or "conversation",
+        "status": row["status"],
+        "created_at": row["created_at"],
+    }
+
+
+def should_propose_measurement(fid: int, patient: str, memory_key: str, proposed_text: str) -> bool:
+    """Only prompt on absent, changed, or stale measurements; don't nag for a fresh identical value."""
+    limits = {"weight_kg": 60, "height_cm": 365, "age_years": 365}
+    if memory_key not in limits:
+        return True
+    current = [
+        item for item in get_manual_facts(fid, patient)
+        if item.get("memory_key") == memory_key and item.get("status") == "active"
+    ]
+    if not current:
+        return True
+    def number(text):
+        match = re.search(r"(?<![a-zа-яё])\d+(?:[.,]\d+)?", str(text or "").casefold())
+        if not match:
+            return None
+        try:
+            return Decimal(match.group(0).replace(",", "."))
+        except InvalidOperation:
+            return None
+    proposed_number = number(proposed_text)
+    today = date.today()
+    max_age = limits[memory_key]
+    for item in current:
+        day = _date_key(item.get("date"))
+        age_days = (today - day).days if day != date.min else None
+        stale = age_days is None or age_days < 0 or age_days > max_age
+        current_number = number(item.get("text"))
+        if not stale and proposed_number is not None and proposed_number == current_number:
+            return False
+    return True
+
+
+def propose_fact(
+    fid: int, patient: str, text: str, category: str = "note",
+    fact_date: str = "", memory_key: str = "", reason: str = "",
+    source: dict | None = None, actor_id: int = 0,
+) -> dict:
+    """Persist an encrypted proposal; does not change active patient memory."""
+    fid = int(fid)
+    pid = db.patient_id(fid, patient)
+    if pid is None:
+        raise ValueError("Пациент не найден в этом семейном архиве")
+    memory_key = str(memory_key or "").strip()
+    if memory_key not in _MEMORY_KEYS:
+        raise ValueError("Неизвестный ключ памяти")
+    payload = _legacy_manual_payload(text, category, fact_date)
+    clean_source = _clean_source(source)
+    reason_text = _clean_text(reason, 500)
+    if memory_key in {"weight_kg", "height_cm", "age_years"}:
+        try:
+            current_values = [
+                item for item in get_manual_facts(fid, patient)
+                if item.get("memory_key") == memory_key and item.get("status") == "active"
+            ]
+        except Exception:
+            current_values = []
+        if current_values:
+            current = current_values[0]
+            old_date = current.get("date") or "дата не указана"
+            reason_text = (
+                "В памяти сейчас записано: " + str(current.get("text") or "значение не указано")
+                + " (" + str(old_date) + "). Новое значение сообщено в диалоге: " + str(payload["text"])
+                + ". Подтвердите, что оно актуально; после подтверждения прежнее значение останется в истории."
+            )
+        else:
+            reason_text = (reason_text + " В памяти нет подтверждённого актуального значения.")[:500]
+    payload.update({
+        "memory_key": memory_key,
+        "reason": reason_text,
+        "source": clean_source,
+        "origin": "document" if clean_source else "conversation",
+        "patient": " ".join(str(patient).split()),
+    })
+    source_id = clean_source["document_id"] if clean_source else None
+    with tenancy.connect() as conn:
+        existing_rows = conn.execute(
+            "SELECT id,family_id,patient_id,payload_enc,source_document_id,status,created_by,created_at,updated_at "
+            "FROM patient_memory_proposals WHERE family_id=? AND patient_id=? AND status='pending' ORDER BY id DESC",
+            (fid, int(pid)),
+        ).fetchall()
+        for row in existing_rows:
+            try:
+                existing = _decode_payload(row["payload_enc"])
+            except Exception:
+                continue
+            if (existing.get("text") == payload["text"]
+                and existing.get("memory_key", "") == memory_key
+                and int(row["source_document_id"] or 0) == int(source_id or 0)):
+                return _proposal_view(row, existing)
+        if memory_key in {"weight_kg", "height_cm", "age_years"}:
+            # A new measurement supersedes an older pending suggestion for the same key.
+            for prior in existing_rows:
+                try:
+                    prior_payload = _decode_payload(prior["payload_enc"])
+                except Exception:
+                    continue
+                if prior_payload.get("memory_key") == memory_key:
+                    conn.execute(
+                        "UPDATE patient_memory_proposals SET status='rejected',updated_at=? WHERE id=? AND status='pending'",
+                        (datetime.utcnow().replace(microsecond=0).isoformat() + "Z", int(prior["id"])),
+                    )
+        now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        cur = conn.execute(
+            "INSERT INTO patient_memory_proposals "
+            "(family_id,patient_id,payload_enc,source_document_id,status,created_by,created_at,updated_at) "
+            "VALUES(?,?,?,?, 'pending', ?, ?, ?)",
+            (fid, int(pid), _encode_payload(payload), source_id, int(actor_id), now, now),
+        )
+        proposal_id = int(cur.lastrowid)
+        row = conn.execute(
+            "SELECT id,family_id,patient_id,payload_enc,source_document_id,status,created_by,created_at,updated_at "
+            "FROM patient_memory_proposals WHERE id=?", (proposal_id,)
+        ).fetchone()
+        return _proposal_view(row, payload)
+
+
+def get_proposals(fid: int, patient: str, include_closed: bool = False) -> list[dict]:
+    pid = db.patient_id(int(fid), patient)
+    if pid is None:
+        raise ValueError("Пациент не найден в этом семейном архиве")
+    status_filter = "" if include_closed else " AND status='pending'"
+    with tenancy.connect() as conn:
+        rows = conn.execute(
+            "SELECT id,family_id,patient_id,payload_enc,source_document_id,status,created_by,created_at,updated_at "
+            "FROM patient_memory_proposals WHERE family_id=? AND patient_id=?" + status_filter +
+            " ORDER BY created_at DESC,id DESC LIMIT 50",
+            (int(fid), int(pid)),
+        ).fetchall()
+    proposals = []
+    for row in rows:
+        try:
+            proposals.append(_proposal_view(row, _decode_payload(row["payload_enc"])))
+        except Exception:
+            logging.warning("Unable to decrypt memory proposal id=%s", row["id"])
+    return proposals
+
+
+def accept_proposal(fid: int, patient: str, proposal_id: int, actor_id: int) -> int:
+    """Accept a pending suggestion, superseding an older value only for keyed measurements."""
+    fid = int(fid)
+    pid = db.patient_id(fid, patient)
+    if pid is None:
+        raise ValueError("Пациент не найден в этом семейном архиве")
+    now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    with tenancy.connect() as conn:
+        row = conn.execute(
+            "SELECT id,family_id,patient_id,payload_enc,status FROM patient_memory_proposals "
+            "WHERE id=? AND family_id=? AND patient_id=?",
+            (int(proposal_id), fid, int(pid)),
+        ).fetchone()
+        if not row or row["status"] != "pending":
+            raise ValueError("Предложение не найдено или уже обработано")
+        payload = _decode_payload(row["payload_enc"])
+        memory_key = payload.get("memory_key") or ""
+        # Measurements are versioned: the previous value remains visible as inactive history.
+        if memory_key in {"weight_kg", "height_cm", "age_years"}:
+            old_rows = conn.execute(
+                "SELECT id,payload_enc FROM patient_memory_manual_facts "
+                "WHERE family_id=? AND patient_id=? AND status='active'",
+                (fid, int(pid)),
+            ).fetchall()
+            for old in old_rows:
+                try:
+                    old_payload = _decode_payload(old["payload_enc"])
+                except Exception:
+                    continue
+                if old_payload.get("memory_key") == memory_key:
+                    conn.execute(
+                        "UPDATE patient_memory_manual_facts SET status='inactive',updated_at=? WHERE id=?",
+                        (now, int(old["id"])),
+                    )
+        accepted = dict(payload)
+        accepted["origin"] = "approved_document" if payload.get("source") else "approved_conversation"
+        accepted["proposal_id"] = int(proposal_id)
+        cur = conn.execute(
+            "INSERT INTO patient_memory_manual_facts "
+            "(family_id,patient_id,payload_enc,created_by,updated_by,status,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,'active',?,?)",
+            (fid, int(pid), _encode_payload(accepted), int(actor_id), int(actor_id), now, now),
+        )
+        conn.execute(
+            "UPDATE patient_memory_proposals SET status='accepted',updated_at=? WHERE id=? AND status='pending'",
+            (now, int(proposal_id)),
+        )
+        return int(cur.lastrowid)
+
+
+def reject_proposal(fid: int, patient: str, proposal_id: int) -> None:
+    pid = db.patient_id(int(fid), patient)
+    if pid is None:
+        raise ValueError("Пациент не найден в этом семейном архиве")
+    now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    with tenancy.connect() as conn:
+        cur = conn.execute(
+            "UPDATE patient_memory_proposals SET status='rejected',updated_at=? "
+            "WHERE id=? AND family_id=? AND patient_id=? AND status='pending'",
+            (now, int(proposal_id), int(fid), int(pid)),
+        )
+        if cur.rowcount != 1:
+            raise ValueError("Предложение не найдено или уже обработано")
+
+
+def get_manual_facts(fid: int, patient: str, include_inactive: bool = False) -> list[dict]:
+    pid = db.patient_id(int(fid), patient)
+    if pid is None:
+        raise ValueError("Пациент не найден в этом семейном архиве")
+    where_status = "" if include_inactive else " AND status='active'"
+    with tenancy.connect() as conn:
+        rows = conn.execute(
+            "SELECT id,payload_enc,created_by,updated_by,status,created_at,updated_at "
+            "FROM patient_memory_manual_facts WHERE family_id=? AND patient_id=?" + where_status +
+            " ORDER BY updated_at DESC,id DESC",
+            (int(fid), int(pid)),
+        ).fetchall()
+    facts = []
+    for row in rows:
+        try:
+            payload = _decode_payload(row["payload_enc"])
+        except Exception:
+            logging.warning("Unable to decrypt manual patient memory fact id=%s", row["id"])
+            continue
+        facts.append({
+            "id": int(row["id"]), **payload,
+            "created_by": int(row["created_by"]), "updated_by": int(row["updated_by"]),
+            "status": row["status"], "created_at": row["created_at"], "updated_at": row["updated_at"],
+            "origin": payload.get("origin") or "user_entered",
+            "source": payload.get("source"),
+            "memory_key": payload.get("memory_key") or "",
+        })
+    return facts
+
+
+def add_manual_fact(
+    fid: int, patient: str, text: str, category: str,
+    fact_date: str, actor_id: int, memory_key: str = "",
+    source: dict | None = None, origin: str = "user_entered",
+) -> int:
+    pid = db.patient_id(int(fid), patient)
+    if pid is None:
+        raise ValueError("Пациент не найден в этом семейном архиве")
+    memory_key = str(memory_key or "").strip()
+    if memory_key not in _MEMORY_KEYS:
+        raise ValueError("Неизвестный ключ памяти")
+    payload = _legacy_manual_payload(text, category, fact_date)
+    payload.update({"memory_key": memory_key, "source": _clean_source(source), "origin": str(origin or "user_entered")[:40]})
+    encrypted = _encode_payload(payload)
+    now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    with tenancy.connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO patient_memory_manual_facts "
+            "(family_id,patient_id,payload_enc,created_by,updated_by,status,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,'active',?,?)",
+            (int(fid), int(pid), encrypted, int(actor_id), int(actor_id), now, now),
+        )
+        return int(cur.lastrowid)
+
+
+def update_manual_fact(
+    fid: int, patient: str, fact_id: int, text: str, category: str,
+    fact_date: str, actor_id: int,
+) -> None:
+    pid = db.patient_id(int(fid), patient)
+    if pid is None:
+        raise ValueError("Пациент не найден в этом семейном архиве")
+    with tenancy.connect() as conn:
+        row = conn.execute(
+            "SELECT payload_enc FROM patient_memory_manual_facts "
+            "WHERE id=? AND family_id=? AND patient_id=? AND status='active'",
+            (int(fact_id), int(fid), int(pid)),
+        ).fetchone()
+        if not row:
+            raise ValueError("Ручная запись не найдена у выбранного пациента")
+        try:
+            old = _decode_payload(row["payload_enc"])
+        except Exception as exc:
+            raise ValueError("Не удалось прочитать сохранённую запись памяти") from exc
+        payload = _legacy_manual_payload(text, category, fact_date)
+        for key in ("memory_key", "source", "origin", "reason", "proposal_id"):
+            if key in old:
+                payload[key] = old[key]
+        encrypted = _encode_payload(payload)
+        now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        conn.execute(
+            "UPDATE patient_memory_manual_facts SET payload_enc=?,updated_by=?,updated_at=? "
+            "WHERE id=? AND family_id=? AND patient_id=? AND status='active'",
+            (encrypted, int(actor_id), now, int(fact_id), int(fid), int(pid)),
+        )
+
+
+def get_snapshot(fid: int, patient: str) -> dict:
+    snapshot = _legacy_get_snapshot(fid, patient)
+    snapshot["pending_proposals"] = get_proposals(fid, patient)
+    return snapshot
+
+
+def to_context(snapshot: dict, max_chars: int = 8500) -> str:
+    manual = list(snapshot.get("manual_facts") or [])
+    base = dict(snapshot)
+    base["manual_facts"] = []
+    context = _legacy_to_context(base, max_chars=max(1000, int(max_chars) - 2500))
+    lines = [
+        "ПОДТВЕРЖДЁННАЯ ПАМЯТЬ, ВНЕСЁННАЯ ИЛИ ПОДТВЕРЖДЁННАЯ ПОЛЬЗОВАТЕЛЕМ "
+        "(считать контекстом, а не диагнозом, независимо подтверждённым врачом):"
+    ]
+    today = date.today()
+    for item in manual[:100]:
+        source = item.get("source") or {}
+        source_text = (
+            "источник: документ ID " + str(source.get("document_id")) + " — " + str(source.get("name") or "")
+            if source.get("document_id") else "источник: сообщение/ручная запись пользователя; документ-источник отсутствует"
+        )
+        day = _date_key(item.get("date"))
+        age_days = (today - day).days if day != date.min else None
+        freshness = ""
+        key = item.get("memory_key") or ""
+        if key == "weight_kg" and (age_days is None or age_days > 60):
+            freshness = " [ВНИМАНИЕ: вес может быть устаревшим; уточни актуальность перед расчётом дозы]"
+        elif key == "height_cm" and (age_days is None or age_days > 365):
+            freshness = " [ВНИМАНИЕ: рост может быть устаревшим]"
+        elif key == "age_years" and age_days is not None and age_days > 365:
+            freshness = " [ВНИМАНИЕ: возраст необходимо пересчитать по дате рождения]"
+        lines.append(
+            "- [" + str(item.get("category") or "note") + "] "
+            + str(item.get("date") or "дата факта не указана") + ": "
+            + str(item.get("text") or "")
+            + " [ключ=" + str(key or "общая запись") + "; происхождение="
+            + str(item.get("origin") or "user_entered") + "; " + source_text + "]"
+            + freshness
+        )
+    return (context + "\n\n" + "\n".join(lines))[:max(500, int(max_chars))]
+
+
+# Expose the current user-approved suggestions to the patient-memory page and API.

@@ -41,7 +41,7 @@
   },
   {
     "id": "RU-PUB-006",
-    "expected_type": "заключение ЭхоКГ",
+    "expected_type": "заключение функциональной диагностики",
     "source_url": "https://echo1.ru/obraztsy-zaklyuchenij.html",
     "source_kind": "public_sample_format",
     "note": "Структура вида документа взята из каталога опубликованных образцов ЭхоКГ; текст тестовый.",

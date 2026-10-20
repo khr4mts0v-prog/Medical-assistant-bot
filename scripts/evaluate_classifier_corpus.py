@@ -15,6 +15,9 @@ CORPORA = [
     FIXTURES / "adversarial_medical_documents_round2.json",
     FIXTURES / "realistic_medical_documents_round2.json",
     FIXTURES / "russian_public_template_examples.json",
+    FIXTURES / "public_official_forms_round2.json",
+    FIXTURES / "public_official_forms_round3.json",
+    FIXTURES / "public_document_stress_190.json",
 ]
 
 
@@ -57,6 +60,12 @@ def main():
     group_unknown = Counter()
     group_total = Counter()
     mismatches = []
+    if len(records) < 300:
+        mismatches.append("corpus has fewer than 300 document records")
+    for filename, item in records:
+        if item.get("record_kind") in {"public_template_derived_synthetic", "ambiguous_negative_stress_synthetic"}:
+            if not item.get("source_url") or not item.get("transformation"):
+                mismatches.append("public-source stress record lacks source/transformation metadata: " + str(item.get("id")))
     for filename, item in records:
         result = analyze_document(item["text"])
         expected = item["expected_type"]

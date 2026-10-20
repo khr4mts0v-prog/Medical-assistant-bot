@@ -28,12 +28,14 @@ def read_env(path):
     return values
 
 
-def request(url, auth=None, timeout=10, attempts=12, retry_delay=2):
+def request(url, auth=None, extra_headers=None, timeout=10, attempts=12, retry_delay=2):
     """Retry transient connection failures while a freshly started server becomes ready."""
     headers = {"Cache-Control": "no-cache", "User-Agent": "medical-archive-release-smoke/1.0"}
     if auth:
         token = base64.b64encode((auth[0] + ":" + auth[1]).encode()).decode()
         headers["Authorization"] = "Basic " + token
+    if extra_headers:
+        headers.update(extra_headers)
     last_error = None
     for attempt in range(1, attempts + 1):
         req = Request(url, headers=headers)
@@ -74,13 +76,53 @@ def main():
     password = env.get("DEMO_PASSWORD", "test")
     require(bool(username and password), "DEMO_USERNAME/DEMO_PASSWORD заданы пустыми: демо-вход отключён.")
     auth = (username, password)
+    admin_username = env.get("WEB_USERNAME", "")
+    admin_password = env.get("WEB_PASSWORD", "")
+    require(bool(admin_username and admin_password), "WEB_USERNAME/WEB_PASSWORD должны быть заданы для проверки изоляции архивов.")
+    admin_auth = (admin_username, admin_password)
 
     status, headers, body = request(urljoin(base, ""), auth)
     require(status == 200, f"Демо-вход не работает: GET / вернул HTTP {status}. Проверьте образ и DEMO_USERNAME/DEMO_PASSWORD.")
     require("Медицинский архив" in body.decode("utf-8", errors="replace"), "GET / вернул неожиданный HTML вместо страницы архива.")
-    cookie = " ".join(headers.get_all("Set-Cookie") or [])
+    cookie_headers = headers.get_all("Set-Cookie") or []
+    cookie = " ".join(cookie_headers)
     require("medical_demo_session=" in cookie and "HttpOnly" in cookie and "Secure" in cookie,
             "Вход успешен, но демо-сессия не получила ожидаемые HttpOnly/Secure cookie.")
+    demo_cookie = next((value.split(";", 1)[0] for value in cookie_headers
+                        if value.startswith("medical_demo_session=")), "")
+    require(bool(demo_cookie), "Не удалось извлечь демо-cookie для проверки изоляции.")
+
+    # Compare metadata only; never print family names, patient names, or document content.
+    status, _, demo_home_body = request(
+        urljoin(base, "api/home"), auth=auth, extra_headers={"Cookie": demo_cookie}
+    )
+    require(status == 200, f"Демо API недоступен: GET /api/home вернул HTTP {status}.")
+    demo_home = json.loads(demo_home_body.decode("utf-8"))
+    require(demo_home.get("is_demo") is True, "test/test не получил демо-идентичность.")
+    demo_family_ids = {int(item["id"]) for item in demo_home.get("families", [])}
+    require(bool(demo_family_ids), "Для test/test не создан отдельный демо-архив.")
+
+    status, _, admin_home_body = request(urljoin(base, "api/home"), auth=admin_auth)
+    require(status == 200, f"Admin API недоступен: GET /api/home вернул HTTP {status}.")
+    admin_home = json.loads(admin_home_body.decode("utf-8"))
+    require(admin_home.get("is_demo") is False, "admin неожиданно получил демо-идентичность.")
+    admin_family_ids = {int(item["id"]) for item in admin_home.get("families", [])}
+    require(not demo_family_ids.intersection(admin_family_ids),
+            "Нарушена изоляция: test/test и admin видят общий family ID.")
+    for family_id in admin_family_ids:
+        status, _, _ = request(
+            urljoin(base, f"api/home?family_id={family_id}"),
+            auth=auth, extra_headers={"Cookie": demo_cookie},
+        )
+        require(status == 403,
+                "Нарушена изоляция: test/test получил доступ к архиву admin (HTTP не 403).")
+    for family_id in demo_family_ids:
+        status, _, _ = request(
+            urljoin(base, f"api/home?family_id={family_id}"),
+            auth=admin_auth,
+        )
+        require(status == 403,
+                "Нарушена изоляция: admin получил доступ к демо-архиву (HTTP не 403).")
 
     status, _, app_html = request(urljoin(base, "app/"))
     require(status == 200, f"React-приложение недоступно: GET /app/ вернул HTTP {status}.")
@@ -100,8 +142,8 @@ def main():
     require(status == 200 and "image/png" in headers.get("Content-Type", "") and icon_body.startswith(b"\x89PNG"),
             "Apple touch icon отсутствует или имеет неверный формат.")
 
-    print("PASS: demo login, session cookie, React shell/assets, PWA manifest and Apple icon.")
-    print("Credentials were not printed. No AI request was sent and no archive documents were modified.")
+    print("PASS: demo login, account isolation, React shell/assets, PWA manifest and Apple icon.")
+    print("Credentials and archive metadata were not printed. No AI request was sent and no archive documents were modified.")
 
 
 if __name__ == "__main__":
