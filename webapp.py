@@ -1464,11 +1464,10 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), ai_c
     token=tenancy.get_yadisk_token(family_id) if storage_backend=="yandex" else None
     if storage_backend=="yandex" and not token:
         raise HTTPException(400,"Сначала подключите Яндекс Диск для выбранного архива")
+    # Uploads must remain possible before the first patient card exists. Without a
+    # registered roster, patient resolution will intentionally return no match and
+    # the document will be preserved in the review inbox instead of failing early.
     roster=db.patient_records(family_id)
-    if not roster:
-        return page("Нужны пациенты",
-            '<p>В выбранном архиве пока нет пациентов. Добавьте короткие имена и варианты ФИО, чтобы система могла безопасно распределять документы.</p>'
-            '<p><a href="/?family_id='+str(family_id)+'">Вернуться в архив</a></p>',400)
     results=[]
     for upload_file in files[:50]:
         name=Path(upload_file.filename or "document.bin").name
