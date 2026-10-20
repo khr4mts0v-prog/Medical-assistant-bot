@@ -12,7 +12,7 @@ from local_storage import save_file as save_local_file
 from ocr import ocr_file
 from AIAnalise import analyze_document, extract_keywords, classify_with_ai
 from utils import format_filename, normalize_extension, parse_date_from_text, safe_name
-from document_metadata import extract_registered_patient, extract_patient_birth_date
+from document_metadata import extract_registered_patient, extract_patient_birth_date, extract_patient_candidate
 
 app=FastAPI(title="Medical Archive", docs_url=None, redoc_url=None)
 from react_ui import install_react_ui
@@ -1514,6 +1514,9 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), ai_c
                         patient=None
                 digest=hashlib.sha256(local.read_bytes()).hexdigest()
                 if not patient:
+                    # A labelled full name is only a candidate; never create a patient
+                    # card from OCR without an explicit user confirmation.
+                    analysis["suggested_patient_name"] = extract_patient_candidate(text)
                     pending_id=db.add_pending_doc(family_id,name,digest,local.read_bytes(),text,analysis)
                     if pending_id is None:
                         results.append('<li><strong>'+html.escape(name)+'</strong>: такой документ уже находится во входящих.</li>')
@@ -1789,6 +1792,7 @@ def pending_document_review_api(fid:int,pending_id:int,uid:int=Depends(current_u
         "created":str(d.get("created") or ""),"ocr_text":_format_ocr_preview(d.get("text"))[:12000],
         "patient_options":patients,"kinds":[{"value":k,"label":labels.get(k,k[:1].upper()+k[1:])} for k in kinds],
         "kind":current_kind if current_kind in kinds else "не определено",
+        "suggested_patient_name":str(analysis.get("suggested_patient_name") or ""),
         "title":str(analysis.get("display_title") or analysis.get("primary_type") or d.get("name") or "Документ"),
         "date":"","preview_url":f"/families/{fid}/inbox/{pending_id}/preview",
         "preview_kind":preview_kind,"page_count":page_count}
@@ -1828,6 +1832,37 @@ def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)
     body+=f'<form class="pending-classification-form" method="post" action="/families/{fid}/inbox/{pending_id}/assign"><label>Пациент<br><select name="patient" required>{patient_options}</select></label><label>Тип документа<br><select name="kind" required>{kind_options}</select></label><label>Название в архиве<br><input name="title" required maxlength="180" value="{html.escape(str(d["analysis"].get("display_title") or d["analysis"].get("primary_type") or d["name"]),quote=True)}"></label><label>Дата документа (ДД-ММ-ГГГГ)<br><input name="date" placeholder="17-03-2025" maxlength="10"></label><p><button type="submit">Сохранить в историю пациента</button></p></form>'
     body+=f'<form class="pending-delete-form" method="post" action="/families/{fid}/inbox/{pending_id}/delete" onsubmit="return confirm(\'Удалить этот документ из входящих без возможности восстановления?\')"><input type="hidden" name="confirm" value="yes"><button type="submit">Удалить документ</button></form>'
     return page("Ручная классификация",body)
+
+
+@app.post("/families/{fid}/inbox/{pending_id}/create-patient", response_class=HTMLResponse)
+def create_patient_from_pending_document(fid:int,pending_id:int,confirm:str=Form(...),uid:int=Depends(current_user)):
+    """Create a patient and assign this pending document only after explicit confirmation."""
+    family(fid,uid)
+    if confirm != "yes":
+        raise HTTPException(400,"Создание пациента не подтверждено")
+    if is_demo_user(uid):
+        tenancy.refresh_demo_expiry(fid)
+        if len(db.patients(fid)) >= DEMO_MAX_PATIENTS:
+            raise HTTPException(413, f"В демо можно создать не более {DEMO_MAX_PATIENTS} карточек пациентов")
+    d=db.get_pending_doc(fid,pending_id)
+    if not d:
+        raise HTTPException(404,"Документ не найден во входящих")
+    candidate=" ".join(str((d.get("analysis") or {}).get("suggested_patient_name") or "").split()).strip()
+    if not candidate:
+        raise HTTPException(400,"В документе не распознано достаточно надёжное ФИО. Добавьте пациента вручную.")
+    existing={str(name).casefold() for name in db.patients(fid)}
+    if candidate.casefold() in existing:
+        raise HTTPException(409,"Пациент с таким именем уже существует. Выберите существующую карточку.")
+    db.add_patient(fid,candidate)
+    analysis=d.get("analysis") or {}
+    kind=str(analysis.get("primary_type") or "не определено")
+    title=str(analysis.get("display_title") or kind or d.get("name") or "Медицинский документ")
+    date=extract_document_date(d.get("text") or "") or ""
+    try:
+        return assign_pending_document(fid,pending_id,candidate,kind,title,date,uid)
+    except Exception:
+        logging.exception("Confirmed patient creation could not finish document assignment")
+        raise
 
 
 @app.post("/families/{fid}/inbox/{pending_id}/delete", response_class=HTMLResponse)
