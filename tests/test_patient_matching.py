@@ -49,7 +49,7 @@ class PatientMatchingTests(unittest.TestCase):
 
     def test_extracts_candidate_only_from_explicit_patient_label(self):
         self.assertEqual(
-            extract_patient_candidate("ФИО пациента: Иванова Мария Сергеевна\\nДата рождения: 29.07.2026"),
+            extract_patient_candidate("ФИО пациента: Иванова Мария Сергеевна\nДата рождения: 29.07.2026"),
             "Иванова Мария Сергеевна",
         )
 
@@ -58,7 +58,7 @@ class PatientMatchingTests(unittest.TestCase):
         self.assertIsNone(extract_patient_candidate("Врач: Петров Иван Сергеевич"))
 
     def test_multiple_patient_candidates_are_ambiguous(self):
-        text = "Пациент: Иванова Мария Сергеевна\\nПациент: Петров Иван Иванович"
+        text = "Пациент: Иванова Мария Сергеевна\nПациент: Петров Иван Иванович"
         self.assertIsNone(extract_patient_candidate(text))
 
     def test_incidental_name_is_not_a_candidate(self):
