@@ -63,8 +63,15 @@ done
 
 [[ -f "$DB_FILE" ]] || { echo "Database not found at $DB_FILE; refusing deployment without a verified backup." >&2; exit 5; }
 
+# Production checks are the default. Testing mode is an explicit operator opt-in.
+DEPLOY_MODE="${DEPLOY_MODE:-production}"
+if [[ "$DEPLOY_MODE" != "production" && "$DEPLOY_MODE" != "testing" ]]; then
+  echo "DEPLOY_MODE must be production or testing." >&2
+  exit 2
+fi
+echo "Deployment safety mode: $DEPLOY_MODE"
 # Fail closed before backup/build/restart. Never auto-edit .env during deployment.
-python3 "$DEPLOY_WORKTREE/scripts/check_production_env.py" --mode testing --env-file "$DEPLOY_WORKTREE/.env"
+python3 "$DEPLOY_WORKTREE/scripts/check_production_env.py" --mode "$DEPLOY_MODE" --env-file "$DEPLOY_WORKTREE/.env"
 
 mkdir -p "$BACKUP_ROOT"
 chmod 700 "$BACKUP_ROOT"

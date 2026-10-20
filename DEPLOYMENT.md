@@ -15,7 +15,7 @@ Target: Ubuntu 24.04, Docker Compose, Nginx + HTTPS. The current low-cost test V
 
 ## Production release gate
 
-Before a release that may contain real medical data, run `python3 scripts/check_production_env.py --env-file /path/to/.env`. The deploy script runs this check before backup/build/restart and fails closed; it never creates or edits secrets in `.env`.
+Before a release that may contain real medical data, run `python3 scripts/check_production_env.py --mode production --env-file /path/to/.env`. The deploy script runs production checks before backup/build/restart and fails closed; it never creates or edits secrets in `.env`. Production mode is the default. `DEPLOY_MODE=testing` is an explicit opt-in for a dedicated non-production environment only; never use it for real patient data.
 
 The preflight requires:
 - a unique web password of at least 20 characters, a session signing secret of at least 32 characters, and a valid `FERNET_KEY`;
