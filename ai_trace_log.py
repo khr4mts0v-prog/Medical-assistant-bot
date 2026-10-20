@@ -76,7 +76,14 @@ def emit(trace_id, stage, **fields):
 
 
 def emit_full(trace_id, stage, **fields):
-    """Write explicitly requested plaintext diagnostic content to the restricted trace file."""
+    """Write plaintext diagnostic content only after an explicit non-production opt-in."""
+    enabled = os.getenv("AI_TRACE_FULL_CONTENT_ENABLED", "false").strip().casefold() in {"1", "true", "yes", "on"}
+    if not enabled:
+        # Full prompts, OCR fragments and answers may contain medical data. Record only
+        # field names; never persist the supplied values unless explicitly opted in.
+        emit(trace_id, str(stage)[:70] + ".content_suppressed",
+             content_suppressed=True, field_names=sorted(str(key)[:60] for key in fields))
+        return
     record = {"ts": time.time(), "trace_id": str(trace_id or "")[:40], "stage": str(stage)[:80]}
     record.update(fields)
     logger = _logger()
