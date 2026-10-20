@@ -516,7 +516,7 @@ function App() {
   const patientRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)(?:\?[^#]*)?$/);
   const patientNewRoute = path.match(/^\/families\/(\d+)\/patients\/new(?:\?[^#]*)?$/);
   const patientEditRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)\/edit(?:\?[^#]*)?$/);
-  const inboxDetailRoute = path.match(/^\\/families\\/(\\d+)\\/inbox\\/(\\d+)(?:\\?[^#]*)?$/);
+  const inboxDetailRoute = path.match(/^\/families\/(\d+)\/inbox\/(\d+)(?:\?[^#]*)?$/);
   const inboxRoute = path.match(/^\/families\/(\d+)\/inbox(?:\?[^#]*)?$/);
   const documentEditRoute = path.match(/^\/families\/(\d+)\/documents\/(\d+)\/edit(?:\?[^#]*)?$/);
   const patientRouteData = patientRoute ? {familyId:Number(patientRoute[1]), patient:decodeURIComponent(patientRoute[2])} : null;
