@@ -54,6 +54,8 @@ jobs:
             -e WEB_SESSION_SECRET=ci-only-not-a-real-secret-value-123456789 \
             -e WEB_USERNAME=smoke-test \
             -e WEB_PASSWORD=ci-only-password \
+            -e DEMO_USERNAME=test \
+            -e DEMO_PASSWORD=test \
             medical-assistant:clean-clone-test webapp:app --host 0.0.0.0 --port 8000
           cleanup() { docker logs medical-archive-web-smoke || true; docker rm -f medical-archive-web-smoke || true; }
           trap cleanup EXIT
@@ -68,3 +70,10 @@ jobs:
           # Protected archive pages must reject anonymous requests; this confirms auth middleware is active.
           status=$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8000/)
           test "$status" = "401"
+          cat > "$RUNNER_TEMP/smoke.env" <<'EOF'
+          WEB_USERNAME=smoke-test
+          WEB_PASSWORD=ci-only-password
+          DEMO_USERNAME=test
+          DEMO_PASSWORD=test
+          EOF
+          python scripts/smoke_test_web.py --base-url http://127.0.0.1:8000 --env-file "$RUNNER_TEMP/smoke.env"
