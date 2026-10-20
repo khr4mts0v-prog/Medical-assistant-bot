@@ -642,7 +642,12 @@ def _strip_embedded_structured_fields(value):
         text,
         flags=re.I,
     )
-    return text[:marker.start()].rstrip() if marker else text
+    if not marker:
+        return text
+    answer = text[:marker.start()].rstrip()
+    # Some providers double-escape JSON newlines; remove those left immediately before metadata.
+    answer = re.sub(r"(?:\\n)+$", "", answer).rstrip()
+    return answer
 
 
 def _parse_structured_answer(raw):
