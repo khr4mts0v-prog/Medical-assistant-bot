@@ -516,6 +516,7 @@ def _looks_like_contextual_medical_followup(question):
         # Explicit references to a previously discussed consultation/document are follow-ups
         # even when the user starts with a conversational opener ("дружище, по этой...").
         r"\b(?:по|про|насч[её]т)\s+(?:эт(?:ой|ого|ому|им|а|о)|данн(?:ой|ого|ому)|предыдущ(?:ей|его|ему))\s+(?:консультац\w*|заключен\w*|выписк\w*|документ\w*|обследовани\w*|анализ\w*)\b",
+        r"\b(?:добавь|запиши|сохрани|внеси)\s+(?:ему|ей|им|этому|этой)\b.{0,100}\b(?:в\s+память|памят|аллерги\w*|факт\w*)\b",
         r"\b(?:что|какие|какая|какой|как|чем)\b.{0,100}\b(?:назначен\w*|рекомендац\w*|вывод\w*|итог\w*|делать|принимать)\b.{0,100}\b(?:консультац\w*|заключен\w*|врач\w*|документ\w*)\b",
         r"\b(?:по|для|у)\s+(?:такого|такому|такой|этого|этому|этой)\s+(?:реб[её]нк\w*|пациент\w*|малыш\w*)\b",
         r"\b(?:какие|что|как)\b.{0,90}\b(?:ещ[её]|дополнительно)\b.{0,90}\b(?:рекомендац\w*|совет\w*|вариант\w*|поделать|сделать|попробовать|предпринять)\b",
@@ -641,6 +642,29 @@ def _extract_memory_measurements(question):
             unique.append(item)
             seen.add(marker)
     return unique
+
+
+def _extract_explicit_memory_facts(question):
+    """Extract only narrow, explicit user requests for patient-memory updates."""
+    q = " ".join(str(question or "").casefold().replace("ё", "е").split())
+    if not _looks_like_explicit_memory_command(q):
+        return []
+    facts = []
+    allergy = re.search(
+        r"\bаллерги\w*\s*(?:на\s*)?(.+?)(?=(?:[,.;]\s*)(?:реакци\w*|проявлени\w*|симптом\w*)|$)",
+        q, re.I,
+    )
+    if allergy:
+        allergens = allergy.group(1).strip(" \t\r\n.,;:")
+        if allergens:
+            reaction = re.search(r"\b(?:реакци\w*|проявлени\w*|симптом\w*)\s*[-:—]?\s*(.+)$", q, re.I)
+            reaction_text = reaction.group(1).strip(" \t\r\n.,;:") if reaction else ""
+            fact_text = "Аллергия " + allergens
+            if reaction_text:
+                fact_text += ". Реакция по сообщению пользователя: " + reaction_text
+            fact_text += "."
+            facts.append({"memory_key": "allergy", "text": fact_text[:500], "category": "symptom"})
+    return facts
 
 
 def _strip_embedded_structured_fields(value):
@@ -2069,7 +2093,8 @@ def install_assistant_routes(app, current_user, family_guard):
         scoped_people = [forced_patient] if forced_patient else (mentioned or people)
         explicit_memory_command = _looks_like_explicit_memory_command(query)
         explicit_measurements = _extract_memory_measurements(query)
-        if explicit_measurements and not forced_patient and len(mentioned) == 0:
+        explicit_memory_facts = _extract_explicit_memory_facts(query)
+        if (explicit_measurements or explicit_memory_facts) and not forced_patient and len(mentioned) == 0:
             # Never guess which family member owns a user-entered measurement.
             if followup and len(previous_turn_people) == 1:
                 mentioned = list(previous_turn_people)
@@ -2087,7 +2112,7 @@ def install_assistant_routes(app, current_user, family_guard):
                     "data_completeness":"insufficient", "memory_proposals":[]})
         # A clear measurement statement is handled locally as a pending proposal,
         # not sent to an external model and never written without user confirmation.
-        if explicit_measurements and (explicit_memory_command or not _looks_like_hypothetical_measurement(query)):
+        if (explicit_measurements or explicit_memory_facts) and (explicit_memory_command or not _looks_like_hypothetical_measurement(query)):
             if len(mentioned) != 1:
                 ai_trace_log.emit(trace_id, "patient.memory_target_ambiguous",
                     scoped_patient_count=len(scoped_people), model_called=False)
@@ -2111,10 +2136,23 @@ def install_assistant_routes(app, current_user, family_guard):
                     ))
                 except ValueError as exc:
                     logging.warning("Could not create direct memory proposal (%s)", type(exc).__name__)
+            for fact in explicit_memory_facts:
+                try:
+                    direct_proposals.append(patient_memory.propose_fact(
+                        fid, mentioned[0], fact["text"], fact["category"], date.today().isoformat(),
+                        memory_key=fact["memory_key"],
+                        reason="Сведения сообщены пользователем и не подтверждены медицинским документом. Проверьте формулировку; запись попадёт в активную память только после подтверждения.",
+                        actor_id=uid,
+                    ))
+                except ValueError as exc:
+                    logging.warning("Could not create explicit memory proposal (%s)", type(exc).__name__)
             if direct_proposals:
-                answer = ("Подготовил предложение сохранить данные со слов пользователя. Проверь значения и подтверди сохранение ниже." if explicit_memory_command else "Распознал сообщённые параметры и подготовил предложения для памяти. Проверь значения и подтверди сохранение ниже.")
+                if explicit_memory_facts:
+                    answer = "Подготовил предложение добавить в память сведения об аллергии со слов пользователя. Проверь формулировку и подтверди сохранение ниже."
+                else:
+                    answer = ("Подготовил предложение сохранить данные со слов пользователя. Проверь значения и подтверди сохранение ниже." if explicit_memory_command else "Распознал сообщённые параметры и подготовил предложения для памяти. Проверь значения и подтверди сохранение ниже.")
             else:
-                answer = "Такие значения уже есть в памяти и не требуют обновления. Ничего не изменено."
+                answer = "Подходящее предложение уже ожидает подтверждения или данные не требуют обновления. Активная память не изменена."
             ai_trace_log.emit(trace_id, "response.complete", status="ok", mode="memory_update",
                 answer_chars=len(answer), proposal_count=len(direct_proposals), model_called=False)
             return JSONResponse({"mode":"memory_update", "answer":answer,
