@@ -62,6 +62,10 @@ for item in .env data; do
 done
 
 [[ -f "$DB_FILE" ]] || { echo "Database not found at $DB_FILE; refusing deployment without a verified backup." >&2; exit 5; }
+
+# Fail closed before backup/build/restart. Never auto-edit .env during deployment.
+python3 "$DEPLOY_WORKTREE/scripts/check_production_env.py" --env-file "$DEPLOY_WORKTREE/.env"
+
 mkdir -p "$BACKUP_ROOT"
 chmod 700 "$BACKUP_ROOT"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
