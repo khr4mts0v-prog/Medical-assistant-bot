@@ -908,3 +908,79 @@ button.home-react-stat{cursor:pointer}
 .memory-notice{padding:12px 14px;margin:0 0 14px;border-radius:10px;background:#eaf7ee;color:#17643a}
 .memory-disclaimer{padding:0 4px;color:var(--muted,#64748b);font-size:13px;line-height:1.5}
 @media(max-width:700px){.memory-react-screen{padding:18px 12px 36px}.memory-react-header{display:block}.memory-header-actions{margin-top:14px}.memory-header-actions button{flex:1}.memory-section{padding:16px}.memory-section h2{font-size:17px}}
+
+/* Home hierarchy: ask first, upload second, family members third. */
+html,body,#root,.app-frame,.main-area,.page-content,.home-react-screen,.legacy-content{min-width:0;max-width:100%}
+body{overflow-x:hidden}
+.home-react-screen{display:flex;flex-direction:column;gap:0;padding-bottom:calc(18px + env(safe-area-inset-bottom))}
+.home-react-screen>.home-react-hero{order:1}
+.home-react-screen>.notice-warning,.home-react-screen>.error-banner,.home-react-screen>.skeleton{order:0}
+.home-react-screen>.home-react-quick-query{order:0}
+.home-react-screen>.home-react-upload-section{order:2}
+.home-react-screen>.home-react-family-members,.home-react-screen>.home-react-no-family{order:3}
+.home-react-screen>.home-react-safety{order:4}
+.home-react-screen>.home-react-archive-selector{display:none!important}
+.home-react-family-members>.home-react-section-heading:not(.home-react-patients-heading),.home-react-family-members>.home-react-stats{display:none!important}
+.home-react-quick-query{padding:17px!important;border:1px solid #dfe8f5!important;border-radius:18px!important;background:#fff;box-shadow:0 3px 12px rgba(35,67,109,.04)}
+.home-react-quick-query .home-react-section-heading{margin-bottom:12px}
+.home-react-quick-query .home-react-section-heading h2{margin:2px 0 5px;font-size:clamp(20px,4.5vw,25px);letter-spacing:-.035em}
+.home-react-quick-query .home-react-section-heading p{margin:0;line-height:1.45}
+.home-react-query-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px;align-items:stretch}
+.home-react-query-form textarea{width:100%;min-width:0;min-height:58px;resize:vertical;padding:12px 13px;border:1px solid #d9e3f1;border-radius:13px;background:#f9fbff;color:#1f3453;font:inherit;line-height:1.45}
+.home-react-query-form button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:48px;padding:10px 15px;border:0;border-radius:13px;background:#2868d7;color:#fff;font-weight:750;white-space:nowrap}
+.home-react-query-form button:disabled{opacity:.5;cursor:not-allowed}
+.home-react-query-note{margin:9px 0 0;color:#74839a;font-size:12px;line-height:1.4}
+.home-react-upload-section{margin-top:12px}
+.home-react-family-members{margin-top:12px}
+.home-react-family-members .home-react-patients-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.home-react-family-members .home-react-patients-heading h2{margin:0 0 4px;font-size:23px;letter-spacing:-.035em}
+.home-react-family-members .home-react-patients-heading p{margin:0}
+.home-react-family-members .home-react-patients-heading>.button-link{flex:0 0 auto;min-height:44px;white-space:nowrap}
+.home-react-inbox{display:flex;align-items:center;gap:9px;width:100%;min-width:0;min-height:46px;margin:0 0 12px;padding:10px 12px;border:1px solid #f0dfbd;border-radius:13px;background:#fffaf0;color:#74521d;text-align:left;font-weight:650}
+.home-react-inbox span{flex:1;min-width:0;overflow-wrap:anywhere}
+.home-react-no-family{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin-top:12px;padding:18px}
+.home-react-no-family>strong{font-size:17px}
+.home-react-no-family>p{margin:0;color:var(--muted);line-height:1.5}
+.home-react-no-family>button{min-height:44px;padding:10px 14px;border:0;border-radius:12px;background:var(--blue);color:#fff;font-weight:700}
+.home-react-safety{display:flex;align-items:flex-start;gap:8px;margin:14px 2px 0;padding:10px 12px;border:1px solid #e9e0c9;border-radius:12px;background:#fffdf7;color:#786846;font-size:12px;line-height:1.45}
+.home-react-safety svg{flex:0 0 auto;margin-top:1px}
+.settings-react-archive-admin{margin-bottom:14px}
+.settings-disclosure{min-width:0;width:100%}
+.settings-view>.settings-disclosure{display:block}
+.settings-disclosure>summary{position:relative;display:flex;align-items:center;gap:10px;min-height:48px;padding:10px 34px 10px 0;cursor:pointer;list-style:none;font-weight:750;color:#243b5b}
+.settings-disclosure>summary>span:last-child{display:grid;gap:3px;min-width:0}
+.settings-disclosure>summary small{color:var(--muted);font-size:12px;font-weight:500;line-height:1.4}
+.settings-disclosure>summary::-webkit-details-marker{display:none}
+.settings-disclosure>summary:after{content:"＋";position:absolute;right:3px;top:50%;transform:translateY(-50%);color:var(--blue);font-size:23px;font-weight:400}
+.settings-disclosure[open]>summary:after{content:"−"}
+.settings-disclosure-body{padding:8px 0 3px;min-width:0}
+.settings-react-archive-list{display:grid;gap:8px;margin:7px 0 14px}
+.settings-react-archive-list button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-width:0;min-height:48px;padding:11px 13px;border:1px solid var(--line);border-radius:12px;background:#fff;color:#243b5b;text-align:left}
+.settings-react-archive-list button.selected{border-color:#9bbdf5;background:#f1f6ff}
+.settings-react-archive-list button span{min-width:0;overflow-wrap:anywhere}
+.settings-react-archive-list small{color:var(--muted);font-size:12px;white-space:nowrap}
+.settings-react-create-form{display:grid;gap:9px;margin-top:12px}
+.settings-react-create-form label{font-size:13px;font-weight:700}
+.settings-react-create-form input{width:100%;min-width:0;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fff;color:inherit}
+.settings-react-create-form button{min-height:44px;padding:10px 13px;border:0;border-radius:12px;background:var(--blue);color:#fff;font-weight:750}
+.settings-react-create-form button:disabled{opacity:.55}
+.settings-react-create-form .error-text{margin:0;color:#9b2922;font-size:13px}
+@media(max-width:600px){
+ .main-area{padding-left:12px;padding-right:12px}
+ .topbar{margin-left:-12px;margin-right:-12px;padding-left:12px;padding-right:12px;gap:8px}
+ .topbar-title{min-width:0;overflow-wrap:anywhere;font-size:14px}
+ .home-react-quick-query{padding:14px!important}
+ .home-react-query-form{grid-template-columns:minmax(0,1fr)}
+ .home-react-query-form button{width:100%}
+ .home-react-family-members .home-react-patients-heading{align-items:flex-start;flex-wrap:wrap}
+ .home-react-family-members .home-react-patients-heading>.button-link{width:100%}
+ .home-react-family-members .home-react-patient{min-width:0;max-width:100%}
+ .settings-react-archive-admin{padding:14px}
+ .settings-react-archive-list button{align-items:flex-start;flex-wrap:wrap}
+ .settings-react-archive-list small{white-space:normal}
+}
+.document-pdf-pages{display:grid;gap:12px;min-width:0}
+.document-pdf-page{min-width:0;margin:0;padding:0;border:0;overflow:hidden}
+.document-pdf-page-label{padding:8px 11px;border:1px solid #d8e2f0;border-bottom:0;border-radius:11px 11px 0 0;background:#f4f7fc;color:#526780;font-size:12px;font-weight:700}
+.document-pdf-page img{display:block;width:100%;max-width:100%;height:auto;margin:0;border:1px solid #d8e2f0;border-radius:0 0 11px 11px;background:#fff;object-fit:contain}
+.document-pdf-pages>p{margin:4px 0 0;font-size:13px;overflow-wrap:anywhere}

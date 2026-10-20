@@ -835,7 +835,7 @@ def unified_search(q:str="",family_id:int|None=None,patient:str="",uid:int=Depen
         a=d.get("analysis") or {}
         title=display_document_title(d,a)
         link=f'<p><a href="/families/{fid}/documents/{int(d["id"])}">Открыть оригинал</a></p>' if (STORAGE_BACKEND=="local" or is_demo_user(uid)) and d.get("remote") else ""
-        b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Тип: {html.escape(str(d.get("kind") or "не определено"))}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}{link}<p><a href="/families/{fid}/patients/{__import__("urllib.parse",fromlist=["quote"]).quote(chosen["name"],safe="")}">История пациента</a></p><details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape((d.get("text") or "")[:4000])+'</pre></details></div>')
+        b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Тип: {html.escape(str(d.get("kind") or "не определено"))}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}{link}<p><a href="/families/{fid}/patients/{__import__("urllib.parse",fromlist=["quote"]).quote(chosen["name"],safe="")}">История пациента</a></p><details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape(_format_ocr_preview(d.get("text"))[:4000])+'</pre></details></div>')
     return page("Поиск по архиву","".join(b))
 
 
@@ -1322,9 +1322,15 @@ def document_editor_api(fid:int,doc_id:int,uid:int=Depends(current_user)):
     analysis=d.get("analysis") or {}
     suffix=Path(str(d.get("name") or "")).suffix.lower()
     preview_url=None
+    page_count=0
     if suffix==".pdf":
         if STORAGE_BACKEND=="local" or is_demo_user(uid):
             preview_url=f"/families/{fid}/documents/{doc_id}/original"
+            try:
+                page_count=min(1000,int(_pdf_page_count(_read_verified_local_document_pdf(fid,d))))
+            except Exception as exc:
+                logging.warning("Document editor PDF page count unavailable (%s)",type(exc).__name__)
+                page_count=0
     elif suffix in {".png",".jpg",".jpeg",".webp",".bmp",".tif",".tiff"}:
         preview_url=f"/families/{fid}/documents/{doc_id}/preview"
     return {
@@ -1335,9 +1341,11 @@ def document_editor_api(fid:int,doc_id:int,uid:int=Depends(current_user)):
         "kind":str(d.get("kind") or "не определено"),
         "title":str(display_document_title(d,analysis)),
         "date":str(d.get("date") or ""),
-        "ocr_text":str(d.get("text") or ""),
+        "ocr_text":_format_ocr_preview(d.get("text")),
+        "ocr_text_raw":str(d.get("text") or ""),
         "kinds":["не определено"]+sorted(DOCUMENT_TYPE_RULES.keys()),
         "preview_url":preview_url,
+        "page_count":page_count,
     }
 
 
@@ -1371,7 +1379,7 @@ def edit_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
     body+="<form method=\"post\" action=\"/families/"+str(fid)+"/documents/"+str(doc_id)+"/edit\"><label>Тип обследования<br><select name=\"kind\" required>"+options+"</select></label><br>"
     body+="<label>Название для архива<br><input type=\"text\" name=\"title\" maxlength=\"180\" value=\""+html.escape(str(title),quote=True)+"\" required></label><br>"
     body+="<label>Дата документа (ДД-ММ-ГГГГ)<br><input type=\"text\" name=\"date\" maxlength=\"10\" placeholder=\"17-03-2025\" value=\""+html.escape(str(d.get("date") or ""),quote=True)+"\"></label>"
-    body+="<label>Распознанный текст (OCR)<br><textarea name=\"ocr_text\" rows=\"12\" maxlength=\"100000\" style=\"width:100%;min-height:260px;resize:vertical;font:inherit;padding:12px;border:1px solid #d5e0f0;border-radius:12px;box-sizing:border-box\">"+html.escape(str(d.get("text") or ""))+"</textarea></label>"
+    body+="<label>Распознанный текст (OCR)<br><textarea name=\"ocr_text\" rows=\"12\" maxlength=\"100000\" style=\"width:100%;min-height:260px;resize:vertical;font:inherit;padding:12px;border:1px solid #d5e0f0;border-radius:12px;box-sizing:border-box\">"+html.escape(_format_ocr_preview(d.get("text")))+"</textarea></label>"
     body+="<p class=\"muted\">Исходный файл не изменяется. Исправленный OCR будет использоваться для поиска и последующего анализа.</p><button type=\"submit\">Сохранить изменения</button></form>"
     body+='<form method="post" action="/families/'+str(fid)+'/documents/'+str(doc_id)+'/delete" onsubmit="return confirm(\'Удалить документ и его OCR-файл из архива? Это действие нельзя отменить.\')"><input type="hidden" name="confirm" value="yes"><button class="danger" type="submit">Удалить документ</button></form>'
     return page("Редактирование документа",body)
@@ -1619,6 +1627,62 @@ def assign_selected_pending(fid:int,patient:str=Form(...),pending_ids:list[int]=
     body='<p><a href="/families/'+str(fid)+'/inbox">← Ко входящим</a></p><h2>Результат массового назначения</h2><div class="card"><ul>'+''.join(results)+'</ul></div>'
     return page("Массовое назначение",body)
 
+def _format_ocr_preview(value):
+    """Render serialized page/text records readably without altering ordinary OCR text."""
+    import ast
+
+    raw = str(value or "")
+    candidate = raw.strip()
+    if not candidate or candidate[0] not in "[{":
+        return raw
+    try:
+        parsed = ast.literal_eval(candidate)
+    except (SyntaxError, ValueError, TypeError):
+        return raw
+
+    records = parsed if isinstance(parsed, list) else [parsed]
+    if not records or not all(
+        isinstance(record, dict)
+        and "text" in record
+        and ("page" in record or len(records) == 1)
+        for record in records
+    ):
+        return raw
+
+    formatted = []
+    for index, record in enumerate(records, start=1):
+        page = record.get("page", index)
+        text = record.get("text")
+        if not isinstance(text, str):
+            return raw
+        formatted.append(f"--- Страница {page} ---\n{text.strip()}")
+    return "\n\n".join(formatted)
+
+
+def _read_verified_local_document_pdf(fid, document):
+    """Read a PDF only from the authorized patient's own local archive directory."""
+    from local_storage import DATA_ROOT, _component
+
+    root = DATA_ROOT.resolve()
+    patient = str(document.get("patient") or "")
+    expected = (root / f"family_{int(fid)}" / _component(patient)).resolve()
+    if root not in expected.parents:
+        raise HTTPException(400, "Каталог документа вне хранилища")
+    raw = Path(str(document.get("remote") or ""))
+    if not str(document.get("remote") or "") or raw.is_symlink():
+        raise HTTPException(404, "Оригинал PDF не найден")
+    try:
+        resolved = raw.resolve(strict=True)
+    except (OSError, ValueError):
+        raise HTTPException(404, "Оригинал PDF не найден")
+    if resolved.parent != expected or root not in resolved.parents or not resolved.is_file():
+        raise HTTPException(404, "Оригинал PDF не найден")
+    try:
+        return resolved.read_bytes()
+    except OSError:
+        raise HTTPException(404, "Оригинал PDF не найден")
+
+
 def _pdf_page_count(file_bytes):
     import fitz
     with fitz.open(stream=bytes(file_bytes), filetype="pdf") as document:
@@ -1634,6 +1698,30 @@ def _render_pdf_page(file_bytes, page_number):
         page = document.load_page(page_number - 1)
         pixmap = page.get_pixmap(matrix=fitz.Matrix(1.35, 1.35), alpha=False)
         return pixmap.tobytes("png")
+
+
+@app.get("/families/{fid}/documents/{doc_id}/preview/page/{page_number}")
+def preview_document_pdf_page(fid:int,doc_id:int,page_number:int,uid:int=Depends(current_user)):
+    """Render an authenticated PDF page for the normal archived-document editor."""
+    family(fid,uid)
+    document=db.get_doc(fid,doc_id)
+    if not document:
+        raise HTTPException(404,"Документ не найден")
+    if Path(str(document.get("name") or "")).suffix.lower() != ".pdf":
+        raise HTTPException(415,"Предпросмотр страниц доступен только для PDF")
+    if STORAGE_BACKEND != "local" and not is_demo_user(uid):
+        raise HTTPException(503,"Встроенный просмотр страниц PDF пока поддерживает локальное хранилище")
+    try:
+        pdf_bytes=_read_verified_local_document_pdf(fid,document)
+        image_bytes=_render_pdf_page(pdf_bytes,page_number)
+    except HTTPException:
+        raise
+    except IndexError:
+        raise HTTPException(404,"Страница PDF не найдена")
+    except Exception as exc:
+        logging.warning("Archived PDF page render failed (%s)",type(exc).__name__)
+        raise HTTPException(422,"Не удалось отобразить страницу PDF")
+    return Response(content=image_bytes,media_type="image/png",headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
 
 
 @app.get("/families/{fid}/inbox/{pending_id}/preview")
@@ -1696,7 +1784,7 @@ def pending_document_review_api(fid:int,pending_id:int,uid:int=Depends(current_u
     patients=[{"name":str(p["name"]),"birth_date":str(p.get("birth_date") or "")} for p in db.patient_records(fid)]
     current_kind=str(analysis.get("primary_type") or "не определено")
     return {"family_id":int(fid),"pending_id":int(pending_id),"source_name":str(d.get("name") or "document"),
-        "created":str(d.get("created") or ""),"ocr_text":str(d.get("text") or "")[:12000],
+        "created":str(d.get("created") or ""),"ocr_text":_format_ocr_preview(d.get("text"))[:12000],
         "patient_options":patients,"kinds":[{"value":k,"label":labels.get(k,k[:1].upper()+k[1:])} for k in kinds],
         "kind":current_kind if current_kind in kinds else "не определено",
         "title":str(analysis.get("display_title") or analysis.get("primary_type") or d.get("name") or "Документ"),
@@ -1733,7 +1821,7 @@ def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)
             preview=f'<div class="pdf-preview"><div class="pdf-preview-toolbar">Предпросмотр PDF · встроенный просмотрщик</div><iframe src="{preview_url}#toolbar=1&navpanes=0&scrollbar=1" title="Предпросмотр PDF" loading="lazy"></iframe><p><a href="{preview_url}" target="_blank" rel="noopener">Открыть PDF отдельно ↗</a></p></div>'
     else:
         preview=""
-    body=f'<p><a href="/families/{fid}/inbox">← К входящим</a></p><h2>Классификация документа</h2><div class="card pending-review-card"><strong>Файл:</strong> {html.escape(d["name"])}{preview}<details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape(d["text"][:12000])}</pre></details></div>'
+    body=f'<p><a href="/families/{fid}/inbox">← К входящим</a></p><h2>Классификация документа</h2><div class="card pending-review-card"><strong>Файл:</strong> {html.escape(d["name"])}{preview}<details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape(_format_ocr_preview(d.get("text"))[:12000])}</pre></details></div>'
     body+=f'<p><a href="/families/{fid}/patients/new">＋ Добавить пациента</a></p>'
     body+=f'<form class="pending-classification-form" method="post" action="/families/{fid}/inbox/{pending_id}/assign"><label>Пациент<br><select name="patient" required>{patient_options}</select></label><label>Тип документа<br><select name="kind" required>{kind_options}</select></label><label>Название в архиве<br><input name="title" required maxlength="180" value="{html.escape(str(d["analysis"].get("display_title") or d["analysis"].get("primary_type") or d["name"]),quote=True)}"></label><label>Дата документа (ДД-ММ-ГГГГ)<br><input name="date" placeholder="17-03-2025" maxlength="10"></label><p><button type="submit">Сохранить в историю пациента</button></p></form>'
     body+=f'<form class="pending-delete-form" method="post" action="/families/{fid}/inbox/{pending_id}/delete" onsubmit="return confirm(\'Удалить этот документ из входящих без возможности восстановления?\')"><input type="hidden" name="confirm" value="yes"><button type="submit">Удалить документ</button></form>'
