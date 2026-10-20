@@ -49,6 +49,12 @@ class ProductionEnvironmentPreflightTests(unittest.TestCase):
         self.assertTrue(any("FERNET_KEY" in error for error in errors))
         self.assertTrue(any("DEMO_USERNAME" in error for error in errors))
 
+    def test_rejects_full_content_ai_trace_logging(self):
+        env = self.valid_env()
+        env["AI_TRACE_FULL_CONTENT_ENABLED"] = "true"
+        errors = preflight.validate(env)
+        self.assertTrue(any("AI_TRACE_FULL_CONTENT_ENABLED" in error for error in errors))
+
     def test_env_parser_and_permissions_check_do_not_print_secret_values(self):
         env = self.valid_env()
         with tempfile.TemporaryDirectory() as directory:
