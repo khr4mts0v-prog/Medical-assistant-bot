@@ -636,6 +636,7 @@ function App() {
   const [modalBusy, setModalBusy] = useState(false);
   const [smartSearchOpen, setSmartSearchOpen] = useState(false);
   const [patientAssistantScope, setPatientAssistantScope] = useState<{familyId:number; patient:string} | null>(null);
+  const [assistantFamilyId, setAssistantFamilyId] = useState<number | null>(null);
   const [documentSelectionActive, setDocumentSelectionActive] = useState(false);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<number[]>([]);
   const [smartQuery, setSmartQuery] = useState('');
@@ -654,14 +655,23 @@ function App() {
 
   useEffect(() => {
     if (!assistantRoute) return;
+    let active = true;
     const params = new URLSearchParams(path.split('?')[1] || '');
-    const familyId = Number(params.get('family_id') || 0);
+    const requestedFamilyId = Number(params.get('family_id') || 0);
     const patient = (params.get('patient') || '').trim();
-    setPatientAssistantScope(patient && familyId > 0 ? {familyId, patient} : null);
+    setAssistantFamilyId(requestedFamilyId > 0 ? requestedFamilyId : null);
+    setPatientAssistantScope(patient && requestedFamilyId > 0 ? {familyId:requestedFamilyId, patient} : null);
+    if (requestedFamilyId <= 0) {
+      fetch('/api/home', {credentials:'same-origin',headers:{Accept:'application/json'},cache:'no-store'})
+        .then(response => response.ok ? response.json() : Promise.reject(new Error('Не удалось определить семейный архив')))
+        .then(data => { if (active) setAssistantFamilyId(Number(data.selected_family_id) || null); })
+        .catch(() => { if (active) setAssistantFamilyId(null); });
+    }
     setDocumentSelectionActive(false);
     setSelectedDocumentIds([]);
     setSmartConversation([]); setSmartQuery(''); setSmartResult(null); setSmartError(''); setSmartConsent(false);
     setSmartSearchOpen(true);
+    return () => { active = false; };
   }, [assistantRoute, path]);
 
   useEffect(() => {
@@ -1051,7 +1061,7 @@ function App() {
             if (!submittedQuestion) return;
             setSmartBusy(true);setSmartError('');
             try {
-              const familyId = patientAssistantScope?.familyId || Number(new URLSearchParams(location.search).get('family_id') || 0) || undefined;
+              const familyId = patientAssistantScope?.familyId || Number(new URLSearchParams(location.search).get('family_id') || 0) || assistantFamilyId || undefined;
               const selectionMode = Boolean(patientAssistantScope && documentSelectionActive);
               if (selectionMode && selectedDocumentIds.length === 0) throw new Error('Отметьте документы в дереве пациента или отключите режим выбора.');
               if (selectionMode && selectedDocumentIds.length > 40) throw new Error('Выбрано слишком много документов. Максимум — 40 за один запрос.');
