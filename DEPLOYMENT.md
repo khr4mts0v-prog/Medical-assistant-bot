@@ -30,7 +30,7 @@ The preflight requires:
 - Keep port 8000 bound to 127.0.0.1; do not expose it directly to the internet. Use HTTPS via Nginx.
 - Back up `data/` and FERNET_KEY securely; test restoration. Keep the encryption key separate from database backups.
 - The database encrypts OCR text, keywords, analysis and pending-file bytes with Fernet. **Local originals and OCR sidecars are plaintext files** with restrictive file permissions; filesystem encryption is still required for production use. Restrict VPS and administrator access and use encrypted backups.
-- Never upload real medical records to this test MVP. It lacks per-person web accounts, rate limiting, a full security review, and comprehensive integration tests.
+- Do not treat this MVP as publicly production-ready until the full security review and integration-test gates are complete. Web access currently uses a configured owner account rather than per-person web accounts. AI and upload endpoints have process-local rate limits, which must be complemented by reverse-proxy limits and are not a substitute for a full security review.
 - The browser login uses a signed, HttpOnly, Secure, SameSite=Lax cookie with a bounded lifetime. Legacy HTTP Basic clients remain supported. The web login still represents the configured web owner account; family memberships are stored in the existing family_members table using a negative numeric principal ID, separate from positive Telegram IDs.
 - AI analysis sends selected OCR text to Hugging Face after consent. Verify provider billing and privacy terms before enabling.
 

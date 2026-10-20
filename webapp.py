@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 import requests
 from fastapi import FastAPI, Depends, File, Form, HTTPException, UploadFile, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import database as db, tenancy
 from cloud import YaDiskClient
@@ -129,6 +129,11 @@ DEMO_UID_FLOOR=10**15
 DEMO_UID=-(DEMO_UID_FLOOR + int(hashlib.sha256(b"medical-archive-demo-tenant-v1").hexdigest()[:14],16))
 AUTH_FAILURES={}
 AUTH_FAILURES_LOCK=threading.Lock()
+# Expensive request limits are per authenticated identity and per operation. These are
+# process-local safeguards for this single-worker deployment, not a replacement for proxy limits.
+RATE_LIMIT_POLICIES = {"ai": (20, 60.0), "upload": (10, 60.0)}
+RATE_LIMIT_EVENTS = {}
+RATE_LIMIT_LOCK = threading.Lock()
 DEMO_CLEANUP_STARTED=False
 DEMO_MAX_ACTIVE_TENANTS=max(1,int(os.getenv("DEMO_MAX_ACTIVE_TENANTS","20")))
 DEMO_MAX_DOCUMENTS=max(1,int(os.getenv("DEMO_MAX_DOCUMENTS","10")))
@@ -186,6 +191,74 @@ async def redirect_unauthenticated_browser_to_login(request: Request, call_next)
             target += "?" + request.url.query
         return RedirectResponse(url="/login?" + urlencode({"next": target}), status_code=303)
     return response
+
+
+def _rate_limit_category(path, method):
+    if method.upper() != "POST":
+        return None
+    if path == "/api/intelligent-search":
+        return "ai"
+    if path == "/upload" or path.endswith("/upload"):
+        return "upload"
+    return None
+
+
+def _rate_limit_identity(request: Request):
+    session_uid = _read_session(request.cookies.get(SESSION_COOKIE_NAME, ""))
+    if session_uid is not None:
+        return "uid:" + str(session_uid)
+    demo_cookie = request.cookies.get("medical_demo_session", "")
+    if demo_cookie:
+        return "demo:" + hashlib.sha256(demo_cookie.encode()).hexdigest()[:24]
+    authorization = request.headers.get("authorization", "")
+    if authorization.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(authorization[6:], validate=True).decode("utf-8")
+            username = decoded.split(":", 1)[0].casefold()
+            return "basic:" + hashlib.sha256(username.encode()).hexdigest()[:24]
+        except (ValueError, UnicodeDecodeError):
+            pass
+    host = request.client.host if request.client else "unknown"
+    return "ip:" + str(host)
+
+
+def _consume_rate_limit(category, identity, now=None):
+    policy = RATE_LIMIT_POLICIES.get(category)
+    if not policy:
+        return False, 0
+    limit, window = policy
+    now = time.monotonic() if now is None else float(now)
+    key = (category, identity)
+    with RATE_LIMIT_LOCK:
+        if len(RATE_LIMIT_EVENTS) > 10000:
+            for old_key, old_events in list(RATE_LIMIT_EVENTS.items()):
+                fresh = [stamp for stamp in old_events if now - stamp < window]
+                if fresh:
+                    RATE_LIMIT_EVENTS[old_key] = fresh
+                else:
+                    RATE_LIMIT_EVENTS.pop(old_key, None)
+        events = [stamp for stamp in RATE_LIMIT_EVENTS.get(key, []) if now - stamp < window]
+        if len(events) >= limit:
+            RATE_LIMIT_EVENTS[key] = events
+            return True, max(1, int(window - (now - events[0]) + 0.999))
+        events.append(now)
+        RATE_LIMIT_EVENTS[key] = events
+        return False, 0
+
+
+@app.middleware("http")
+async def limit_expensive_requests(request: Request, call_next):
+    category = _rate_limit_category(request.url.path, request.method)
+    if category:
+        limited, retry_after = _consume_rate_limit(category, _rate_limit_identity(request))
+        if limited:
+            return JSONResponse(
+                {"detail": "Слишком много запросов. Подождите немного и повторите."},
+                status_code=429,
+                headers={"Retry-After": str(retry_after), "Cache-Control": "no-store"},
+            )
+    return await call_next(request)
+
 
 def current_user(request: Request, credentials: HTTPBasicCredentials|None=Depends(security))->int:
     # A valid signed session takes precedence for PWA requests; legacy HTTP Basic remains supported.
