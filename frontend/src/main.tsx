@@ -188,6 +188,64 @@ function HomeReactView({familyId,onNavigate}: {familyId:number|null;onNavigate:(
   </div>;
 }
 
+type InboxDocument = {id:number;title:string;created:string;kind:string;review_required:boolean;url:string};
+type InboxPayload = {family_id:number;documents:InboxDocument[];patients:string[];count:number};
+
+function InboxReactView({familyId,onNavigate}: {familyId:number;onNavigate:(url:string)=>void}) {
+  const [payload,setPayload]=useState<InboxPayload|null>(null);
+  const [busy,setBusy]=useState(true);
+  const [error,setError]=useState('');
+  const [selected,setSelected]=useState<number[]>([]);
+  const [patient,setPatient]=useState('');
+  const [assignBusy,setAssignBusy]=useState(false);
+  const [status,setStatus]=useState('');
+  const [refreshKey,setRefreshKey]=useState(0);
+  useEffect(()=>{
+    let active=true;
+    setBusy(true);setError('');
+    fetch('/api/families/'+familyId+'/inbox',{credentials:'same-origin',headers:{Accept:'application/json'}})
+      .then(async response=>{const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.detail||'Не удалось загрузить входящие');return data as InboxPayload;})
+      .then(data=>{if(active){setPayload(data);setPatient(current=>data.patients.includes(current)?current:(data.patients[0]||''));setSelected([]);}})
+      .catch(e=>{if(active)setError(e instanceof Error?e.message:'Ошибка загрузки входящих');})
+      .finally(()=>{if(active)setBusy(false);});
+    return ()=>{active=false;};
+  },[familyId,refreshKey]);
+  const assignSelected=async(event:React.FormEvent<HTMLFormElement>)=>{
+    event.preventDefault();
+    if(!payload||!selected.length||!patient)return;
+    setAssignBusy(true);setStatus('');setError('');
+    try {
+      const data=new FormData();data.set('patient',patient);selected.forEach(id=>data.append('pending_ids',String(id)));
+      const response=await fetch('/families/'+familyId+'/inbox/assign-selected',{method:'POST',body:data,credentials:'same-origin'});
+      const body=await response.text();
+      if(!response.ok)throw new Error('Не удалось назначить документы (HTTP '+response.status+').');
+      if(!body.includes('Результат массового назначения')&&!body.toLowerCase().includes('назначен пациенту'))throw new Error('Сервер не подтвердил назначение. Проверь входящие перед повтором.');
+      setStatus('Результат обработки получен. Проверь оставшиеся документы во входящих.');
+      setSelected([]);
+      setRefreshKey(v=>v+1);
+    } catch(e){setError(e instanceof Error?e.message:'Ошибка назначения документов');}
+    finally{setAssignBusy(false);}
+  };
+  return <div className="inbox-react-screen">
+    <div className="inbox-react-header"><button type="button" className="inbox-back-link" onClick={()=>onNavigate('/?family_id='+familyId)}>← В архив</button><div className="eyebrow">ТРЕБУЮТ ПРОВЕРКИ</div><h1>Входящие документы</h1><p>Назначь документ нужному пациенту. Если тип или дата определены неверно, открой файл и проверь его отдельно.</p></div>
+    {error&&<div className="error-banner" role="alert">{error}<button type="button" onClick={()=>setRefreshKey(v=>v+1)}>Повторить</button></div>}
+    {status&&<div className="notice-success" role="status">{status}</div>}
+    {busy&&<div className="skeleton"><div/><div/><div/></div>}
+    {!busy&&payload&&payload.count>0&&<>
+      <div className="inbox-react-summary"><ClipboardCheck size={20}/><span><strong>{payload.count} документов</strong><small>Сохранены во входящих до назначения пациента</small></span></div>
+      <form className="inbox-react-bulk" onSubmit={assignSelected}>
+        <div className="inbox-react-bulk-heading"><div><h2>Массовое назначение</h2><p>Отметь документы одного пациента. Тип и дата каждого файла обрабатываются отдельно.</p></div><span>{selected.length} выбрано</span></div>
+        <label className="inbox-react-select-all"><input type="checkbox" checked={payload.documents.length>0&&selected.length===payload.documents.length} onChange={e=>setSelected(e.target.checked?payload.documents.map(doc=>doc.id):[])}/> Выбрать все документы</label>
+        <label className="inbox-react-patient-label">Назначить пациенту<select value={patient} onChange={e=>setPatient(e.target.value)} required disabled={!payload.patients.length}><option value="" disabled>Выбери пациента</option>{payload.patients.map(name=><option key={name} value={name}>{name}</option>)}</select></label>
+        <div className="inbox-react-documents">{payload.documents.map(doc=><article className="inbox-react-document" key={doc.id}><label className="inbox-react-check"><input type="checkbox" checked={selected.includes(doc.id)} onChange={e=>setSelected(current=>e.target.checked?[...current,doc.id]:current.filter(id=>id!==doc.id))}/></label><button type="button" className="inbox-react-document-main" onClick={()=>onNavigate(doc.url)}><strong>{doc.title}</strong><span>{doc.kind} · Добавлен: {doc.created||'дата неизвестна'}</span><small>Открыть и классифицировать отдельно</small></button><button type="button" className="inbox-react-open" onClick={()=>onNavigate(doc.url)} aria-label="Открыть документ"><ChevronRight size={19}/></button></article>)}</div>
+        <button type="submit" disabled={assignBusy||!selected.length||!patient||!payload.patients.length}>{assignBusy?'Обрабатываем…':'Назначить выбранные ('+selected.length+')'}</button>
+        {!payload.patients.length&&<p className="muted">Сначала добавь пациента в семейный архив.</p>}
+      </form>
+    </>}
+    {!busy&&payload&&payload.count===0&&<div className="card inbox-react-empty"><ClipboardCheck size={30}/><h2>Входящих нет</h2><p>Новые документы появятся здесь, если система не смогла уверенно назначить пациента.</p><button type="button" onClick={()=>onNavigate('/?family_id='+familyId)}>Вернуться в архив</button></div>}
+  </div>;
+}
+
 type PatientDocument = { id:number; title:string; kind:string; date:string; metadata:string; finding:string; review_required:boolean; url:string };
 type PatientPayload = { patient:string; family_id:number; query:string; view:string; document_count:number; documents:PatientDocument[]; capabilities:{upload:boolean;patient_memory:boolean;document_selection:boolean;assistant:boolean} };
 
@@ -233,6 +291,8 @@ function PatientReactView({familyId, patient, onAsk}: {familyId:number; patient:
 function App() {
   const [path, setPath] = useState(location.pathname + location.search);
   const patientRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)(?:\?[^#]*)?$/);
+  const inboxRoute = path.match(/^\/families\/(\d+)\/inbox(?:\?[^#]*)?$/);
+  const inboxRouteData = inboxRoute ? {familyId:Number(inboxRoute[1])} : null;
   const patientRouteData = patientRoute ? {familyId:Number(patientRoute[1]), patient:decodeURIComponent(patientRoute[2])} : null;
   const [screen, setScreen] = useState<Screen | null>(null);
   const [loading, setLoading] = useState(true);
@@ -761,7 +821,7 @@ function App() {
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
+        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : inboxRouteData ? <InboxReactView familyId={inboxRouteData.familyId} onNavigate={(url)=>{void navigate(url);}} /> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
         {loading && screen && <div className="loading-line"/>}
       </section>}
     </main>
