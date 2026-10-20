@@ -631,6 +631,13 @@ def _resolve_patient_reference_with_ai(question, patient_records, trace_id=None)
     elif confidence != "high" or not valid_indices:
         status = "ambiguous"
         selected_names = []
+    elif _looks_like_unresolved_person_question(question) and not re.search(
+        r"\\b(?:сравни|сравнить|сравнение|между|разниц\\w*|отличи\\w*|всех|каждого|каждой)\\b",
+        " ".join(str(question or "").casefold().replace("ё", "е").split())
+    ) and len(valid_indices) != 1:
+        # A singular reference must never expand to multiple family members.
+        status = "ambiguous"
+        selected_names = []
     else:
         selected_names = [candidates[index]["name"] for index in valid_indices]
         status = "matched"
@@ -2171,7 +2178,7 @@ def install_assistant_routes(app, current_user, family_guard):
         search_question = query
         history = []
         history_for_model = []
-        if followup and previous_turn:
+        if followup and previous_turn and not needs_patient_resolution:
             previous_question = previous_turn["question"]
             previous_context = "Предыдущий вопрос: " + previous_question
             # In selected-document mode, a prior assistant answer may cite an unselected source.
