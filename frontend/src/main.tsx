@@ -128,7 +128,7 @@ function PatientReactView({familyId, patient, onAsk}: {familyId:number; patient:
   const grouped = payload?.documents.reduce<Record<string,PatientDocument[]>>((acc,doc)=>{(acc[doc.kind || 'Не определено'] ||= []).push(doc);return acc;},{}) || {};
   return <div className="patient-react-screen">
     <div className="patient-react-header"><div><div className="eyebrow">КАРТОЧКА ПАЦИЕНТА</div><h1>{patient}</h1><p className="lead">{payload ? payload.document_count+' документов в архиве' : 'Документы и медицинская история'}</p></div>
-      <div className="patient-react-actions"><button type="button" className="patient-action-primary" onClick={onAsk}><BrainCircuit size={17}/> Спросить ИИ</button><a className="button-link" href={'/patient-memory?family_id='+familyId+'&patient='+encodeURIComponent(patient)}>Память пациента</a><a className="button-link" href={base+'/edit'}>Редактировать</a></div>
+      <div className="patient-react-actions"><button type="button" className="patient-action-primary" onClick={() => onAsk()}><BrainCircuit size={17}/> Спросить ИИ</button><a className="button-link" href={'/patient-memory?family_id='+familyId+'&patient='+encodeURIComponent(patient)}>Память пациента</a><a className="button-link" href={base+'/edit'}>Редактировать</a></div>
     </div>
     <form className="card patient-react-search" onSubmit={event=>event.preventDefault()}><label htmlFor="patient-react-q">Поиск по документам пациента</label><div className="row"><input id="patient-react-q" type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Например: анализы, УЗИ, выписка"/>{query && <button type="button" onClick={()=>setQuery('')}>Сбросить</button>}</div></form>
     {payload?.capabilities.upload && <section className="card patient-react-upload"><h2>Добавить документы</h2><form method="post" encType="multipart/form-data" action={base+'/upload'}><input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" required/><label><input type="checkbox" name="ai_consent" value="true"/> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label><button type="submit">Загрузить и распознать</button></form></section>}
@@ -648,37 +648,3 @@ function App() {
       {settingsOpen ? <section className="settings-view">
         <div className="eyebrow">ПАРАМЕТРЫ</div><h1>Настройки архива</h1><p className="lead">Управление семейным архивом и хранением документов.</p>
         <article className="settings-card"><div className="settings-icon"><Users size={21}/></div><div><h2>Семейный архив</h2><p>Имя архива и данные семьи будут доступны здесь после подключения безопасного редактирования на сервере.</p></div></article>
-        <article className="settings-card"><div className="settings-icon"><Cloud size={21}/></div><div><h2>Хранение документов</h2><p>Сейчас документы хранятся локально на VPS. Подключение Яндекс Диска добавим отдельным этапом с OAuth и проверкой прав доступа.</p><span className="status-pill">Локальное хранилище</span></div></article>
-        <article className="settings-card"><div className="settings-icon"><BrainCircuit size={21}/></div><div>
-          <h2>Внешний ИИ-анализ</h2>
-          <p>При включении внешнему ИИ-провайдеру передаётся ваш вопрос и только отобранные релевантные фрагменты документов выбранного пациента. Весь архив целиком не отправляется. Вход в аккаунт сам по себе не означает согласия.</p>
-          <span className="status-pill">{!aiConsentLoaded ? 'Проверка настроек…' : aiConsentGranted ? 'Согласие включено' : 'Согласие не дано'}</span>
-          {aiConsentError && <p role="alert">{aiConsentError}</p>}
-          <button type="button" disabled={!aiConsentLoaded || aiConsentActionBusy} onClick={async () => {
-            const nextGranted = !aiConsentGranted;
-            setAiConsentActionBusy(true); setAiConsentError('');
-            try {
-              const response = await fetch('/api/ai-consent', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({granted:nextGranted})});
-              const data = await response.json();
-              if (!response.ok) throw new Error(data.detail || data.error || 'Не удалось сохранить согласие');
-              setAiConsentGranted(data.granted === true);
-              setSmartConsent(false);
-              setSmartResult(null);
-              setToast(data.granted ? 'Согласие на внешний ИИ-анализ сохранено' : 'Согласие отозвано');
-              window.setTimeout(() => setToast(''), 3500);
-            } catch (e) { setAiConsentError(e instanceof Error ? e.message : 'Не удалось изменить согласие'); }
-            finally { setAiConsentActionBusy(false); }
-          }}>{aiConsentActionBusy ? 'Сохранение…' : aiConsentGranted ? 'Отозвать согласие' : 'Дать согласие на внешний ИИ-анализ'}</button>
-          <p className="muted">Согласие сохраняется для учётной записи и действует для следующих вопросов, пока вы его не отзовёте. Настройку можно изменить здесь в любое время.</p>
-        </div></article>
-        <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
-      </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')}>
-        {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
-        {loading && screen && <div className="loading-line"/>}
-      </section>}
-    </main>
-  </div>;
-}
-
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
