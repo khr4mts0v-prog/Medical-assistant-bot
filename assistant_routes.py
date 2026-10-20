@@ -522,6 +522,30 @@ def _history_for_current_patient(previous_turn, current_patients, previous_patie
         history = ["Предыдущий вопрос: " + question + " Предыдущий ответ ассистента (только контекст диалога, не медицинский источник): " + answer]
     return history
 
+def _normalize_conversation(raw, family_id, patient_scope):
+    """Accept only turns explicitly tagged for this family and the current patient scope."""
+    if not isinstance(raw, list):
+        return []
+    current_patient = " ".join(str(patient_scope or "").split()) or None
+    normalized = []
+    for turn in raw[-5:]:
+        if not isinstance(turn, dict):
+            continue
+        try:
+            turn_family_id = int(turn.get("family_id"))
+        except (TypeError, ValueError):
+            continue
+        if turn_family_id != int(family_id):
+            continue
+        turn_patient = " ".join(str(turn.get("patient_scope") or "").split()) or None
+        if turn_patient != current_patient:
+            continue
+        question = " ".join(str(turn.get("question") or "").split())[:350]
+        answer = " ".join(str(turn.get("answer") or "").split())[:900]
+        if question:
+            normalized.append({"question": question, "answer": answer})
+    return normalized
+
 
 def _looks_like_patient_fact_fragment(question):
     q = " ".join(str(question or "").casefold().replace("ё", "е").split())
@@ -1916,20 +1940,18 @@ def install_assistant_routes(app, current_user, family_guard):
                 raise HTTPException(400, str(exc))
         elif selected_ids:
             selected_ids = []
-        # Prefer the full conversation payload; retain compatibility with clients sending only history.
-        conversation_raw = payload.get("conversation", [])
-        conversation = []
-        if isinstance(conversation_raw, list):
-            for turn in conversation_raw[-5:]:
-                if not isinstance(turn, dict):
-                    continue
-                previous_q = " ".join(str(turn.get("question") or "").split())[:350]
-                previous_a = " ".join(str(turn.get("answer") or "").split())[:900]
-                if previous_q:
-                    conversation.append({"question": previous_q, "answer": previous_a})
+        # Conversation turns are client-supplied, so scope tags are mandatory. A stale turn
+        # from another family or patient must not become prompt context for this request.
+        conversation_raw = payload.get("conversation")
+        conversation = _normalize_conversation(conversation_raw, fid, forced_patient)
         history_raw = payload.get("history", [])
         legacy_history = [str(x).strip()[:350] for x in history_raw if isinstance(x, str) and str(x).strip()][-5:] if isinstance(history_raw, list) else []
-        previous_turn = conversation[-1] if conversation else ({"question": legacy_history[-1], "answer": ""} if legacy_history else None)
+        # Legacy question-only history is allowed only when the client did not send the
+        # structured conversation field at all; it has no trustworthy patient/family tags.
+        previous_turn = conversation[-1] if conversation else (
+            {"question": legacy_history[-1], "answer": ""}
+            if "conversation" not in payload and legacy_history else None
+        )
         qfold = query.casefold().replace("ё", "е")
         query_mentioned_people = _mentioned_people(patient_records, query)
         current_mentioned = list(query_mentioned_people)
