@@ -1,6 +1,6 @@
 """Patient matching regression cases. Only synthetic names are used."""
 import unittest
-from document_metadata import extract_registered_patient
+from document_metadata import extract_registered_patient, extract_patient_candidate
 
 
 class PatientMatchingTests(unittest.TestCase):
@@ -46,6 +46,23 @@ class PatientMatchingTests(unittest.TestCase):
             {"name": "Маша", "aliases": ["Иванова Мария Сергеевна"]},
         ]
         self.assertEqual(extract_registered_patient("Пациент: Иванов А.С.", roster), "Саша")
+
+    def test_extracts_candidate_only_from_explicit_patient_label(self):
+        self.assertEqual(
+            extract_patient_candidate("ФИО пациента: Иванова Мария Сергеевна\\nДата рождения: 29.07.2026"),
+            "Иванова Мария Сергеевна",
+        )
+
+    def test_candidate_does_not_use_parent_or_doctor_name(self):
+        self.assertIsNone(extract_patient_candidate("ФИО матери: Иванова Анна Сергеевна"))
+        self.assertIsNone(extract_patient_candidate("Врач: Петров Иван Сергеевич"))
+
+    def test_multiple_patient_candidates_are_ambiguous(self):
+        text = "Пациент: Иванова Мария Сергеевна\\nПациент: Петров Иван Иванович"
+        self.assertIsNone(extract_patient_candidate(text))
+
+    def test_incidental_name_is_not_a_candidate(self):
+        self.assertIsNone(extract_patient_candidate("Врач обсудил результаты с Ивановой Марией Сергеевной."))
 
 
 if __name__ == "__main__":
