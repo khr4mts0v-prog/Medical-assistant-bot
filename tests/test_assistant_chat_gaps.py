@@ -475,11 +475,43 @@ class AssistantChatGapTests(unittest.TestCase):
         self.assertEqual({row["id"] for row in selected}, {1, 3})
 
 
-if __name__ == "__main__":
-    unittest.main()
+
+    def test_four_family_members_recognize_common_name_cases_and_nicknames(self):
+        cases = [
+            ("Олег", ["Олег", "Олега", "Олегу", "Олеге", "Олегом", "Олежка", "Олежке", "Олежкой"]),
+            ("Юлия", ["Юля", "Юли", "Юле", "Юлю", "Юлей", "Юлия", "Юлии", "Юлию", "Юлечка", "Юлечке"]),
+            ("Александр", ["Саша", "Саши", "Саше", "Сашу", "Сашкой", "Сашка", "Сашке", "Саня", "Сане", "Сашенька"]),
+            ("Мария", ["Маша", "Маши", "Маше", "Машу", "Машей", "Машка", "Машке", "Машенька"]),
+        ]
+        for registered_name, forms in cases:
+            records = [{"name": registered_name, "aliases": [registered_name]}]
+            for form in forms:
+                with self.subTest(registered_name=registered_name, form=form):
+                    self.assertEqual(assistant._mentioned_people(records, f"Расскажи про {form}"), [registered_name])
+
+    def test_family_nicknames_do_not_cross_match_other_registered_patients(self):
+        records = [
+            {"name": "Олег", "aliases": ["Олег"]},
+            {"name": "Юлия", "aliases": ["Юлия"]},
+            {"name": "Александр", "aliases": ["Александр"]},
+            {"name": "Мария", "aliases": ["Мария"]},
+        ]
+        for form, expected in [
+            ("Олежка", ["Олег"]),
+            ("Юлечке", ["Юлия"]),
+            ("Сашкой", ["Александр"]),
+            ("Машеньке", ["Мария"]),
+        ]:
+            with self.subTest(form=form):
+                self.assertEqual(assistant._mentioned_people(records, f"Расскажи про {form}"), expected)
+
+
 
     def test_structured_answer_extracts_json_wrapped_in_commentary(self):
         raw = 'Результат анализа:\n```json\n{"answer":"Саша: обследования за 2025 год.","missing_documents":[],"limitations":[],"data_completeness":"partial","memory_updates":[{"text":"не показывать это"}]}\n```\nГотово.'
         parsed = assistant._parse_structured_answer(raw)
         self.assertEqual(parsed["answer"], "Саша: обследования за 2025 год.")
         self.assertNotIn("memory_updates", parsed["answer"])
+
+if __name__ == "__main__":
+    unittest.main()
