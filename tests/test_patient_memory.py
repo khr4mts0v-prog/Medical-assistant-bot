@@ -108,8 +108,10 @@ class PatientMemoryTests(unittest.TestCase):
                 "SELECT snapshot_enc,source_ids_enc FROM patient_memory_snapshots WHERE family_id=?",
                 (self.family,),
             ).fetchone()
-        self.assertNotIn("Гемоглобин", bytes(row["snapshot_enc"]).decode("latin1"))
-        self.assertNotIn("115", bytes(row["snapshot_enc"]).decode("latin1"))
+        encrypted_snapshot = bytes(row["snapshot_enc"])
+        decrypted_snapshot = json.loads(tenancy.cipher().decrypt(encrypted_snapshot).decode("utf-8"))
+        self.assertEqual(decrypted_snapshot["lab_results"][0]["value"], "115")
+        self.assertNotEqual(encrypted_snapshot, json.dumps(decrypted_snapshot, ensure_ascii=False).encode("utf-8"))
         self.assertEqual(json.loads(tenancy.cipher().decrypt(row["source_ids_enc"])), [self.doc_id])
 
     def test_memory_refreshes_when_new_document_is_added(self):

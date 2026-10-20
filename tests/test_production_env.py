@@ -1,6 +1,7 @@
-import os
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -49,6 +50,12 @@ class ProductionEnvironmentPreflightTests(unittest.TestCase):
         self.assertTrue(any("FERNET_KEY" in error for error in errors))
         self.assertTrue(any("DEMO_USERNAME" in error for error in errors))
 
+    def test_rejects_full_content_ai_trace_logging(self):
+        env = self.valid_env()
+        env["AI_TRACE_FULL_CONTENT_ENABLED"] = "true"
+        errors = preflight.validate(env)
+        self.assertTrue(any("AI_TRACE_FULL_CONTENT_ENABLED" in error for error in errors))
+
     def test_env_parser_and_permissions_check_do_not_print_secret_values(self):
         env = self.valid_env()
         with tempfile.TemporaryDirectory() as directory:
@@ -56,11 +63,17 @@ class ProductionEnvironmentPreflightTests(unittest.TestCase):
             path.write_text("\n".join(f"{key}={value}" for key, value in env.items()), encoding="utf-8")
             path.chmod(0o600)
             self.assertEqual(preflight.parse_env(path), env)
+            output = StringIO()
+            errors = StringIO()
             with patch("sys.argv", ["check_production_env.py", "--env-file", str(path)]):
-                self.assertEqual(preflight.main(), 0)
+                with redirect_stdout(output), redirect_stderr(errors):
+                    self.assertEqual(preflight.main(), 0)
             path.chmod(0o644)
             with patch("sys.argv", ["check_production_env.py", "--env-file", str(path)]):
-                self.assertEqual(preflight.main(), 2)
+                with redirect_stdout(output), redirect_stderr(errors):
+                    self.assertEqual(preflight.main(), 2)
+            self.assertNotIn(env["WEB_PASSWORD"], output.getvalue() + errors.getvalue())
+            self.assertNotIn(env["FERNET_KEY"], output.getvalue() + errors.getvalue())
 
 
 if __name__ == "__main__":
