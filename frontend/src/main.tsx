@@ -105,7 +105,7 @@ type HomePatient = {name:string;short_name:string;document_count:number;url:stri
 type HomeFamily = {id:number;name:string;selected:boolean};
 type HomePayload = {families:HomeFamily[];selected_family_id:number|null;family_name:string;patients:HomePatient[];pending_count:number;storage_label:string;disk_connected:boolean;is_demo:boolean;upload_limit_mb:number};
 
-function HomeReactView({familyId,onNavigate}: {familyId:number|null;onNavigate:(url:string)=>void}) {
+function HomeReactView({familyId,onNavigate,onAsk}: {familyId:number|null;onNavigate:(url:string)=>void;onAsk:(query:string,familyId:number|null)=>void}) {
   const [payload,setPayload] = useState<HomePayload|null>(null);
   const [busy,setBusy] = useState(true);
   const [error,setError] = useState('');
@@ -113,6 +113,7 @@ function HomeReactView({familyId,onNavigate}: {familyId:number|null;onNavigate:(
   const [uploadBusy,setUploadBusy] = useState(false);
   const [uploadStatus,setUploadStatus] = useState('');
   const [refreshKey,setRefreshKey] = useState(0);
+  const [quickQuery,setQuickQuery] = useState('');
   const [familyName,setFamilyName] = useState('');
   const [createFamilyOpen,setCreateFamilyOpen] = useState(false);
   const [createBusy,setCreateBusy] = useState(false);
@@ -163,14 +164,22 @@ function HomeReactView({familyId,onNavigate}: {familyId:number|null;onNavigate:(
     {error && <div className="error-banner" role="alert">{error}<button type="button" onClick={()=>setRefreshKey(v=>v+1)}>Повторить</button></div>}
     {busy && <div className="skeleton"><div/><div/><div/></div>}
     {!busy && payload && <>
-      <section className="home-react-section">
+      <section className="home-react-section home-react-quick-query">
+        <div className="home-react-section-heading"><div><div className="eyebrow">ИИ-АССИСТЕНТ</div><h2>Что нужно узнать?</h2><p className="muted">Спроси о документах, динамике анализов или медицинской истории.</p></div></div>
+        <form className="home-react-query-form" onSubmit={event=>{event.preventDefault();const query=quickQuery.trim();if(query)onAsk(query,payload.selected_family_id);}}>
+          <textarea aria-label="Вопрос ИИ-ассистенту" rows={2} maxLength={1200} value={quickQuery} onChange={event=>setQuickQuery(event.target.value)} placeholder="Например: сравни последние анализы крови" required />
+          <button type="submit" disabled={!quickQuery.trim()}><Search size={17}/> Спросить ИИ</button>
+        </form>
+        <p className="home-react-query-note">Внешнему ИИ документы передаются только при наличии явного согласия.</p>
+      </section>
+      <section className="home-react-section home-react-archive-selector">
         <div className="home-react-section-heading"><div><div className="eyebrow">ПРОСТРАНСТВО ДАННЫХ</div><h2>Семейные архивы</h2></div><button type="button" className="button-link" onClick={()=>setCreateFamilyOpen(v=>!v)}><Plus size={16}/> Создать архив</button></div>
         <div className="home-react-family-list">{payload.families.map(family=><button type="button" key={family.id} className={'home-react-family '+(family.id===payload.selected_family_id?'selected':'')} onClick={()=>onNavigate('/?family_id='+family.id)}><span className="home-react-family-icon"><Users size={19}/></span><span className="home-react-family-copy"><strong>{family.name}</strong><small>{family.id===payload.selected_family_id?'Открыт сейчас':'Открыть архив'}</small></span>{family.id===payload.selected_family_id&&<span className="home-react-family-current">Выбран</span>}</button>)}
           {payload.families.length===0 && <div className="card"><p>Пока нет семейных архивов. Создай первый, чтобы начать.</p></div>}
         </div>
         {createFamilyOpen && <form className="card home-react-create-family" onSubmit={createFamily}><label htmlFor="home-family-name">Название нового архива</label><div className="row"><input id="home-family-name" value={familyName} onChange={e=>setFamilyName(e.target.value)} maxLength={80} required placeholder="Например, Семья"/><button type="submit" disabled={createBusy}>{createBusy?'Создаём…':'Создать'}</button></div>{createError&&<p className="error-text" role="alert">{createError}</p>}</form>}
       </section>
-      {payload.selected_family_id!==null && <section className="home-react-section">
+      {payload.selected_family_id!==null && <section className="home-react-section home-react-family-members">
         <div className="home-react-section-heading"><div><div className="eyebrow">АРХИВ</div><h2>{payload.family_name}</h2><p className="muted">Хранение документов: {payload.storage_label}{payload.disk_connected?' · диск подключён':''}</p></div></div>
         <div className="home-react-stats"><button type="button" onClick={()=>onNavigate('/families/'+payload.selected_family_id+'/inbox')} className="home-react-stat"><ClipboardCheck size={19}/><span><strong>{payload.pending_count}</strong><small>Входящие на проверку</small></span></button><div className="home-react-stat"><Users size={19}/><span><strong>{payload.patients.length}</strong><small>Пациентов</small></span></div></div>
         {payload.pending_count>0&&<button type="button" className="home-react-inbox" onClick={()=>onNavigate('/families/'+payload.selected_family_id+'/inbox')}><ClipboardCheck size={18}/> Проверить входящие документы <ChevronRight size={17}/></button>}
@@ -179,10 +188,11 @@ function HomeReactView({familyId,onNavigate}: {familyId:number|null;onNavigate:(
           {payload.patients.length===0&&<div className="card home-react-empty"><Users size={24}/><strong>Пока нет карточек пациентов</strong><p>Добавь члена семьи, чтобы хранить его документы отдельно.</p><button type="button" onClick={()=>onNavigate('/families/'+payload.selected_family_id+'/patients/new')}>Добавить первого пациента</button></div>}
         </div>
       </section>}
-      <section className="home-react-section">
+      <section className="home-react-section home-react-upload-section">
         <div className="home-react-section-heading"><div><div className="eyebrow">ЗАГРУЗКА</div><h2>Добавить документы</h2><p className="muted">PDF, фотографии и сканы · до {payload.upload_limit_mb} МБ на файл.</p></div></div>
         <div className="card home-react-upload"><label className="home-react-consent"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label><label className={'home-react-file-picker '+(uploadBusy?'disabled':'')}><FilePlus2 size={21}/><span>{uploadBusy?'Обработка загрузки…':'Выбрать документы'}</span><input type="file" accept="image/*,application/pdf,.tif,.tiff,.bmp" multiple disabled={uploadBusy||payload.families.length===0} onChange={e=>{void uploadFiles(e.target.files);e.currentTarget.value='';}}/></label>{uploadStatus&&<p className="home-react-upload-status" role="status">{uploadStatus}</p>}</div>
       </section>
+      {payload.selected_family_id===null && <section className="home-react-section card home-react-no-family"><Users size={24}/><strong>Семейный архив ещё не выбран</strong><p>Создай или выбери архив в разделе «Настройки архива», затем добавь карточки членов семьи.</p><button type="button" onClick={()=>onNavigate('/settings')}>Открыть настройки архива</button></section>}
       <p className="home-react-safety"><ShieldCheck size={16}/> Перед загрузкой реальных медицинских документов проверь резервное копирование и права доступа.</p>
     </>}
   </div>;
@@ -241,7 +251,7 @@ function InboxReactView({familyId,onNavigate}: {familyId:number;onNavigate:(url:
 }
 
 
-type DocumentEditorPayload = {family_id:number;document_id:number;patient:string;source_name:string;kind:string;title:string;date:string;ocr_text:string;kinds:string[];preview_url:string|null};
+type DocumentEditorPayload = {family_id:number;document_id:number;patient:string;source_name:string;kind:string;title:string;date:string;ocr_text:string;ocr_text_raw:string;kinds:string[];preview_url:string|null;page_count:number};
 function DocumentEditorReactView({familyId,documentId,onNavigate}: {familyId:number;documentId:number;onNavigate:(url:string)=>void}) {
   const [data,setData]=useState<DocumentEditorPayload|null>(null);
   const [kind,setKind]=useState('');
@@ -267,7 +277,7 @@ function DocumentEditorReactView({familyId,documentId,onNavigate}: {familyId:num
     setSaving(true);setError('');
     try{
       const form=new FormData();
-      form.set('kind',kind);form.set('title',title);form.set('date',date);form.set('ocr_text',ocrText);
+      form.set('kind',kind);form.set('title',title);form.set('date',date);form.set('ocr_text',ocrText===data.ocr_text?data.ocr_text_raw:ocrText);
       const response=await fetch('/families/'+familyId+'/documents/'+documentId+'/edit',{method:'POST',body:form,credentials:'same-origin',redirect:'follow'});
       if(!response.ok)throw new Error('Сохранение не подтверждено сервером (HTTP '+response.status+'). Проверь дату и повтори попытку.');
       const finalUrl=new URL(response.url,location.origin);
@@ -283,7 +293,7 @@ function DocumentEditorReactView({familyId,documentId,onNavigate}: {familyId:num
     {busy&&<div className="skeleton"><div/><div/><div/></div>}
     {!busy&&data&&<form className="document-editor-form" onSubmit={save}>
       <section className="card document-editor-source"><div><span className="muted">Пациент</span><strong>{data.patient}</strong></div><div><span className="muted">Исходный файл</span><strong>{data.source_name}</strong></div></section>
-      {data.preview_url&&<section className="card document-editor-preview"><h2>Предпросмотр оригинала</h2>{data.preview_url.endsWith('/original')?<iframe src={data.preview_url+'#toolbar=1&navpanes=0&scrollbar=1'} title="Оригинал PDF" loading="lazy"/>:<a href={data.preview_url} target="_blank" rel="noopener noreferrer"><img src={data.preview_url} alt="Предпросмотр оригинала"/></a>}</section>}
+      {data.preview_url&&<section className="card document-editor-preview"><h2>Предпросмотр оригинала</h2>{data.preview_url.endsWith('/original')&&data.page_count>0?<div className="document-pdf-pages"><div className="pdf-preview-toolbar">PDF · {data.page_count} стр. · прокрути, чтобы просмотреть все страницы</div>{Array.from({length:data.page_count},(_,index)=><section className="document-pdf-page" key={index}><div className="pdf-preview-page-label">Страница {index+1} из {data.page_count}</div><img src={'/families/'+familyId+'/documents/'+documentId+'/preview/page/'+(index+1)} alt={'Страница '+(index+1)+' из '+data.page_count} loading="lazy" decoding="async"/></section>)}<p><a href={data.preview_url} target="_blank" rel="noopener noreferrer">Открыть исходный PDF отдельно ↗</a></p></div>:data.preview_url.endsWith('/original')?<iframe src={data.preview_url+'#toolbar=1&navpanes=0&scrollbar=1'} title="Оригинал PDF" loading="lazy"/>:<a href={data.preview_url} target="_blank" rel="noopener noreferrer"><img src={data.preview_url} alt="Предпросмотр оригинала"/></a>}</section>}
       <section className="card document-editor-fields">
         <label>Тип документа<select value={kind} onChange={e=>setKind(e.target.value)} required>{data.kinds.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
         <label>Название в архиве<input value={title} onChange={e=>setTitle(e.target.value)} maxLength={180} required/></label>
@@ -401,6 +411,12 @@ function SettingsReactView({familyId,onNavigate}: {familyId:number|null;onNaviga
   const [busy,setBusy]=useState(true);
   const [saving,setSaving]=useState(false);
   const [error,setError]=useState('');
+  const [homeData,setHomeData]=useState<HomePayload|null>(null);
+  const [archivesOpen,setArchivesOpen]=useState(false);
+  const [newFamilyName,setNewFamilyName]=useState('');
+  const [createFamilyOpen,setCreateFamilyOpen]=useState(false);
+  const [createFamilyBusy,setCreateFamilyBusy]=useState(false);
+  const [createFamilyError,setCreateFamilyError]=useState('');
   useEffect(()=>{
     let active=true;setBusy(true);setError('');
     const query=familyId===null?'':'?family_id='+encodeURIComponent(String(familyId));
@@ -411,6 +427,28 @@ function SettingsReactView({familyId,onNavigate}: {familyId:number|null;onNaviga
       .finally(()=>{if(active)setBusy(false);});
     return ()=>{active=false;};
   },[familyId]);
+  useEffect(()=>{
+    let active=true;
+    const query=familyId===null?'':'?family_id='+encodeURIComponent(String(familyId));
+    fetch('/api/home'+query,{credentials:'same-origin',headers:{Accept:'application/json'},cache:'no-store'})
+      .then(async response=>{const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error('Не удалось загрузить список архивов');return body as HomePayload;})
+      .then(body=>{if(active)setHomeData(body);})
+      .catch(()=>{if(active)setHomeData(null);});
+    return ()=>{active=false;};
+  },[familyId]);
+  const createFamily=async(event:React.FormEvent<HTMLFormElement>)=>{
+    event.preventDefault();if(!newFamilyName.trim()||createFamilyBusy)return;
+    setCreateFamilyBusy(true);setCreateFamilyError('');
+    try{
+      const form=new FormData();form.set('name',newFamilyName.trim());
+      const response=await fetch('/families',{method:'POST',body:form,credentials:'same-origin',redirect:'follow'});
+      if(!response.ok)throw new Error('Не удалось создать архив (HTTP '+response.status+').');
+      const target=new URL(response.url,window.location.origin);
+      if(target.pathname==='/')onNavigate(target.pathname+target.search);
+      else onNavigate('/');
+    }catch(e){setCreateFamilyError(e instanceof Error?e.message:'Ошибка создания архива');}
+    finally{setCreateFamilyBusy(false);}
+  };
   const save=async(event:React.FormEvent<HTMLFormElement>)=>{
     event.preventDefault();if(!data?.family_id||!data.can_rename)return;
     setSaving(true);setError('');
@@ -426,7 +464,8 @@ function SettingsReactView({familyId,onNavigate}: {familyId:number|null;onNaviga
   return <div className="settings-react-screen">
     <header className="settings-react-header"><div><div className="eyebrow">УПРАВЛЕНИЕ АРХИВОМ</div><h1>Настройки архива</h1><p className="muted">Параметры семейного медицинского архива и хранения документов.</p></div><button type="button" className="button-link" onClick={()=>onNavigate(data?.family_id? '/?family_id='+data.family_id:'/')}>← На главную</button></header>
     {error&&<div className="error-banner" role="alert">{error}</div>}
-    {busy?<div className="skeleton"><div/><div/><div/></div>:data&&!data.family_id?<section className="card"><h2>Семейный архив не создан</h2><p>Сначала создай архив, чтобы настраивать его параметры.</p><button type="button" onClick={()=>onNavigate('/')}>Перейти на главную</button></section>:data&&<>
+    <section className="card settings-react-card settings-react-archive-admin"><div className="settings-react-card-icon"><Users size={20}/></div><div className="settings-react-card-body"><details className="settings-disclosure" open={archivesOpen} onToggle={event=>setArchivesOpen(event.currentTarget.open)}><summary>Семейные архивы</summary><div className="settings-disclosure-body"><p className="muted">Переключение между архивами и создание нового. Данные существующих архивов не меняются.</p>{homeData? <div className="settings-react-archive-list">{homeData.families.map(item=><button type="button" key={item.id} className={item.id===homeData.selected_family_id?'selected':''} onClick={()=>onNavigate('/?family_id='+item.id)}><span>{item.name}</span><small>{item.id===homeData.selected_family_id?'Текущий архив':'Открыть архив'}</small></button>)}{homeData.families.length===0&&<p className="muted">Пока нет созданных архивов.</p>}</div>:<p className="muted">Список архивов пока недоступен. Обнови раздел позже.</p>}<button type="button" className="button-link" onClick={()=>setCreateFamilyOpen(value=>!value)}><Plus size={16}/> {createFamilyOpen?'Отменить':'Создать семейный архив'}</button>{createFamilyOpen&&<form className="settings-react-create-form" onSubmit={createFamily}><label htmlFor="settings-new-family-name">Название нового архива</label><input id="settings-new-family-name" value={newFamilyName} onChange={event=>setNewFamilyName(event.target.value)} maxLength={80} required placeholder="Например, Семья"/><button type="submit" disabled={createFamilyBusy}>{createFamilyBusy?'Создаём…':'Создать архив'}</button>{createFamilyError&&<p className="error-text" role="alert">{createFamilyError}</p>}</form>}</div></details></div></section>
+    {busy?<div className="skeleton"><div/><div/><div/></div>:data&&!data.family_id?<section className="card"><h2>Семейный архив не создан</h2><p>Сначала создай архив, чтобы настраивать его параметры.</p><button type="button" onClick={()=>{setArchivesOpen(true);setCreateFamilyOpen(true);}}>Создать семейный архив</button></section>:data&&<>
       {data.is_demo&&<div className="notice-warning"><strong>Демо-режим.</strong> Временный архив хранится локально и автоматически очищается примерно через 2 часа. Используй только тестовые документы.</div>}
       {data.updated&&<div className="notice-success" role="status">Название архива сохранено.</div>}
       <form className="card settings-react-card" onSubmit={save}>
@@ -1154,7 +1193,7 @@ function App() {
       </header>
       {settingsOpen ? <section className="settings-view">
         <div className="eyebrow">ПАРАМЕТРЫ</div><h1>Настройки архива</h1><p className="lead">Управление семейным архивом и хранением документов.</p>
-        <article className="settings-card"><div className="settings-icon"><Users size={21}/></div><div><h2>Семейный архив</h2><p>Имя архива и данные семьи будут доступны здесь после подключения безопасного редактирования на сервере.</p></div></article>
+        <details className="settings-card settings-disclosure"><summary><span className="settings-icon"><Users size={21}/></span><span><strong>Семейный архив</strong><small>Переключение архивов, создание и переименование</small></span></summary><div className="settings-disclosure-body"><p>Управление семейными архивами доступно в отдельном разделе. Существующие документы и данные не перемещаются и не удаляются.</p><button type="button" onClick={()=>{setSettingsOpen(false);void navigate('/settings');}}>Открыть управление архивами</button></div></details>
         <article className="settings-card"><div className="settings-icon"><Cloud size={21}/></div><div><h2>Хранение документов</h2><p>Сейчас документы хранятся локально на VPS. Подключение Яндекс Диска добавим отдельным этапом с OAuth и проверкой прав доступа.</p><span className="status-pill">Локальное хранилище</span></div></article>
         <article className="settings-card"><div className="settings-icon"><BrainCircuit size={21}/></div><div>
           <h2>Внешний ИИ-анализ</h2>
@@ -1181,7 +1220,7 @@ function App() {
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')} style={assistantRoute ? {display:'none'} : undefined}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : searchRoute ? <SearchReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : memoryRouteData && memoryRouteData.familyId>0 && memoryRouteData.patient ? <PatientMemoryReactView familyId={memoryRouteData.familyId} patient={memoryRouteData.patient} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
+        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} onAsk={(query,selectedFamilyId)=>{setPatientAssistantScope(null);setAssistantFamilyId(selectedFamilyId);setDocumentSelectionActive(false);setSelectedDocumentIds([]);setSmartConversation([]);setSmartQuery(query);setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : searchRoute ? <SearchReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : memoryRouteData && memoryRouteData.familyId>0 && memoryRouteData.patient ? <PatientMemoryReactView familyId={memoryRouteData.familyId} patient={memoryRouteData.patient} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
         {loading && screen && <div className="loading-line"/>}
       </section>}
     </main>
