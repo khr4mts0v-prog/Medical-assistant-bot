@@ -332,5 +332,64 @@ class PatientMemoryTests(unittest.TestCase):
         self.assertIn("Гемоглобин = 115 г/л", context)
 
 
+    def test_proposal_acceptance_flows_into_next_context_only_for_target_patient(self):
+        other_patient = "Мария Тестовая"
+        db.add_patient(self.family, other_patient, birth_date="2022-02-02")
+        rows = db.search(self.family, self.patient, "", limit=1000)
+        source_row = next(row for row in rows if row["name"] == "Анализ крови")
+        proposal_text = "Со слов пользователя: длительный приём препарата X"
+
+        proposal = patient_memory.propose_fact(
+            self.family, self.patient, proposal_text, "medication", "2026-10-20",
+            memory_key="medication", reason="Проверить и подтвердить перед сохранением",
+            source={"document_id": source_row["id"], "name": source_row["name"],
+                    "date": source_row["date"], "kind": source_row["kind"]},
+            actor_id=1001,
+        )
+        before = patient_memory.get_snapshot(self.family, self.patient)
+        self.assertIn(proposal["id"], [item["id"] for item in before["pending_proposals"]])
+        self.assertNotIn(proposal_text, patient_memory.to_context(before))
+        self.assertNotIn(proposal_text, patient_memory.to_context(
+            patient_memory.get_snapshot(self.family, other_patient)
+        ))
+        self.assertEqual(patient_memory.get_manual_facts(self.family, self.patient), [])
+
+        fact_id = patient_memory.accept_proposal(self.family, self.patient, proposal["id"], 1001)
+        next_snapshot = patient_memory.get_snapshot(self.family, self.patient)
+        next_context = patient_memory.to_context(next_snapshot)
+        confirmed = next(item for item in patient_memory.get_manual_facts(self.family, self.patient)
+                         if item["id"] == fact_id)
+        self.assertEqual(confirmed["status"], "active")
+        self.assertEqual(confirmed["origin"], "approved_document")
+        self.assertEqual(confirmed["source"]["document_id"], source_row["id"])
+        self.assertIn(proposal_text, next_context)
+        self.assertIn("документ ID " + str(source_row["id"]), next_context)
+        self.assertNotIn(proposal_text, patient_memory.to_context(
+            patient_memory.get_snapshot(self.family, other_patient)
+        ))
+        with self.assertRaises(ValueError):
+            patient_memory.accept_proposal(self.family, other_patient, proposal["id"], 1001)
+        with self.assertRaises(ValueError):
+            patient_memory.accept_proposal(self.family, self.patient, proposal["id"], 1001)
+
+    def test_rejected_proposal_never_enters_confirmed_context(self):
+        proposal_text = "Пользователь сомневается в актуальности препарата Y"
+        proposal = patient_memory.propose_fact(
+            self.family, self.patient, proposal_text, "medication", "2026-10-20",
+            memory_key="medication", reason="Требуется подтверждение",
+            actor_id=1001,
+        )
+        patient_memory.reject_proposal(self.family, self.patient, proposal["id"])
+        self.assertEqual(patient_memory.get_manual_facts(self.family, self.patient), [])
+        self.assertNotIn(proposal_text, patient_memory.to_context(
+            patient_memory.get_snapshot(self.family, self.patient)
+        ))
+        closed = patient_memory.get_proposals(self.family, self.patient, include_closed=True)
+        rejected = next(item for item in closed if item["id"] == proposal["id"])
+        self.assertEqual(rejected["status"], "rejected")
+        with self.assertRaises(ValueError):
+            patient_memory.accept_proposal(self.family, self.patient, proposal["id"], 1001)
+
+
 if __name__ == "__main__":
     unittest.main()
