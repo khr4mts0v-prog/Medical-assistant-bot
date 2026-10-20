@@ -39,6 +39,7 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
         self.assertEqual(payload["patient_options"], [{"name": "Саша", "birth_date": "10-03-2019"}])
         self.assertEqual(payload["kind"], "заключение УЗИ")
         self.assertEqual(payload["title"], "УЗИ брюшной полости")
+        self.assertEqual(payload["suggested_patient_name"], "Иванова Мария Сергеевна")
         self.assertEqual(payload["page_count"], 2)
         self.assertEqual(payload["preview_kind"], "pdf")
         self.assertNotIn("file_bytes", response.text)
@@ -59,6 +60,53 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
         webapp.app.dependency_overrides.clear()
         response = self.client.get("/api/families/1/inbox/12")
         self.assertEqual(response.status_code, 401)
+
+    def test_create_patient_from_pending_requires_explicit_confirmation(self):
+        with (
+            patch.object(webapp, "family"),
+            patch.object(webapp.db, "get_pending_doc", return_value={
+                "id": 12, "name": "discharge.pdf", "text": "Пациент: Иванова Мария Сергеевна",
+                "analysis": {"suggested_patient_name": "Иванова Мария Сергеевна"},
+            }),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(webapp.db, "patients", return_value=[]),
+            patch.object(webapp.db, "add_patient") as add_patient,
+        ):
+            response = self.client.post(
+                "/families/1/inbox/12/create-patient",
+                data={"confirm": "no"},
+                follow_redirects=False,
+            )
+        self.assertEqual(response.status_code, 400)
+        add_patient.assert_not_called()
+
+    def test_confirmed_patient_creation_files_pending_document(self):
+        from fastapi.responses import RedirectResponse
+        with (
+            patch.object(webapp, "family"),
+            patch.object(webapp.db, "get_pending_doc", return_value={
+                "id": 12, "name": "discharge.pdf", "text": "Дата заключения: 12.05.2026",
+                "analysis": {"suggested_patient_name": "Иванова Мария Сергеевна",
+                             "primary_type": "выписной эпикриз", "display_title": "Выписка"},
+            }),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(webapp.db, "patients", return_value=[]),
+            patch.object(webapp.db, "add_patient") as add_patient,
+            patch.object(webapp, "extract_document_date", return_value="12-05-2026"),
+            patch.object(webapp, "assign_pending_document", return_value=RedirectResponse(
+                "/families/1/patients/Иванова Мария Сергеевна", status_code=303
+            )) as assign,
+        ):
+            response = self.client.post(
+                "/families/1/inbox/12/create-patient",
+                data={"confirm": "yes"},
+                follow_redirects=False,
+            )
+        self.assertEqual(response.status_code, 303)
+        add_patient.assert_called_once_with(1, "Иванова Мария Сергеевна")
+        assign.assert_called_once_with(
+            1, 12, "Иванова Мария Сергеевна", "выписной эпикриз", "Выписка", "12-05-2026", 123
+        )
 
 
 if __name__ == "__main__":
