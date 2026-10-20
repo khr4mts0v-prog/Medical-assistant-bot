@@ -65,6 +65,10 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
+def demo_login_enabled(env):
+    return bool(env.get("DEMO_USERNAME", "").strip() and env.get("DEMO_PASSWORD", ""))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
@@ -72,57 +76,72 @@ def main():
     args = parser.parse_args()
     base = args.base_url.rstrip("/") + "/"
     env = read_env(args.env_file)
-    username = env.get("DEMO_USERNAME", "test")
-    password = env.get("DEMO_PASSWORD", "test")
-    require(bool(username and password), "DEMO_USERNAME/DEMO_PASSWORD заданы пустыми: демо-вход отключён.")
-    auth = (username, password)
-    admin_username = env.get("WEB_USERNAME", "")
+
+    admin_username = env.get("WEB_USERNAME", "").strip()
     admin_password = env.get("WEB_PASSWORD", "")
-    require(bool(admin_username and admin_password), "WEB_USERNAME/WEB_PASSWORD должны быть заданы для проверки изоляции архивов.")
+    require(bool(admin_username and admin_password), "WEB_USERNAME/WEB_PASSWORD должны быть заданы для smoke-проверки.")
     admin_auth = (admin_username, admin_password)
 
-    status, headers, body = request(urljoin(base, ""), auth)
-    require(status == 200, f"Демо-вход не работает: GET / вернул HTTP {status}. Проверьте образ и DEMO_USERNAME/DEMO_PASSWORD.")
-    require("Медицинский архив" in body.decode("utf-8", errors="replace"), "GET / вернул неожиданный HTML вместо страницы архива.")
-    cookie_headers = headers.get_all("Set-Cookie") or []
-    cookie = " ".join(cookie_headers)
-    require("medical_demo_session=" in cookie and "HttpOnly" in cookie and "Secure" in cookie,
-            "Вход успешен, но демо-сессия не получила ожидаемые HttpOnly/Secure cookie.")
-    demo_cookie = next((value.split(";", 1)[0] for value in cookie_headers
-                        if value.startswith("medical_demo_session=")), "")
-    require(bool(demo_cookie), "Не удалось извлечь демо-cookie для проверки изоляции.")
+    demo_username = env.get("DEMO_USERNAME", "").strip()
+    demo_password = env.get("DEMO_PASSWORD", "")
+    demo_enabled = demo_login_enabled(env)
 
-    # Compare metadata only; never print family names, patient names, or document content.
-    status, _, demo_home_body = request(
-        urljoin(base, "api/home"), auth=auth, extra_headers={"Cookie": demo_cookie}
-    )
-    require(status == 200, f"Демо API недоступен: GET /api/home вернул HTTP {status}.")
-    demo_home = json.loads(demo_home_body.decode("utf-8"))
-    require(demo_home.get("is_demo") is True, "test/test не получил демо-идентичность.")
-    demo_family_ids = {int(item["id"]) for item in demo_home.get("families", [])}
-    require(bool(demo_family_ids), "Для test/test не создан отдельный демо-архив.")
+    if demo_enabled:
+        demo_auth = (demo_username, demo_password)
+        status, headers, body = request(urljoin(base, ""), demo_auth)
+        require(status == 200, f"Демо-вход вернул HTTP {status}. Проверьте конфигурацию демо-учётной записи.")
+        require("Медицинский архив" in body.decode("utf-8", errors="replace"),
+                "GET / вернул неожиданный HTML вместо страницы архива.")
+        cookie_headers = headers.get_all("Set-Cookie") or []
+        cookie = " ".join(cookie_headers)
+        require("medical_demo_session=" in cookie and "HttpOnly" in cookie and "Secure" in cookie,
+                "Демо-сессия не получила ожидаемые HttpOnly/Secure cookie.")
+        demo_cookie = next((value.split(";", 1)[0] for value in cookie_headers
+                            if value.startswith("medical_demo_session=")), "")
+        require(bool(demo_cookie), "Не удалось извлечь демо-cookie для проверки изоляции.")
 
-    status, _, admin_home_body = request(urljoin(base, "api/home"), auth=admin_auth)
-    require(status == 200, f"Admin API недоступен: GET /api/home вернул HTTP {status}.")
-    admin_home = json.loads(admin_home_body.decode("utf-8"))
-    require(admin_home.get("is_demo") is False, "admin неожиданно получил демо-идентичность.")
-    admin_family_ids = {int(item["id"]) for item in admin_home.get("families", [])}
-    require(not demo_family_ids.intersection(admin_family_ids),
-            "Нарушена изоляция: test/test и admin видят общий family ID.")
-    for family_id in admin_family_ids:
-        status, _, _ = request(
-            urljoin(base, f"api/home?family_id={family_id}"),
-            auth=auth, extra_headers={"Cookie": demo_cookie},
+        # Compare metadata only; never print family names, patient names, or document content.
+        status, _, demo_home_body = request(
+            urljoin(base, "api/home"), auth=demo_auth, extra_headers={"Cookie": demo_cookie}
         )
-        require(status == 403,
-                "Нарушена изоляция: test/test получил доступ к архиву admin (HTTP не 403).")
-    for family_id in demo_family_ids:
-        status, _, _ = request(
-            urljoin(base, f"api/home?family_id={family_id}"),
-            auth=admin_auth,
-        )
-        require(status == 403,
-                "Нарушена изоляция: admin получил доступ к демо-архиву (HTTP не 403).")
+        require(status == 200, f"Демо API недоступен: GET /api/home вернул HTTP {status}.")
+        demo_home = json.loads(demo_home_body.decode("utf-8"))
+        require(demo_home.get("is_demo") is True, "Демо-учётная запись не получила изолированную демо-идентичность.")
+        demo_family_ids = {int(item["id"]) for item in demo_home.get("families", [])}
+        require(bool(demo_family_ids), "Для демо-учётной записи не создан отдельный демо-архив.")
+
+        status, _, admin_home_body = request(urljoin(base, "api/home"), auth=admin_auth)
+        require(status == 200, f"Основной API недоступен: GET /api/home вернул HTTP {status}.")
+        admin_home = json.loads(admin_home_body.decode("utf-8"))
+        require(admin_home.get("is_demo") is False, "Основная учётная запись неожиданно получила демо-идентичность.")
+        admin_family_ids = {int(item["id"]) for item in admin_home.get("families", [])}
+        require(not demo_family_ids.intersection(admin_family_ids),
+                "Нарушена изоляция: демо-учётная запись и владелец видят общий family ID.")
+        for family_id in admin_family_ids:
+            status, _, _ = request(
+                urljoin(base, f"api/home?family_id={family_id}"),
+                auth=demo_auth, extra_headers={"Cookie": demo_cookie},
+            )
+            require(status == 403, "Демо-учётная запись получила доступ к архиву владельца.")
+        for family_id in demo_family_ids:
+            status, _, _ = request(
+                urljoin(base, f"api/home?family_id={family_id}"), auth=admin_auth,
+            )
+            require(status == 403, "Основная учётная запись получила доступ к демо-архиву.")
+        auth_message = "demo login and account isolation"
+    else:
+        # A private production deployment may disable demo access completely.
+        status, _, body = request(urljoin(base, ""), admin_auth)
+        require(status == 200, f"Основной вход вернул HTTP {status}. Проверьте WEB_USERNAME/WEB_PASSWORD.")
+        require("Медицинский архив" in body.decode("utf-8", errors="replace"),
+                "GET / вернул неожиданный HTML вместо страницы архива.")
+        status, _, admin_home_body = request(urljoin(base, "api/home"), auth=admin_auth)
+        require(status == 200, f"Основной API недоступен: GET /api/home вернул HTTP {status}.")
+        admin_home = json.loads(admin_home_body.decode("utf-8"))
+        require(admin_home.get("is_demo") is False, "Основная учётная запись неожиданно получила демо-идентичность.")
+        status, _, _ = request(urljoin(base, "api/home"), auth=("test", "test"))
+        require(status == 401, "Демо-доступ отключён в конфигурации, но стандартные test/test credentials всё ещё работают.")
+        auth_message = "main account login; demo access disabled"
 
     status, _, app_html = request(urljoin(base, "app/"))
     require(status == 200, f"React-приложение недоступно: GET /app/ вернул HTTP {status}.")
@@ -142,7 +161,7 @@ def main():
     require(status == 200 and "image/png" in headers.get("Content-Type", "") and icon_body.startswith(b"\x89PNG"),
             "Apple touch icon отсутствует или имеет неверный формат.")
 
-    print("PASS: demo login, account isolation, React shell/assets, PWA manifest and Apple icon.")
+    print(f"PASS: {auth_message}, React shell/assets, PWA manifest and Apple icon.")
     print("Credentials and archive metadata were not printed. No AI request was sent and no archive documents were modified.")
 
 
