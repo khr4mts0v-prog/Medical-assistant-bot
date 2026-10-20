@@ -29,6 +29,8 @@ class PatientNameResolutionTests(unittest.TestCase):
     def test_medical_subject_is_not_mistaken_for_a_person_name(self):
         self.assertFalse(assistant_routes._looks_like_unresolved_person_question("Расскажи про спастичности"))
         self.assertFalse(assistant_routes._looks_like_unresolved_person_question("Расскажи про анализы"))
+        self.assertFalse(assistant_routes._looks_like_unresolved_person_question("Расскажи по анализам"))
+        self.assertFalse(assistant_routes._looks_like_unresolved_person_question("Расскажи про консультацию"))
 
     def test_singular_target_is_distinguished_from_multiple_people(self):
         self.assertTrue(assistant_routes._looks_like_single_patient_reference("Расскажи про Сашку"))
