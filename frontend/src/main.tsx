@@ -11,28 +11,38 @@ const HOME = '/';
 
 // Last-resort presentation guard: never render a serialized structured answer as chat prose.
 function readableAnswer(value: unknown): string {
-  let cleaned = String(value ?? '').trim();
-  if (!cleaned) return '';
-  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  // Some compatible models double-serialize the structured response. Unwrap only answer
-  // envelopes, with a bound to avoid loops; never display the JSON payload as chat prose.
-  for (let depth = 0; depth < 3; depth += 1) {
+  const fallback = 'Не удалось корректно отобразить ответ модели. Повтори вопрос.';
+  let current: unknown = value;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current && typeof current === 'object' && !Array.isArray(current)) {
+      const record = current as Record<string, unknown>;
+      if (typeof record.answer === 'string' && record.answer.trim()) { current = record.answer; continue; }
+      return fallback;
+    }
+    if (typeof current !== 'string') break;
+    let cleaned = current.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    if (!cleaned) return '';
     try {
-      const parsed = JSON.parse(cleaned);
-      if (parsed && typeof parsed === 'object' && typeof parsed.answer === 'string' && parsed.answer.trim()) {
-        cleaned = parsed.answer.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-        continue;
+      const parsed: unknown = JSON.parse(cleaned);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const record = parsed as Record<string, unknown>;
+        if (typeof record.answer === 'string' && record.answer.trim()) { current = record.answer; continue; }
       }
-      break;
-    } catch { break; }
+    } catch {
+      // Recover the answer string if a provider appended malformed transport metadata.
+      const match = cleaned.match(/^\s*\{[\s\S]*?"answer"\s*:\s*("(?:\\.|[^"\\])*")/i);
+      if (match) {
+        try { const extracted: unknown = JSON.parse(match[1]); if (typeof extracted === 'string' && extracted.trim()) { current = extracted; continue; } }
+        catch { /* use safe fallback below */ }
+      }
+    }
+    if (/^\s*[\[{]/.test(cleaned) && /"(?:answer|missing_documents|data_completeness|limitations|memory_updates)"\s*:/.test(cleaned)) return fallback;
+    const internalFields = cleaned.search(/(?:^|,\s*|\\n|\n)\s*"?\s*(?:missing_documents|limitations|data_completeness|memory_updates)\s*"?\s*:/i);
+    if (internalFields >= 0) cleaned = cleaned.slice(0, internalFields).trim();
+    if (/^\s*[\[{]/.test(cleaned)) return fallback;
+    return cleaned || fallback;
   }
-  // Do not show transport metadata if the model accidentally appends it to prose.
-  const internalFields = cleaned.search(/(?:^|\\n|\n)\s*(?:missing_documents|limitations|data_completeness|memory_updates)\s*:/i);
-  if (internalFields >= 0) cleaned = cleaned.slice(0, internalFields).trim();
-  if (/^\s*\{/.test(cleaned) && /"(?:answer|missing_documents|data_completeness)"\s*:/.test(cleaned)) {
-    return 'Не удалось корректно отобразить ответ модели. Повтори вопрос.';
-  }
-  return cleaned || 'Не удалось корректно отобразить ответ модели. Повтори вопрос.';
+  return typeof current === 'string' && current.trim() ? current.trim() : fallback;
 }
 
 function ArchiveDocumentIcon({ name, size = 22 }: { name: string; size?: number }) {
