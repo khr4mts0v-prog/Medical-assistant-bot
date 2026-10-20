@@ -659,7 +659,7 @@ def _extract_explicit_memory_facts(question):
         if allergens:
             reaction = re.search(r"\b(?:реакци\w*|проявлени\w*|симптом\w*)\s*[-:—]?\s*(.+)$", q, re.I)
             reaction_text = reaction.group(1).strip(" \t\r\n.,;:") if reaction else ""
-            fact_text = "Аллергия " + allergens
+            fact_text = "Аллергия на " + allergens
             if reaction_text:
                 fact_text += ". Реакция по сообщению пользователя: " + reaction_text
             fact_text += "."
