@@ -649,9 +649,9 @@ def _parse_structured_answer(raw):
     """Parse the constrained response format while preserving a plain-text fallback."""
     text = sanitize_model_text(re.sub(r"^\s*\`\`\`(?:json)?\s*|\s*\`\`\`\s*$", "", str(raw or ""), flags=re.I))
     data = None
-    # Strip unquoted transport labels before probing for JSON objects.
-    text = _strip_embedded_structured_fields(text)
     # Providers may wrap JSON in commentary or fenced output. Decode the first complete object.
+    # Do not sanitize this outer transport string before JSON parsing: escaped newlines inside
+    # the JSON answer may legitimately contain labels like "missing_documents:".
     decoder = json.JSONDecoder()
     for index, char in enumerate(text):
         if char != "{":
