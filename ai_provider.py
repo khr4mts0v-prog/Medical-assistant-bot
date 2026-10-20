@@ -68,8 +68,8 @@ def chat_completion(messages, max_tokens=1200, temperature=0.1, timeout=90, retu
             body = response.text or ""
         except Exception:
             body = ""
-        body = re.sub(r"(?i)(bearer\\s+)[^\\s\"']+", r"\\1[REDACTED]", body)
-        body = re.sub(r"(?i)(api[_ -]?key|token|authorization)(\\s*[:=]\\s*[\"']?)[^\\s,\"'}]+", r"\\1\\2[REDACTED]", body)
+        body = re.sub(r"(?i)(bearer\s+)[^\s\"']+", r"\1[REDACTED]", body)
+        body = re.sub(r"(?i)(api[_ -]?key|token|authorization)(\s*[:=]\s*[\"']?)[^\s,\"'}]+", r"\1\2[REDACTED]", body)
         body = " ".join(body.split())[:800]
         ai_trace_log.emit(
             "provider-http-error",
