@@ -41,6 +41,13 @@ class ProviderHttpErrorTests(unittest.TestCase):
         self.assertNotIn("sensitive echoed text", str(fields))
         self.assertNotIn("test-api-key", str(fields))
 
+    def test_user_facing_answer_does_not_expose_internal_exception_type(self):
+        with patch.object(ai_provider, "chat_completion", side_effect=ai_provider.requests.HTTPError("provider detail")):
+            answer = ai_provider.answer_archive_question("Что такое ферритин?", patient=None)
+        self.assertIn("Попробуйте ещё раз позже", answer)
+        self.assertNotIn("HTTPError", answer)
+        self.assertNotIn("provider detail", answer)
+
     def test_successful_response_keeps_existing_behavior(self):
         response = Mock()
         response.status_code = 200
