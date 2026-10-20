@@ -16,6 +16,8 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements.txt pytest
       - run: python -m compileall -q .
+      - name: Check clean-clone portability prerequisites
+        run: python scripts/check_portability.py
       - name: Validate deployment script syntax
         run: bash -n scripts/deploy_web_release.sh
       - name: Independent synthetic classifier holdout (diagnostic; no accuracy gate)
@@ -31,3 +33,74 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+
+  clean-clone-container-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build application image from clean checkout
+        run: docker build --pull -t medical-assistant:clean-clone-test .
+      - name: Validate Compose configuration with placeholder environment
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+          rm -f .env
+      - name: Start isolated web app against an empty temporary database
+        run: |
+          docker run -d --name medical-archive-web-smoke \
+            --entrypoint uvicorn \
+            -p 127.0.0.1:8000:8000 \
+            -e DB_PATH=/tmp/medical-archive-smoke.sqlite3 \
+            -e WEB_SESSION_SECRET=ci-only-not-a-real-secret-value-123456789 \
+            -e WEB_USERNAME=smoke-test \
+            -e WEB_PASSWORD=ci-only-password \
+            -e DEMO_USERNAME=test \
+            -e DEMO_PASSWORD=test \
+            medical-assistant:clean-clone-test webapp:app --host 0.0.0.0 --port 8000
+          cleanup() {
+            docker logs medical-archive-web-smoke || true
+            docker logs medical-archive-web-smoke-no-demo || true
+            docker rm -f medical-archive-web-smoke medical-archive-web-smoke-no-demo || true
+          }
+          trap cleanup EXIT
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8000/login >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --silent --show-error --fail http://127.0.0.1:8000/login >/dev/null
+          curl --silent --show-error --fail http://127.0.0.1:8000/manifest.webmanifest >/dev/null
+          curl --silent --show-error --fail http://127.0.0.1:8000/app-icon.svg >/dev/null
+          curl --silent --show-error --fail http://127.0.0.1:8000/apple-touch-icon.png >/dev/null
+          # Protected archive pages must reject anonymous requests; this confirms auth middleware is active.
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8000/)
+          test "$status" = "401"
+          cat > "$RUNNER_TEMP/smoke.env" <<'EOF'
+          WEB_USERNAME=smoke-test
+          WEB_PASSWORD=ci-only-password
+          DEMO_USERNAME=test
+          DEMO_PASSWORD=test
+          EOF
+          python scripts/smoke_test_web.py --base-url http://127.0.0.1:8000 --env-file "$RUNNER_TEMP/smoke.env"
+          # Repeat the smoke test with demo login disabled, as expected for a locked-down private deployment.
+          docker run -d --name medical-archive-web-smoke-no-demo \
+            --entrypoint uvicorn \
+            -p 127.0.0.1:8001:8000 \
+            -e DB_PATH=/tmp/medical-archive-smoke-no-demo.sqlite3 \
+            -e WEB_SESSION_SECRET=ci-only-not-a-real-secret-value-123456789 \
+            -e WEB_USERNAME=smoke-test \
+            -e WEB_PASSWORD=ci-only-password \
+            -e DEMO_USERNAME= \
+            -e DEMO_PASSWORD= \
+            medical-assistant:clean-clone-test webapp:app --host 0.0.0.0 --port 8000
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8001/login >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --silent --show-error --fail http://127.0.0.1:8001/login >/dev/null
+          cat > "$RUNNER_TEMP/smoke-no-demo.env" <<'EOF'
+          WEB_USERNAME=smoke-test
+          WEB_PASSWORD=ci-only-password
+          DEMO_USERNAME=
+          DEMO_PASSWORD=
+          EOF
+          python scripts/smoke_test_web.py --base-url http://127.0.0.1:8001 --env-file "$RUNNER_TEMP/smoke-no-demo.env"

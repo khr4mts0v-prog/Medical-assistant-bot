@@ -1,7 +1,9 @@
 FROM node:20-alpine AS frontend-build
 WORKDIR /frontend
 COPY frontend/package.json ./
-RUN npm install --no-audit --no-fund
+# Match the known-working CI install flags; the frontend currently has no lockfile
+# and includes peer dependencies that npm's strict resolver cannot resolve reliably.
+RUN npm install --legacy-peer-deps --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 

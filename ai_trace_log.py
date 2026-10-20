@@ -23,7 +23,9 @@ def _logger():
         path = Path(os.getenv("AI_TRACE_LOG_PATH", "/app/data/ai_trace.log"))
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            handler = RotatingFileHandler(path, maxBytes=5_000_000, backupCount=4, encoding="utf-8", delay=True)
+            handler = RotatingFileHandler(path, maxBytes=5_000_000, backupCount=4, encoding="utf-8", delay=False)
+            # Full prompts and model responses can contain medical data. Restrict the
+            # active log to the service account (owner read/write only).
             try:
                 os.chmod(path, 0o600)
             except OSError:
@@ -74,7 +76,14 @@ def emit(trace_id, stage, **fields):
 
 
 def emit_full(trace_id, stage, **fields):
-    """Write explicitly requested plaintext diagnostic content to the restricted trace file."""
+    """Write plaintext diagnostic content only after an explicit non-production opt-in."""
+    enabled = os.getenv("AI_TRACE_FULL_CONTENT_ENABLED", "false").strip().casefold() in {"1", "true", "yes", "on"}
+    if not enabled:
+        # Full prompts, OCR fragments and answers may contain medical data. Record only
+        # field names; never persist the supplied values unless explicitly opted in.
+        emit(trace_id, str(stage)[:70] + ".content_suppressed",
+             content_suppressed=True, field_names=sorted(str(key)[:60] for key in fields))
+        return
     record = {"ts": time.time(), "trace_id": str(trace_id or "")[:40], "stage": str(stage)[:80]}
     record.update(fields)
     logger = _logger()

@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 data/
+# Local diagnostic logs may contain medical information; never bake them into images.
+*.log
 __pycache__/
 *.py[cod]
 .venv/
