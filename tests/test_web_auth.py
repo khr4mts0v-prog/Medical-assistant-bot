@@ -200,5 +200,60 @@ class WebAuthTests(unittest.TestCase):
         self.assertEqual(image.size, (180, 180))
         self.assertEqual(image.format, "PNG")
 
+
+    def test_demo_account_family_data_is_disjoint_from_admin(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from starlette.requests import Request
+
+        def request():
+            return Request({
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "https",
+                "path": "/",
+                "raw_path": b"/",
+                "query_string": b"",
+                "headers": [(b"host", b"archive.example")],
+                "client": ("203.0.113.4", 1234),
+                "server": ("archive.example", 443),
+            })
+
+        with TemporaryDirectory() as directory, patch.object(
+            webapp.tenancy, "DB_PATH", Path(directory) / "isolation.sqlite3"
+        ):
+            admin_uid = webapp.current_user(
+                request(),
+                HTTPBasicCredentials(
+                    username="test-admin",
+                    password="test-password-for-unit-tests",
+                ),
+            )
+            demo_request = request()
+            demo_request.state.medical_demo_session = "isolated-browser-session"
+            with patch.object(webapp, "_ensure_demo_tenant"):
+                demo_uid = webapp.current_user(
+                    demo_request,
+                    HTTPBasicCredentials(username="test", password="test"),
+                )
+
+            self.assertNotEqual(admin_uid, demo_uid)
+            admin_family = webapp.tenancy.create_family("Admin archive", admin_uid)
+            demo_family = webapp.tenancy.create_family("Demo archive", demo_uid)
+
+            self.assertEqual(
+                {row["id"] for row in webapp.tenancy.families_for_user(admin_uid)},
+                {admin_family},
+            )
+            self.assertEqual(
+                {row["id"] for row in webapp.tenancy.families_for_user(demo_uid)},
+                {demo_family},
+            )
+            self.assertIsNone(webapp.tenancy.role_for_user(admin_family, demo_uid))
+            self.assertIsNone(webapp.tenancy.role_for_user(demo_family, admin_uid))
+
 if __name__ == "__main__":
     unittest.main()
