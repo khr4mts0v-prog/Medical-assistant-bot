@@ -159,7 +159,6 @@ function HomeReactView({familyId,onNavigate,onAsk}: {familyId:number|null;onNavi
     finally{setCreateBusy(false);}
   };
   return <div className="home-react-screen">
-    <section className="home-react-hero"><div><div className="eyebrow">СЕМЕЙНЫЙ МЕДИЦИНСКИЙ АРХИВ</div><h1>Всё важное о здоровье — в одном месте</h1><p>Документы, обследования и история семьи с быстрым поиском и помощью ИИ.</p></div><div className="home-react-hero-icon"><HeartPulse size={34}/></div></section>
     {payload?.is_demo && <div className="notice-warning"><strong>Демо-режим.</strong> Используй только тестовые документы. Данные демо-архива автоматически удаляются после периода бездействия.</div>}
     {error && <div className="error-banner" role="alert">{error}<button type="button" onClick={()=>setRefreshKey(v=>v+1)}>Повторить</button></div>}
     {busy && <div className="skeleton"><div/><div/><div/></div>}
@@ -293,7 +292,7 @@ function DocumentEditorReactView({familyId,documentId,onNavigate}: {familyId:num
     {busy&&<div className="skeleton"><div/><div/><div/></div>}
     {!busy&&data&&<form className="document-editor-form" onSubmit={save}>
       <section className="card document-editor-source"><div><span className="muted">Пациент</span><strong>{data.patient}</strong></div><div><span className="muted">Исходный файл</span><strong>{data.source_name}</strong></div></section>
-      {data.preview_url&&<section className="card document-editor-preview"><h2>Предпросмотр оригинала</h2>{data.preview_url.endsWith('/original')&&data.page_count>0?<div className="document-pdf-pages"><div className="pdf-preview-toolbar">PDF · {data.page_count} стр. · прокрути, чтобы просмотреть все страницы</div>{Array.from({length:data.page_count},(_,index)=><section className="document-pdf-page" key={index}><div className="pdf-preview-page-label">Страница {index+1} из {data.page_count}</div><img src={'/families/'+familyId+'/documents/'+documentId+'/preview/page/'+(index+1)} alt={'Страница '+(index+1)+' из '+data.page_count} loading="lazy" decoding="async"/></section>)}<p><a href={data.preview_url} target="_blank" rel="noopener noreferrer">Открыть исходный PDF отдельно ↗</a></p></div>:data.preview_url.endsWith('/original')?<iframe src={data.preview_url+'#toolbar=1&navpanes=0&scrollbar=1'} title="Оригинал PDF" loading="lazy"/>:<a href={data.preview_url} target="_blank" rel="noopener noreferrer"><img src={data.preview_url} alt="Предпросмотр оригинала"/></a>}</section>}
+      {data.preview_url&&<section className="card document-editor-preview"><h2>Предпросмотр оригинала</h2>{data.preview_url.endsWith('/original')&&data.page_count>0?<ScrollablePdfPreview pageCount={data.page_count} pageUrl={page=>'/families/'+familyId+'/documents/'+documentId+'/preview/page/'+page} originalUrl={data.preview_url}/>:data.preview_url.endsWith('/original')?<iframe src={data.preview_url+'#toolbar=1&navpanes=0&scrollbar=1'} title="Оригинал PDF" loading="lazy"/>:<a href={data.preview_url} target="_blank" rel="noopener noreferrer"><img src={data.preview_url} alt="Предпросмотр оригинала"/></a>}</section>}
       <section className="card document-editor-fields">
         <label>Тип документа<select value={kind} onChange={e=>setKind(e.target.value)} required>{data.kinds.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
         <label>Название в архиве<input value={title} onChange={e=>setTitle(e.target.value)} maxLength={180} required/></label>
@@ -333,10 +332,10 @@ function PatientReactView({familyId, patient, onAsk}: {familyId:number; patient:
   const grouped = payload?.documents.reduce<Record<string,PatientDocument[]>>((acc,doc)=>{(acc[doc.kind || 'Не определено'] ||= []).push(doc);return acc;},{}) || {};
   return <div className="patient-react-screen">
     <div className="patient-react-header"><div><div className="eyebrow">КАРТОЧКА ПАЦИЕНТА</div><h1>{patient}</h1><p className="lead">{payload ? payload.document_count+' документов в архиве' : 'Документы и медицинская история'}</p></div>
-      <div className="patient-react-actions"><button type="button" className="patient-action-primary" onClick={() => onAsk()}><BrainCircuit size={17}/> Спросить ИИ</button><a className="button-link" href={'/patient-memory?family_id='+familyId+'&patient='+encodeURIComponent(patient)}>Память пациента</a><a className="button-link" href={base+'/edit'}>Редактировать</a></div>
+      <div className="patient-react-actions" aria-label="Действия с пациентом"><button type="button" className="patient-action patient-action-primary" onClick={() => onAsk()}><BrainCircuit size={17}/> Спросить ИИ</button><a className="patient-action patient-action-secondary" href={'/patient-memory?family_id='+familyId+'&patient='+encodeURIComponent(patient)}>Память пациента</a><a className="patient-action patient-action-secondary" href={base+'/edit'}>Редактировать</a><button type="button" className="patient-action patient-action-secondary" onClick={() => document.getElementById('patient-react-upload')?.scrollIntoView({behavior:'smooth',block:'start'})}><Plus size={17}/> Добавить документы</button></div>
     </div>
     <form className="card patient-react-search" onSubmit={event=>event.preventDefault()}><label htmlFor="patient-react-q">Поиск по документам пациента</label><div className="row"><input id="patient-react-q" type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Например: анализы, УЗИ, выписка"/>{query && <button type="button" onClick={()=>setQuery('')}>Сбросить</button>}</div></form>
-    {payload?.capabilities.upload && <section className="card patient-react-upload"><h2>Добавить документы</h2><form method="post" encType="multipart/form-data" action={base+'/upload'}><input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" required/><label><input type="checkbox" name="ai_consent" value="true"/> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label><button type="submit">Загрузить и распознать</button></form></section>}
+    {payload?.capabilities.upload && <section id="patient-react-upload" className="card patient-react-upload"><h2>Добавить документы</h2><form method="post" encType="multipart/form-data" action={base+'/upload'}><input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" required/><label><input type="checkbox" name="ai_consent" value="true"/> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label><button type="submit">Загрузить и распознать</button></form></section>}
     <div className="patient-react-tabs" role="tablist" aria-label="Вид документов"><button type="button" role="tab" aria-selected={view==='timeline'} className={view==='timeline'?'active':''} onClick={()=>setView('timeline')}>Хронология</button><button type="button" role="tab" aria-selected={view==='tree'} className={view==='tree'?'active':''} onClick={()=>setView('tree')}>Дерево документов</button></div>
     {view==='tree' && <div className="patient-react-selection"><div><strong>Выбор документов для ИИ</strong><p>По умолчанию ассистент сам ищет подходящие документы. Включи выбор, чтобы ограничить запрос отмеченными файлами.</p></div><button type="button" onClick={()=>{setSelectionMode(v=>!v);setSelected([]);}}>{selectionMode?'Отменить выбор':'Выбрать документы'}</button>{selectionMode && <span>{selected.length} выбрано</span>}</div>}
     {busy && <div className="skeleton"><div/><div/><div/></div>}
@@ -480,6 +479,22 @@ function SettingsReactView({familyId,onNavigate}: {familyId:number|null;onNaviga
 }
 
 
+type ScrollablePdfPreviewProps = { pageCount:number; pageUrl:(page:number)=>string; originalUrl:string; };
+function ScrollablePdfPreview({pageCount,pageUrl,originalUrl}: ScrollablePdfPreviewProps) {
+  const visiblePageCount=Math.max(0,Math.min(100,Math.trunc(pageCount)));
+  return <div className="pdf-viewer">
+    <div className="pdf-viewer-toolbar"><strong>PDF · {pageCount} {pageCount===1?'страница':pageCount>1&&pageCount<5?'страницы':'страниц'}</strong><span>Прокрутите документ внутри окна</span></div>
+    <div className="pdf-viewer-scroll" role="region" aria-label={'Предпросмотр PDF, '+pageCount+' страниц'} tabIndex={0}>
+      {Array.from({length:visiblePageCount},(_,index)=><figure className="pdf-viewer-page" key={index}>
+        <figcaption>Страница {index+1} из {pageCount}</figcaption>
+        <img src={pageUrl(index+1)} alt={'Страница '+(index+1)+' из '+pageCount} loading="lazy" decoding="async"/>
+      </figure>)}
+      {pageCount>visiblePageCount&&<p className="pdf-viewer-limit" role="status">Показаны первые {visiblePageCount} страниц из {pageCount}. Откройте оригинал для просмотра всего документа.</p>}
+    </div>
+    <div className="pdf-viewer-footer"><a href={originalUrl} target="_blank" rel="noopener noreferrer">Открыть исходный PDF отдельно ↗</a></div>
+  </div>;
+}
+
 type InboxReviewPayload = {family_id:number;pending_id:number;source_name:string;created:string;ocr_text:string;patient_options:{name:string;birth_date:string}[];kinds:{value:string;label:string}[];kind:string;title:string;date:string;preview_url:string|null;preview_kind:'image'|'pdf'|'none';page_count:number};
 function InboxReviewReactView({familyId,pendingId,onNavigate}: {familyId:number;pendingId:number;onNavigate:(url:string)=>void}) {
   const [data,setData]=useState<InboxReviewPayload|null>(null);
@@ -530,7 +545,7 @@ function InboxReviewReactView({familyId,pendingId,onNavigate}: {familyId:number;
     {!busy&&data&&<>
       <section className="card inbox-review-source"><div><div className="eyebrow">ИСХОДНЫЙ ФАЙЛ</div><h2>{data.source_name}</h2><p className="muted">Добавлен: {data.created||'дата не указана'}</p></div>
         {data.preview_kind==='image'&&data.preview_url&&<a href={data.preview_url} target="_blank" rel="noopener" className="inbox-review-image-link"><img src={data.preview_url} alt="Предпросмотр исходного документа"/><span>Открыть полностью ↗</span></a>}
-        {data.preview_kind==='pdf'&&data.preview_url&&<div className="inbox-review-pdf">{data.page_count>0?Array.from({length:Math.min(data.page_count,100)},(_,i)=><figure key={i}><figcaption>Страница {i+1}{data.page_count>100?' (показаны первые 100 страниц)':' из '+data.page_count}</figcaption><img src={data.preview_url+'/page/'+(i+1)} alt={'Страница '+(i+1)} loading="lazy" decoding="async"/></figure>):<iframe src={data.preview_url+'#toolbar=1&navpanes=0'} title="Предпросмотр PDF" loading="lazy"/>}<p><a href={data.preview_url} target="_blank" rel="noopener">Открыть PDF отдельно ↗</a></p></div>}
+        {data.preview_kind==='pdf'&&data.preview_url&&(data.page_count>0?<ScrollablePdfPreview pageCount={data.page_count} pageUrl={page=>data.preview_url!+'/page/'+page} originalUrl={data.preview_url}/>:<div className="inbox-review-pdf"><iframe src={data.preview_url+'#toolbar=1&navpanes=0&scrollbar=1'} title="Предпросмотр PDF" loading="lazy"/><p><a href={data.preview_url} target="_blank" rel="noopener noreferrer">Открыть PDF отдельно ↗</a></p></div>)}
         {data.preview_kind==='none'&&<p className="muted">Предпросмотр для этого формата недоступен.</p>}
         <button type="button" className="button-link inbox-review-ocr-toggle" onClick={()=>setShowOcr(v=>!v)}>{showOcr?'Скрыть OCR-текст':'Показать OCR-текст'}</button>
         {showOcr&&<pre className="inbox-review-ocr">{data.ocr_text||'Текст не распознан.'}</pre>}
@@ -669,6 +684,10 @@ function App() {
   const [error, setError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [patientsExpanded, setPatientsExpanded] = useState(false);
+  const [patientMenuItems, setPatientMenuItems] = useState<{href:string;label:string}[]>([]);
+  const [patientMenuLoading, setPatientMenuLoading] = useState(false);
+  const [patientMenuError, setPatientMenuError] = useState('');
+  const [patientMenuRetry, setPatientMenuRetry] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modal, setModal] = useState<Screen | null>(null);
   const [modalError, setModalError] = useState('');
@@ -987,17 +1006,49 @@ function App() {
   }, [screen, navigate]);
 
   const isHome = path === '/' || path === '/app' || path.startsWith('/?');
-  const patientMenuItems = React.useMemo(() => {
-    if (!screen?.html) return [];
-    const parsed = new DOMParser().parseFromString(screen.html, 'text/html');
-    return Array.from(parsed.querySelectorAll<HTMLAnchorElement>('.patient-card[href]')).map(a => ({ href: a.getAttribute('href') || '/', label: (a.querySelector('strong')?.textContent || a.textContent || '').trim().replace(/\s+/g, ' ') })).filter(item => item.label && item.href.startsWith('/'));
-  }, [screen]);
+  const patientMenuFamilyId = React.useMemo(() => {
+    const pathFamily = path.match(/^\/families\/(\d+)\//);
+    if (pathFamily) return Number(pathFamily[1]);
+    const params = new URLSearchParams(path.split('?')[1] || '');
+    const requested = Number(params.get('family_id') || 0);
+    return Number.isInteger(requested) && requested > 0 ? requested : null;
+  }, [path]);
+  useEffect(() => {
+    if (!patientsExpanded) return;
+    let active = true;
+    setPatientMenuLoading(true);
+    setPatientMenuError('');
+    const query = patientMenuFamilyId ? '?family_id=' + encodeURIComponent(String(patientMenuFamilyId)) : '';
+    fetch('/api/home' + query, {credentials:'same-origin',headers:{Accept:'application/json'},cache:'no-store'})
+      .then(async response => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || 'Не удалось загрузить список пациентов');
+        return data;
+      })
+      .then(data => {
+        if (!active) return;
+        const items = Array.isArray(data.patients) ? data.patients.map((patient:any) => ({
+          href: String(patient.url || ''),
+          label: String(patient.short_name || patient.name || '').trim(),
+        })).filter((item:{href:string;label:string}) => item.label && item.href.startsWith('/')) : [];
+        setPatientMenuItems(items);
+      })
+      .catch(error => {
+        if (active) {
+          setPatientMenuItems([]);
+          setPatientMenuError(error instanceof Error ? error.message : 'Не удалось загрузить пациентов');
+        }
+      })
+      .finally(() => { if (active) setPatientMenuLoading(false); });
+    return () => { active = false; };
+  }, [patientsExpanded, patientMenuFamilyId, patientMenuRetry]);
   const hasPendingInbox = !isHome || Boolean(screen?.html && /href=["']\/families\/\d+\/inbox/.test(screen.html));
   useEffect(() => {
     setDocumentSelectionActive(false);
     setSelectedDocumentIds([]);
     setPatientAssistantScope(null);
     setSmartSearchOpen(false);
+    window.scrollTo({top:0,behavior:'instant' as ScrollBehavior});
   }, [path]);
 
   const handleMemoryProposal = async (proposal: any, action: 'accept' | 'reject', turnIndex: number) => {
@@ -1177,7 +1228,7 @@ function App() {
       <div className="brand"><span className="brand-icon"><HeartPulse size={22}/></span><span>Семейный медицинский архив</span><button className="icon-button sidebar-close" onClick={() => setMenuOpen(false)} aria-label="Закрыть"><X size={20}/></button></div>
       <button className={'nav-item ' + (isHome ? 'active' : '')} onClick={() => navigate(HOME)}><Home size={19}/>Главная</button>
       <button className={'nav-item ' + (patientsExpanded ? 'active' : '')} aria-expanded={patientsExpanded} onClick={() => setPatientsExpanded(value => !value)}><Users size={19}/>Пациенты <ChevronRight className={patientsExpanded ? 'submenu-chevron expanded' : 'submenu-chevron'} size={16}/></button>
-      {patientsExpanded && <div className="patient-submenu">{patientMenuItems.length ? patientMenuItems.map((patient, index) => <button className="nav-subitem" key={patient.href + index} onClick={() => navigate(patient.href)}>{patient.label}</button>) : <span className="nav-subitem-empty">Открываем список пациентов…</span>}</div>}
+      {patientsExpanded && <div className="patient-submenu">{patientMenuLoading ? <span className="nav-subitem-empty" role="status">Загружаем пациентов…</span> : patientMenuError ? <button type="button" className="nav-subitem nav-subitem-retry" onClick={() => setPatientMenuRetry(value => value + 1)}>{patientMenuError} · Повторить</button> : patientMenuItems.length ? patientMenuItems.map((patient, index) => <button type="button" className="nav-subitem" key={patient.href + index} onClick={() => navigate(patient.href)}>{patient.label}</button>) : <span className="nav-subitem-empty">Пациентов пока нет</span>}</div>}
       {hasPendingInbox && <button className="nav-item" onClick={() => { const link = document.querySelector<HTMLAnchorElement>('.app-content a[href*="/inbox"]'); navigate(link?.getAttribute('href') || '/search'); }}><ClipboardCheck size={19}/>Требуют проверки</button>}
       <button className="nav-item" onClick={() => navigate('/search')}><Search size={19}/>Поиск</button>
       <button className="nav-item" onClick={() => navigate('/assistant')}><BrainCircuit size={19}/>Ассистент</button>
