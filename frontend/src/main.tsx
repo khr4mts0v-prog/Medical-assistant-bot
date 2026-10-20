@@ -510,9 +510,53 @@ function InboxReviewReactView({familyId,pendingId,onNavigate}: {familyId:number;
   </div>;
 }
 
+
+type SearchResult = {id:number;title:string;kind:string;date:string;text:string;url:string;patient_url:string};
+type SearchPayload = {family_id:number|null;family_name:string;query:string;patient:string;patients:{name:string;aliases:string[]}[];needs_patient:boolean;ambiguous:boolean;patient_choices:string[];results:SearchResult[];searched:boolean;message:string;total:number};
+function SearchReactView({familyId,onNavigate}: {familyId:number|null;onNavigate:(url:string)=>void}) {
+  const params=new URLSearchParams(location.search);
+  const [selectedFamily,setSelectedFamily]=useState(familyId??Number(params.get('family_id'))||null);
+  const [query,setQuery]=useState(params.get('q')||'');
+  const [patient,setPatient]=useState(params.get('patient')||'');
+  const [payload,setPayload]=useState<SearchPayload|null>(null);
+  const [busy,setBusy]=useState(true);
+  const [searching,setSearching]=useState(false);
+  const [error,setError]=useState('');
+  useEffect(()=>{
+    let active=true;setBusy(true);setError('');
+    const qs=new URLSearchParams();if(selectedFamily)qs.set('family_id',String(selectedFamily));if(query.trim())qs.set('q',query.trim());if(patient)qs.set('patient',patient);
+    fetch('/api/search?'+qs.toString(),{credentials:'same-origin',headers:{Accept:'application/json'},cache:'no-store'})
+      .then(async response=>{const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.detail||'Не удалось выполнить поиск');return body as SearchPayload;})
+      .then(body=>{if(active){setPayload(body);if(!selectedFamily&&body.family_id)setSelectedFamily(body.family_id);}})
+      .catch(e=>{if(active)setError(e instanceof Error?e.message:'Ошибка поиска');})
+      .finally(()=>{if(active)setBusy(false);});
+    return ()=>{active=false;};
+  },[selectedFamily,query,patient]);
+  const submit=(event:React.FormEvent<HTMLFormElement>)=>{event.preventDefault();setSearching(true);setError('');const qs=new URLSearchParams();if(selectedFamily)qs.set('family_id',String(selectedFamily));if(query.trim())qs.set('q',query.trim());if(patient)qs.set('patient',patient);onNavigate('/search?'+qs.toString());setSearching(false);};
+  const choosePatient=(name:string)=>{setPatient(name);const qs=new URLSearchParams();if(selectedFamily)qs.set('family_id',String(selectedFamily));qs.set('patient',name);qs.set('q',query);onNavigate('/search?'+qs.toString());};
+  return <div className="archive-search-screen">
+    <header className="archive-search-header"><div><div className="eyebrow">ПОИСК ПО МЕДИЦИНСКОМУ АРХИВУ</div><h1>Поиск документов</h1><p className="muted">Ищи по содержимому, названию, типу исследования или дате. Результаты ограничены выбранным семейным архивом.</p></div><button type="button" className="button-link" onClick={()=>onNavigate(selectedFamily? '/?family_id='+selectedFamily:'/')}><Home size={16}/> В архив</button></header>
+    <form className="card archive-search-form" onSubmit={submit}>
+      <label htmlFor="archive-search-query">Что ищем?</label><div className="archive-search-input-row"><input id="archive-search-query" type="search" value={query} onChange={e=>setQuery(e.target.value)} maxLength={300} placeholder="Например: Саша анализы за март" required/><button type="submit" disabled={searching}>{searching?'Ищем…':'Найти'}</button></div>
+      {payload?.patients?.length?<><label htmlFor="archive-search-patient">Пациент</label><select id="archive-search-patient" value={patient} onChange={e=>choosePatient(e.target.value)}><option value="">Определить из запроса</option>{payload.patients.map(p=><option key={p.name} value={p.name}>{p.name}</option>)}</select></>:null}
+      <p className="muted">Если имя встречается у нескольких пациентов, поиск попросит выбрать нужного — автоматически угадывать не будет.</p>
+    </form>
+    {error&&<div className="error-banner" role="alert">{error}</div>}
+    {busy?<div className="skeleton"><div/><div/><div/></div>:payload&&<>
+      {payload.ambiguous&&<section className="card"><h2>Уточни пациента</h2><p>{payload.message}</p><div className="archive-search-patient-choices">{payload.patient_choices.map(name=><button type="button" key={name} onClick={()=>choosePatient(name)}>{name}<ChevronRight size={16}/></button>)}</div></section>}
+      {!payload.ambiguous&&payload.needs_patient&&payload.searched&&<section className="card"><h2>Выбери пациента</h2><p>{payload.message}</p><div className="archive-search-patient-choices">{payload.patient_choices.map(name=><button type="button" key={name} onClick={()=>choosePatient(name)}>{name}<ChevronRight size={16}/></button>)}</div></section>}
+      {payload.searched&&!payload.needs_patient&&!payload.ambiguous&&<section className="archive-search-results"><div className="archive-search-results-heading"><h2>Результаты</h2><span>{payload.total} документов</span></div>{payload.message&&<p className="muted">{payload.message}</p>}
+        {payload.results.length===0?<div className="card">Подходящие документы не найдены. Попробуй уточнить запрос или выбрать другой тип документа.</div>:payload.results.map(doc=><article className="card archive-search-result" key={doc.id}><div className="archive-search-result-heading"><h3>{doc.title}</h3><span className="archive-search-kind">{doc.kind||'Не определено'}</span></div><p className="muted">Дата: {doc.date||'не указана'} · Пациент: {payload.patient}</p><details><summary>Показать фрагмент OCR-текста</summary><pre>{doc.text||'Текст не распознан.'}</pre></details><div className="archive-search-result-actions"><button type="button" onClick={()=>onNavigate(doc.patient_url)}>История пациента</button><button type="button" className="button-link" onClick={()=>onNavigate(doc.url)}>Открыть документ</button></div></article>)}
+      </section>}
+      {!payload.searched&&<section className="card archive-search-empty"><Search size={24}/><h2>Найди нужный документ</h2><p>Введи запрос, например «анализы крови», «УЗИ» или «выписка за июнь», и выбери пациента, если понадобится.</p></section>}
+    </>}
+  </div>;
+}
+
 function App() {
   const [path, setPath] = useState(location.pathname + location.search);
   const settingsRoute = path.split('?')[0] === '/settings';
+  const searchRoute = path.split('?')[0] === '/search';
   const patientRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)(?:\?[^#]*)?$/);
   const patientNewRoute = path.match(/^\/families\/(\d+)\/patients\/new(?:\?[^#]*)?$/);
   const patientEditRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)\/edit(?:\?[^#]*)?$/);
@@ -1047,7 +1091,7 @@ function App() {
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
+        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : searchRoute ? <SearchReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
         {loading && screen && <div className="loading-line"/>}
       </section>}
     </main>
