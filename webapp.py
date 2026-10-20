@@ -1107,6 +1107,36 @@ def preview_document(fid: int, doc_id: int, uid: int = Depends(current_user)):
         raise HTTPException(502, "Не удалось получить оригинал изображения из хранилища")
 
 
+@app.get("/api/families/{fid}/documents/{doc_id}/edit")
+def document_editor_api(fid:int,doc_id:int,uid:int=Depends(current_user)):
+    """Authorized editor payload; OCR is exposed only to the user who can access this family/document."""
+    family(fid,uid)
+    d=db.get_doc(fid,doc_id)
+    if not d:
+        raise HTTPException(404,"Документ не найден")
+    from AIAnalise import DOCUMENT_TYPE_RULES
+    analysis=d.get("analysis") or {}
+    suffix=Path(str(d.get("name") or "")).suffix.lower()
+    preview_url=None
+    if suffix==".pdf":
+        if STORAGE_BACKEND=="local" or is_demo_user(uid):
+            preview_url=f"/families/{fid}/documents/{doc_id}/original"
+    elif suffix in {".png",".jpg",".jpeg",".webp",".bmp",".tif",".tiff"}:
+        preview_url=f"/families/{fid}/documents/{doc_id}/preview"
+    return {
+        "family_id":int(fid),
+        "document_id":int(doc_id),
+        "patient":str(d.get("patient") or ""),
+        "source_name":str(d.get("name") or ""),
+        "kind":str(d.get("kind") or "не определено"),
+        "title":str(display_document_title(d,analysis)),
+        "date":str(d.get("date") or ""),
+        "ocr_text":str(d.get("text") or ""),
+        "kinds":["не определено"]+sorted(DOCUMENT_TYPE_RULES.keys()),
+        "preview_url":preview_url,
+    }
+
+
 @app.get("/families/{fid}/documents/{doc_id}/edit", response_class=HTMLResponse)
 def edit_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
     family(fid,uid)
