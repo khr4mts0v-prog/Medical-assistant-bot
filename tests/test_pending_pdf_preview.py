@@ -38,6 +38,33 @@ class PendingPdfPreviewTests(unittest.TestCase):
             Matrix=lambda *_args: object(),
         )
 
+    def test_ocr_preview_formats_serialized_page_records(self):
+        self.assertEqual(
+            webapp._format_ocr_preview("{'page': 2, 'text': 'Гемоглобин 120'}"),
+            "--- Страница 2 ---\nГемоглобин 120",
+        )
+        self.assertEqual(
+            webapp._format_ocr_preview("[{'page': 1, 'text': 'Первая'}, {'page': 2, 'text': 'Вторая'}]"),
+            "--- Страница 1 ---\nПервая\n\n--- Страница 2 ---\nВторая",
+        )
+
+    def test_ocr_preview_preserves_plain_text_and_unknown_structures(self):
+        ordinary = "Обычный OCR-текст"
+        unknown = "{'unexpected': 'value'}"
+        self.assertEqual(webapp._format_ocr_preview(ordinary), ordinary)
+        self.assertEqual(webapp._format_ocr_preview(unknown), unknown)
+
+    def test_document_editor_api_keeps_raw_ocr_when_formatting_display(self):
+        raw = "{'page': 2, 'text': 'Гемоглобин 120'}"
+        document = {
+            "id": 2, "name": "blood.pdf", "patient": "Тестовый пациент", "kind": "не определено",
+            "date": "", "text": raw, "remote": "", "analysis": {"display_title": "Анализ крови"},
+        }
+        with patch("webapp.family"), patch("webapp.db.get_doc", return_value=document):
+            response = webapp.document_editor_api(fid=1, doc_id=2, uid=9)
+        self.assertEqual(response["ocr_text"], "--- Страница 2 ---\nГемоглобин 120")
+        self.assertEqual(response["ocr_text_raw"], raw)
+
     def test_page_count_reads_full_document(self):
         with patch.dict(sys.modules, {"fitz": self.fake_fitz}):
             self.assertEqual(webapp._pdf_page_count(b"pdf-bytes"), 3)
