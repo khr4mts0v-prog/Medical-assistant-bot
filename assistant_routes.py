@@ -631,10 +631,7 @@ def _resolve_patient_reference_with_ai(question, patient_records, trace_id=None)
     elif confidence != "high" or not valid_indices:
         status = "ambiguous"
         selected_names = []
-    elif _looks_like_unresolved_person_question(question) and not re.search(
-        r"\b(?:сравни|сравнить|сравнение|между|разниц\w*|отличи\w*|всех|каждого|каждой)\b",
-        " ".join(str(question or "").casefold().replace("ё", "е").split())
-    ) and len(valid_indices) != 1:
+    elif _looks_like_single_patient_reference(question) and len(valid_indices) != 1:
         # A singular reference must never expand to multiple family members.
         status = "ambiguous"
         selected_names = []
