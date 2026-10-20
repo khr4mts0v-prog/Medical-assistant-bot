@@ -10,10 +10,11 @@ import ai_provider
 
 
 class ProviderHttpErrorTests(unittest.TestCase):
-    def test_http_error_is_actionable_and_logs_bounded_redacted_details(self):
+    def test_http_error_is_actionable_and_logs_privacy_safe_details(self):
         response = Mock()
-        response.status_code = 429\n        response.headers = {"Content-Type": "application/json"}
-        response.text = '{"error":{"code":"rate_limit","message":"secret-value"}}'
+        response.status_code = 429
+        response.headers = {"Content-Type": "application/json"}
+        response.text = '{"error":{"code":"rate_limit","message":"sensitive echoed text"}}'
         response.raise_for_status.side_effect = ai_provider.requests.HTTPError("429 Client Error")
 
         with (
@@ -34,10 +35,11 @@ class ProviderHttpErrorTests(unittest.TestCase):
         self.assertEqual(fields["provider"], "polza")
         self.assertEqual(fields["model"], "test/model")
         self.assertEqual(fields["http_status"], 429)
-        self.assertEqual(fields["error_code"], "rate_limit")\n        self.assertEqual(fields["response_chars"], len(response.text))
+        self.assertEqual(fields["error_code"], "rate_limit")
+        self.assertEqual(fields["response_chars"], len(response.text))
         self.assertNotIn("response_excerpt", fields)
+        self.assertNotIn("sensitive echoed text", str(fields))
         self.assertNotIn("test-api-key", str(fields))
-        self.assertEqual(fields["http_status"], 429)
 
     def test_successful_response_keeps_existing_behavior(self):
         response = Mock()
