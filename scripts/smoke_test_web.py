@@ -116,6 +116,13 @@ def main():
         )
         require(status == 403,
                 "Нарушена изоляция: test/test получил доступ к архиву admin (HTTP не 403).")
+    for family_id in demo_family_ids:
+        status, _, _ = request(
+            urljoin(base, f"api/home?family_id={family_id}"),
+            auth=admin_auth,
+        )
+        require(status == 403,
+                "Нарушена изоляция: admin получил доступ к демо-архиву (HTTP не 403).")
 
     status, _, app_html = request(urljoin(base, "app/"))
     require(status == 200, f"React-приложение недоступно: GET /app/ вернул HTTP {status}.")
