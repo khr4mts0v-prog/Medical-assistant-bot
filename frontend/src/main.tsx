@@ -1216,10 +1216,10 @@ function App() {
           }}>
             <label htmlFor="smart-search-query">Что хочешь узнать?</label>
             <textarea id="smart-search-query" rows={2} maxLength={1200} value={smartQuery} onChange={e => setSmartQuery(e.target.value)} placeholder="Например: Дай краткую сводку по УЗИ Саши" required />
-            {smartResult?.needs_consent && <label className="smart-consent"><input type="checkbox" checked={smartConsent} onChange={e => setSmartConsent(e.target.checked)} /> Я разрешаю отправить вопрос и найденные фрагменты медицинских документов внешнему ИИ-провайдеру для анализа.</label>}
+            {smartResult?.needs_consent && <label className="smart-consent"><input type="checkbox" checked={smartConsent} onChange={e => setSmartConsent(e.target.checked)} /> Я разрешаю отправлять вопрос и релевантные фрагменты медицинских документов внешнему ИИ. Если имя не распознаётся, для сопоставления могут быть отправлены имена и псевдонимы карточек пациентов этого семейного архива без медицинских документов.</label>}
             <button type="submit" disabled={smartBusy || !smartQuery.trim()}>{smartBusy ? 'Готовлю ответ…' : smartResult?.needs_consent ? 'Продолжить анализ' : 'Отправить'}</button>
           </form>
-          <p className="smart-search-footnote">Медицинские фрагменты передаются внешней модели только после явного согласия. ИИ может ошибаться; источники всегда доступны для проверки.</p>
+          <p className="smart-search-footnote">Вопрос, релевантные медицинские фрагменты и, при необходимости, имена и псевдонимы карточек для распознавания пациента передаются внешней модели только после явного согласия. ИИ может ошибаться; источники всегда доступны для проверки.</p>
         </div>
       </section>
     </div>}
