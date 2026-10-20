@@ -1,3 +1,27 @@
+
+/* Native React document editor */
+.document-editor-react{display:flex;flex-direction:column;gap:20px;max-width:1000px;margin:0 auto}
+.document-editor-heading{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.document-editor-heading h1{margin:0;font-size:clamp(27px,4vw,35px);letter-spacing:-.035em}
+.document-editor-heading p{margin:0;max-width:720px;color:#6b788c;line-height:1.6}
+.document-editor-form{display:flex;flex-direction:column;gap:16px}
+.document-editor-source{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.document-editor-source>div{display:flex;flex-direction:column;gap:5px;min-width:0}
+.document-editor-source strong{overflow-wrap:anywhere}
+.document-editor-preview h2{margin:0 0 12px;font-size:18px}
+.document-editor-preview iframe{display:block;width:100%;height:75vh;min-height:420px;border:1px solid #d8e2f0;border-radius:12px;background:#fff}
+.document-editor-preview img{display:block;width:100%;height:auto;max-height:75vh;object-fit:contain;border:1px solid #d8e2f0;border-radius:12px;background:#fff}
+.document-editor-fields{display:flex;flex-direction:column;gap:16px}
+.document-editor-fields label{display:flex;flex-direction:column;gap:7px;font-weight:600}
+.document-editor-fields input,.document-editor-fields select,.document-editor-fields textarea{width:100%;box-sizing:border-box;min-height:44px;padding:10px 12px;border:1px solid #d5e0f0;border-radius:10px;background:var(--surface,#fff);color:inherit;font:inherit}
+.document-editor-fields textarea{min-height:260px;resize:vertical;line-height:1.5}
+.document-editor-fields .muted{margin:0;line-height:1.5}
+.document-editor-actions{display:flex;gap:10px;flex-wrap:wrap}
+.document-editor-actions button{padding:11px 16px;border:0;border-radius:11px;background:#2d69c4;color:#fff;font-weight:650;cursor:pointer}
+.document-editor-actions button:disabled{opacity:.55;cursor:not-allowed}
+.document-editor-actions button.secondary{border:1px solid var(--border,#d5e0f0);background:var(--surface,#fff);color:inherit}
+@media(max-width:600px){.document-editor-source{grid-template-columns:minmax(0,1fr)}.document-editor-preview iframe{min-height:300px;height:55vh}.document-editor-fields{padding:15px}}
+
 :root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#192d4e;background:#f3f7ff;font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;--bg:#f3f7ff;--card:#fff;--line:#e0e9f7;--muted:#70819b;--blue:#3478df;--blue-dark:#245fc0;--blue-soft:#eaf2ff;--radius:18px}
 *{box-sizing:border-box}
 html{min-width:320px;background:var(--bg);scroll-behavior:smooth}
