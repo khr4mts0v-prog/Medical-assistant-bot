@@ -11,28 +11,38 @@ const HOME = '/';
 
 // Last-resort presentation guard: never render a serialized structured answer as chat prose.
 function readableAnswer(value: unknown): string {
-  let cleaned = String(value ?? '').trim();
-  if (!cleaned) return '';
-  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  // Some compatible models double-serialize the structured response. Unwrap only answer
-  // envelopes, with a bound to avoid loops; never display the JSON payload as chat prose.
-  for (let depth = 0; depth < 3; depth += 1) {
+  const fallback = 'Не удалось корректно отобразить ответ модели. Повтори вопрос.';
+  let current: unknown = value;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current && typeof current === 'object' && !Array.isArray(current)) {
+      const record = current as Record<string, unknown>;
+      if (typeof record.answer === 'string' && record.answer.trim()) { current = record.answer; continue; }
+      return fallback;
+    }
+    if (typeof current !== 'string') break;
+    let cleaned = current.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    if (!cleaned) return '';
     try {
-      const parsed = JSON.parse(cleaned);
-      if (parsed && typeof parsed === 'object' && typeof parsed.answer === 'string' && parsed.answer.trim()) {
-        cleaned = parsed.answer.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-        continue;
+      const parsed: unknown = JSON.parse(cleaned);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const record = parsed as Record<string, unknown>;
+        if (typeof record.answer === 'string' && record.answer.trim()) { current = record.answer; continue; }
       }
-      break;
-    } catch { break; }
+    } catch {
+      // Recover the answer string if a provider appended malformed transport metadata.
+      const match = cleaned.match(/^\s*\{[\s\S]*?"answer"\s*:\s*("(?:\\.|[^"\\])*")/i);
+      if (match) {
+        try { const extracted: unknown = JSON.parse(match[1]); if (typeof extracted === 'string' && extracted.trim()) { current = extracted; continue; } }
+        catch { /* use safe fallback below */ }
+      }
+    }
+    if (/^\s*[\[{]/.test(cleaned) && /"(?:answer|missing_documents|data_completeness|limitations|memory_updates)"\s*:/.test(cleaned)) return fallback;
+    const internalFields = cleaned.search(/(?:^|,\s*|\\n|\n)\s*"?\s*(?:missing_documents|limitations|data_completeness|memory_updates)\s*"?\s*:/i);
+    if (internalFields >= 0) cleaned = cleaned.slice(0, internalFields).trim();
+    if (/^\s*[\[{]/.test(cleaned)) return fallback;
+    return cleaned || fallback;
   }
-  // Do not show transport metadata if the model accidentally appends it to prose.
-  const internalFields = cleaned.search(/(?:^|\\n|\n)\s*(?:missing_documents|limitations|data_completeness|memory_updates)\s*:/i);
-  if (internalFields >= 0) cleaned = cleaned.slice(0, internalFields).trim();
-  if (/^\s*\{/.test(cleaned) && /"(?:answer|missing_documents|data_completeness)"\s*:/.test(cleaned)) {
-    return 'Не удалось корректно отобразить ответ модели. Повтори вопрос.';
-  }
-  return cleaned || 'Не удалось корректно отобразить ответ модели. Повтори вопрос.';
+  return typeof current === 'string' && current.trim() ? current.trim() : fallback;
 }
 
 function ArchiveDocumentIcon({ name, size = 22 }: { name: string; size?: number }) {
@@ -271,6 +281,7 @@ function DocumentEditorReactView({familyId,documentId,onNavigate}: {familyId:num
   const [ocrText,setOcrText]=useState('');
   const [busy,setBusy]=useState(true);
   const [saving,setSaving]=useState(false);
+  const [deleting,setDeleting]=useState(false);
   const [error,setError]=useState('');
   useEffect(()=>{
     let active=true;
@@ -282,6 +293,22 @@ function DocumentEditorReactView({familyId,documentId,onNavigate}: {familyId:num
       .finally(()=>{if(active)setBusy(false);});
     return ()=>{active=false;};
   },[familyId,documentId]);
+  const deleteDocument=async()=>{
+    if(!data||deleting||saving)return;
+    const documentLabel=data.title.trim()||data.source_name.trim()||'Документ без названия';
+    const patientLabel=data.patient.trim()||'неизвестный пациент';
+    if(!window.confirm('Точно удалить документ «'+documentLabel+'» у пациента «'+patientLabel+'»?\n\nБудут удалены запись документа и его локальные OCR/исходные файлы. Действие нельзя отменить.'))return;
+    setDeleting(true);setError('');
+    try{
+      const form=new FormData();form.set('confirm','yes');
+      const response=await fetch('/families/'+familyId+'/documents/'+documentId+'/delete',{method:'POST',body:form,credentials:'same-origin',redirect:'follow'});
+      if(!response.ok)throw new Error('Удаление не подтверждено сервером (HTTP '+response.status+').');
+      const finalUrl=new URL(response.url,location.origin);
+      if(finalUrl.pathname.indexOf('/families/'+familyId+'/patients/')!==0||!finalUrl.searchParams.has('deleted'))throw new Error('Сервер не подтвердил удаление. Документ считается не удалённым.');
+      onNavigate(finalUrl.pathname+finalUrl.search);
+    }catch(e){setError(e instanceof Error?e.message:'Не удалось удалить документ');}
+    finally{setDeleting(false);}
+  };
   const save=async(event:React.FormEvent<HTMLFormElement>)=>{
     event.preventDefault();
     if(!data)return;
@@ -311,7 +338,7 @@ function DocumentEditorReactView({familyId,documentId,onNavigate}: {familyId:num
         <label>Дата документа (ДД-ММ-ГГГГ)<input value={date} onChange={e=>setDate(e.target.value)} maxLength={10} placeholder="17-03-2025" inputMode="numeric"/></label>
         <label>Распознанный текст (OCR)<textarea value={ocrText} onChange={e=>setOcrText(e.target.value)} maxLength={100000} rows={14}/></label>
         <p className="muted">OCR-текст доступен только в авторизованной карточке документа. Сохранение выполняется существующим backend-обработчиком.</p>
-        <div className="document-editor-actions"><button type="submit" disabled={saving}>{saving?'Сохраняем…':'Сохранить изменения'}</button><button type="button" className="secondary" onClick={()=>onNavigate(data?'/families/'+familyId+'/patients/'+encodeURIComponent(data.patient):'/')}>Отмена</button></div>
+         <div className="document-editor-actions"><button type="submit" disabled={saving||deleting}>{saving?"Сохраняем…":"Сохранить изменения"}</button><button type="button" className="secondary" disabled={saving||deleting} onClick={()=>onNavigate(data?"/families/"+familyId+"/patients/"+encodeURIComponent(data.patient):"/")}>Отмена</button><button type="button" className="danger" disabled={saving||deleting} onClick={deleteDocument}>{deleting?"Удаляем…":"Удалить документ"}</button></div>
       </section>
     </form>}
   </div>;
@@ -1260,8 +1287,8 @@ function App() {
     <main className="main-area">
       <header className="topbar">
         <button className="icon-button menu-button" onClick={() => setMenuOpen(true)} aria-label="Открыть меню"><Menu size={23}/></button>
-        {!isHome && <button className="home-button" onClick={() => navigate(HOME)} aria-label="На главную" title="Домой"><Home size={18}/>Домой</button>}
         <div className="topbar-title">{patientRouteData ? patientRouteData.patient : 'Семейный медицинский архив'}</div>
+        {!isHome ? <button className="home-button" onClick={() => navigate(HOME)} aria-label="На главную" title="Домой"><Home size={18}/></button> : <span className="home-button-placeholder" aria-hidden="true" />}
       </header>
       {settingsOpen ? <section className="settings-view">
         <div className="eyebrow">ПАРАМЕТРЫ</div><h1>Настройки архива</h1><p className="lead">Управление семейным архивом и хранением документов.</p>
