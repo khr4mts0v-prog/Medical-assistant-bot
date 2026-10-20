@@ -49,6 +49,26 @@ class PatientDetailApiTests(unittest.TestCase):
         self.assertNotIn("private OCR text", serialized)
         self.assertNotIn("/private/family_1", serialized)
 
+    def test_patient_detail_formats_serialized_ocr_diagnosis_without_python_dict(self):
+        serialized = "{'page': 2, 'text': 'отделах до 1,4 мм; дифференцировка на отделы сглажена. Диагноз'}"
+        rows = [{
+            "id": 18, "name": "private-original.pdf", "kind": "консультация",
+            "date": "14-09-2026", "text": serialized,
+            "analysis": {"diagnoses": [serialized]}, "keywords": [],
+        }]
+        with (
+            patch.object(webapp, "family"),
+            patch.object(webapp.db, "patients", return_value=["Тестовый пациент"]),
+            patch.object(webapp.db, "search", return_value=rows),
+            patch.object(webapp, "display_document_title", return_value="Консультация невролога"),
+        ):
+            response = self.client.get("/api/families/1/patients/%D0%A2%D0%B5%D1%81%D1%82%D0%BE%D0%B2%D1%8B%D0%B9%20%D0%BF%D0%B0%D1%86%D0%B8%D0%B5%D0%BD%D1%82")
+        self.assertEqual(response.status_code, 200)
+        finding = response.json()["documents"][0]["finding"]
+        self.assertNotIn("{'page':", finding)
+        self.assertIn("Страница 2", finding)
+        self.assertIn("дифференцировка", finding)
+
     def test_unknown_patient_returns_404(self):
         with patch.object(webapp, "family"), patch.object(webapp.db, "patients", return_value=[]):
             response = self.client.get("/api/families/1/patients/unknown")
