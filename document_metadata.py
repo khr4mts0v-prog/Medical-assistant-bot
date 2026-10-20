@@ -160,6 +160,33 @@ def extract_registered_patient(text, patients):
     winners = [name for name, score in patient_scores.items() if score == best_score]
     return winners[0] if len(winners) == 1 else None
 
+
+def extract_patient_candidate(text):
+    """Extract a *candidate* full patient name only from explicitly labelled fields.
+
+    This is not identity verification. Callers must ask the user before creating
+    a patient card; names belonging to parents or clinicians are deliberately ignored.
+    """
+    raw = (text or "")[:12000]
+    labels = re.compile(
+        r"(?:фио\\s+(?:пациента|больного)|ф\\.и\\.о\\.\\s*пациента|"
+        r"пациент(?:ка)?|данные\\s+пациента)\\s*[:№]?\\s*"
+        r"([А-ЯЁ][А-ЯЁа-яё-]{1,40}(?:\\s+[А-ЯЁ][А-ЯЁа-яё-]{1,40}){1,2})",
+        re.IGNORECASE,
+    )
+    excluded = re.compile(r"^(?:мать|отец|мама|папа|врач|медсестра|представитель)\\b", re.IGNORECASE)
+    candidates = set()
+    for match in labels.finditer(raw):
+        name = " ".join(match.group(1).split()).strip(" .,:;")
+        words = name.split()
+        if len(words) not in (2, 3) or excluded.search(name):
+            continue
+        # Require Cyrillic letters in every name component; avoid matching headings.
+        if not all(re.fullmatch(r"[А-ЯЁа-яё-]{2,40}", word) for word in words):
+            continue
+        candidates.add(name)
+    return next(iter(candidates)) if len(candidates) == 1 else None
+
 _UZI_SUBJECTS = [
     (r"\bмалого\s+таза\b", "УЗИ малого таза"),
     (r"\bщитовидн[а-яё]*\s+желез[аыы]\b", "УЗИ щитовидной железы"),
