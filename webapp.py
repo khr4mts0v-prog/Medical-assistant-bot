@@ -1498,6 +1498,48 @@ def preview_pending_document_page(fid:int,pending_id:int,page_number:int,uid:int
         raise HTTPException(422,"Не удалось отобразить страницу PDF")
     return Response(content=image_bytes,media_type="image/png",headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
 
+
+@app.get("/api/families/{fid}/inbox/{pending_id}")
+def pending_document_review_api(fid:int,pending_id:int,uid:int=Depends(current_user)):
+    """Authorized metadata and preview references for manual inbox classification."""
+    family(fid,uid)
+    d=db.get_pending_doc(fid,pending_id)
+    if not d:
+        raise HTTPException(404,"Документ не найден во входящих")
+    from AIAnalise import DOCUMENT_TYPE_RULES
+    analysis=d.get("analysis") or {}
+    labels={"лабораторный отчёт":"Анализы","заключение УЗИ":"УЗИ","заключение КТ":"КТ","заключение МРТ":"МРТ",
+        "рентгенологическое заключение":"Рентген","направление":"Направление","протокол осмотра или приёма":"Приём врача",
+        "консультация специалиста":"Консультация врача","выписной эпикриз":"Выписка из стационара",
+        "выписка из медицинской карты":"Выписка из карты","назначение или рецепт":"Назначение / рецепт",
+        "заключение ЭКГ":"ЭКГ","эндоскопическое заключение":"Эндоскопия (ФГДС / колоноскопия)",
+        "патоморфологическое заключение":"Гистология / биопсия","операционный протокол":"Операция",
+        "медицинская справка":"Медицинская справка","справка о временной нетрудоспособности":"Больничный / справка",
+        "вакцинальный документ":"Прививки","история развития ребёнка":"История развития ребёнка",
+        "контрольная карта диспансерного наблюдения":"Диспансерное наблюдение","медицинская карта или наблюдение":"Медицинская карта",
+        "документ по беременности и родам":"Беременность и роды","медицинское свидетельство о рождении":"Свидетельство о рождении",
+        "медицинское свидетельство о смерти":"Свидетельство о смерти","санаторно-курортная документация":"Санаторий / реабилитация",
+        "не определено":"Не определено"}
+    kinds=["не определено"]+sorted(DOCUMENT_TYPE_RULES.keys())
+    ext=Path(d.get("name") or "").suffix.lower()
+    preview_kind="image" if ext in {".jpg",".jpeg",".png",".webp",".bmp",".tif",".tiff"} else ("pdf" if ext==".pdf" else "none")
+    page_count=0
+    if preview_kind=="pdf":
+        try:
+            page_count=min(1000,int(_pdf_page_count(d.get("file_bytes") or b"")))
+        except Exception:
+            page_count=0
+    patients=[{"name":str(p["name"]),"birth_date":str(p.get("birth_date") or "")} for p in db.patient_records(fid)]
+    current_kind=str(analysis.get("primary_type") or "не определено")
+    return {"family_id":int(fid),"pending_id":int(pending_id),"source_name":str(d.get("name") or "document"),
+        "created":str(d.get("created") or ""),"ocr_text":str(d.get("text") or "")[:12000],
+        "patient_options":patients,"kinds":[{"value":k,"label":labels.get(k,k[:1].upper()+k[1:])} for k in kinds],
+        "kind":current_kind if current_kind in kinds else "не определено",
+        "title":str(analysis.get("display_title") or analysis.get("primary_type") or d.get("name") or "Документ"),
+        "date":"","preview_url":f"/families/{fid}/inbox/{pending_id}/preview",
+        "preview_kind":preview_kind,"page_count":page_count}
+
+
 @app.get("/families/{fid}/inbox/{pending_id}", response_class=HTMLResponse)
 def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)):
     family(fid,uid)
