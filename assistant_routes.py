@@ -379,8 +379,8 @@ def _mentioned_people(records, question):
             last = alias.split()[-1]
             # Common nickname forms, only when the registered name makes the match plausible.
             nickname_forms = {
-                "александр": ("саша", "саши", "саше", "сашу", "сашей", "саня", "сани", "сане", "саню"),
-                "александра": ("саша", "саши", "саше", "сашу", "сашей"),
+                "александр": ("саша", "саши", "саше", "сашу", "сашей", "сашка", "сашки", "сашке", "сашку", "сашкой", "сашкою", "саня", "сани", "сане", "саню"),
+                "александра": ("саша", "саши", "саше", "сашу", "сашей", "сашка", "сашки", "сашке", "сашку", "сашкой", "сашкою"),
                 "мария": ("маша", "маши", "маше", "машу", "машей"),
                 "дмитрий": ("дима", "дими", "митя"),
                 "михаил": ("миша", "миши"),
@@ -400,7 +400,8 @@ def _mentioned_people(records, question):
                     variants.update(token + suffix for suffix in ("а", "у", "е", "ом", "ы", "и"))
             # Inflect common nickname aliases ("Саша" → "Саши/Саше/Сашу/Сашей").
             nickname_inflections = {
-                "саша": ("саши", "саше", "сашу", "сашей"),
+                "саша": ("саши", "саше", "сашу", "сашей", "сашка", "сашки", "сашке", "сашку", "сашкой", "сашкою"),
+                "сашка": ("сашки", "сашке", "сашку", "сашкой", "сашкою"),
                 "маша": ("маши", "маше", "машу", "машей"),
                 "саня": ("сани", "сане", "саню", "саней"),
                 "катя": ("кати", "кате", "катю", "катей"),
@@ -633,11 +634,29 @@ def _extract_memory_measurements(question):
     return unique
 
 
+def _strip_embedded_structured_fields(value):
+    """Remove model transport metadata accidentally appended to user-facing prose."""
+    text = sanitize_model_text(value)
+    marker = re.search(
+        r"(?:^|\\n|\n)\s*(?:missing_documents|limitations|data_completeness|memory_updates)\s*:",
+        text,
+        flags=re.I,
+    )
+    if not marker:
+        return text
+    answer = text[:marker.start()].rstrip()
+    # Some providers double-escape JSON newlines; remove those left immediately before metadata.
+    answer = re.sub(r"(?:\\n)+$", "", answer).rstrip()
+    return answer
+
+
 def _parse_structured_answer(raw):
     """Parse the constrained response format while preserving a plain-text fallback."""
     text = sanitize_model_text(re.sub(r"^\s*\`\`\`(?:json)?\s*|\s*\`\`\`\s*$", "", str(raw or ""), flags=re.I))
     data = None
     # Providers may wrap JSON in commentary or fenced output. Decode the first complete object.
+    # Do not sanitize this outer transport string before JSON parsing: escaped newlines inside
+    # the JSON answer may legitimately contain labels like "missing_documents:".
     decoder = json.JSONDecoder()
     for index, char in enumerate(text):
         if char != "{":
@@ -664,8 +683,9 @@ def _parse_structured_answer(raw):
         )
         fallback = ("Не удалось корректно обработать ответ модели. Попробуйте переформулировать вопрос."
                     if looks_serialized else sanitize_model_text(text) or sanitize_model_text(raw))
-        return {"answer": fallback, "missing_documents": [], "limitations": [],
-                "data_completeness": "unknown"}
+        fallback = _strip_embedded_structured_fields(fallback)
+        return {"answer": fallback or "Не удалось корректно обработать ответ модели. Попробуйте переформулировать вопрос.",
+                "missing_documents": [], "limitations": [], "data_completeness": "unknown"}
     answer_text = sanitize_model_text(data.get("answer"))
     # Some OpenAI-compatible models place a complete JSON response inside the outer
     # answer field. Unwrap it before rendering or retaining it in chat history.
@@ -683,10 +703,9 @@ def _parse_structured_answer(raw):
             break
     if not answer_text:
         answer_text = "Не удалось корректно обработать ответ модели. Попробуйте переформулировать вопрос."
-    embedded_fields = re.search(r"(?:\\\\n|\\n|\n)\s*(?:missing_documents|limitations|data_completeness|memory_updates)\s*:", answer_text, re.I)
-    if embedded_fields:
-        answer_text = answer_text[:embedded_fields.start()]
-        answer_text = re.sub(r"(?:\\n)+$", "", answer_text).rstrip().rstrip("}").rstrip()
+    answer_text = _strip_embedded_structured_fields(answer_text)
+    if not answer_text:
+        answer_text = "Не удалось корректно обработать ответ модели. Попробуйте переформулировать вопрос."
     gaps = []
     for item in data.get("missing_documents", [])[:4] if isinstance(data.get("missing_documents"), list) else []:
         if isinstance(item, str):
@@ -744,6 +763,7 @@ def _structured_archive_answer(question, patients, rows, history=None, memory_co
     system = (
         "Ты медицинский информационный помощник семейного архива. Отвечай по-русски, понятно и по существу. "
         "Стиль: короткий естественный русский без канцелярита, повторов и общих лекций. По умолчанию 80–180 слов; если пользователь просит «кратко», «вывод» или «что делать» — до 100 слов. "
+        "Если пользователь называет человека по короткому имени или домашнему прозвищу (например, «Олега», «Сашку», «Саши»), используй в ответе естественное короткое имя («Олег», «Саша»), а не полное юридическое ФИО. Не повторяй дату рождения и полное ФИО без необходимости или прямого запроса; при этом сохраняй строгую привязку фактов к зарегистрированному пациенту. "
         "Сначала ответь на текущий вопрос. Не пересказывай всё досье и не перечисляй источники/анализы, если они не нужны для ответа. Не добавляй нерелевантные сведения о других членах семьи. "
         "Не обращайся к пациенту во втором лице и не называй ребёнка собеседником: отвечай взрослому, который задаёт вопрос о пациенте. "
         "История диалога нужна только для разрешения ссылок и уточнений; предыдущие ответы ассистента не являются медицинскими доказательствами. "

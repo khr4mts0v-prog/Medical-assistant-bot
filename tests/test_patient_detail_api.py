@@ -44,6 +44,7 @@ class PatientDetailApiTests(unittest.TestCase):
         self.assertEqual(payload["document_count"], 1)
         self.assertEqual(payload["documents"][0]["id"], 17)
         self.assertEqual(payload["documents"][0]["title"], "УЗИ брюшной полости")
+        self.assertEqual(payload["documents"][0]["file_type"], ".pdf")
         serialized = response.text
         self.assertNotIn("private-original.pdf", serialized)
         self.assertNotIn("private OCR text", serialized)

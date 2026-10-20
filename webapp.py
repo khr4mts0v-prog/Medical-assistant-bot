@@ -1080,6 +1080,7 @@ def patient_detail_api(fid:int,patient:str,q:str="",view:str="timeline",uid:int=
             "metadata": str(details.get("metadata") or ""),
             "finding": str(details.get("finding") or ""),
             "review_required": bool(analysis.get("review_required", False)),
+            "file_type": str(Path(str(d.get("name") or "")).suffix or "").lower(),
             "url": f"/families/{fid}/documents/{int(d['id'])}/edit",
         })
     return {
