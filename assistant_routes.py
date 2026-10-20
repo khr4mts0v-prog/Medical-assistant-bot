@@ -506,6 +506,12 @@ _GENERIC_PERSON_REFERENCE_OBJECTS = {
     "ребенке", "ребёнке", "сына", "дочь", "дочку", "маму", "папу", "него", "неё", "нее",
     "их", "них", "меня", "тебя", "нас", "вас", "себя", "этом", "этого", "этому", "этой",
 }
+_GENERIC_PERSON_REFERENCE_STEMS = (
+    "анализ", "документ", "архив", "диагноз", "симптом", "заключен", "рекомендац",
+    "назначен", "результат", "лекарств", "препарат", "здоров", "болезн", "обследован",
+    "консультац", "прием", "приём", "температур", "ребен", "ребён", "спастич",
+    "давлен", "кров", "моч", "рост", "вес", "парацетамол", "ибупрофен", "врач",
+)
 
 
 def _looks_like_unresolved_person_question(question):
@@ -520,7 +526,7 @@ def _looks_like_unresolved_person_question(question):
     # the current family's candidate list and validated below after explicit AI consent.
     for match in re.finditer(r"\b(?:про|обо?|по|для|у)\s+([а-яё][а-яё-]{1,})\b", q):
         target = match.group(1)
-        if target not in _GENERIC_PERSON_REFERENCE_OBJECTS:
+        if target not in _GENERIC_PERSON_REFERENCE_OBJECTS and not target.startswith(_GENERIC_PERSON_REFERENCE_STEMS):
             return True
     return bool(re.search(r"\bкто\s+(?:такой|такая)\s+[а-яё][а-яё-]{1,}\b", q))
 
@@ -2197,7 +2203,7 @@ def install_assistant_routes(app, current_user, family_guard):
             scoped_people = []
         explicit_memory_command = _looks_like_explicit_memory_command(query)
         explicit_measurements = _extract_memory_measurements(query)
-        if explicit_measurements and not forced_patient and len(mentioned) == 0:
+        if explicit_measurements and not forced_patient and len(mentioned) == 0 and not needs_patient_resolution:
             # Never guess which family member owns a user-entered measurement.
             if followup and len(previous_turn_people) == 1:
                 mentioned = list(previous_turn_people)
@@ -2215,7 +2221,7 @@ def install_assistant_routes(app, current_user, family_guard):
                     "data_completeness":"insufficient", "memory_proposals":[]})
         # A clear measurement statement is handled locally as a pending proposal,
         # not sent to an external model and never written without user confirmation.
-        if explicit_measurements and (explicit_memory_command or not _looks_like_hypothetical_measurement(query)):
+        if explicit_measurements and not needs_patient_resolution and (explicit_memory_command or not _looks_like_hypothetical_measurement(query)):
             if len(mentioned) != 1:
                 ai_trace_log.emit(trace_id, "patient.memory_target_ambiguous",
                     scoped_patient_count=len(scoped_people), model_called=False)
