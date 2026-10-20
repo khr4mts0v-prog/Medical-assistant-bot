@@ -60,6 +60,9 @@ def validate(values, mode="production"):
         if demo_user == username and demo_password == password:
             errors.append("Demo credentials must differ from the main web account.")
 
+    if values.get("AI_TRACE_FULL_CONTENT_ENABLED", "false").strip().casefold() in {"1", "true", "yes", "on"}:
+        errors.append("AI_TRACE_FULL_CONTENT_ENABLED must be false for production; full medical prompts and answers would be written to plaintext logs.")
+
     backend = values.get("DOCUMENT_STORAGE_BACKEND", "").strip().casefold()
     if backend not in {"local", "yandex"}:
         errors.append("DOCUMENT_STORAGE_BACKEND must be explicitly set to local or yandex.")
