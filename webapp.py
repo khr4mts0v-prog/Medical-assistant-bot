@@ -1851,9 +1851,10 @@ def create_patient_from_pending_document(fid:int,pending_id:int,confirm:str=Form
     if not candidate:
         raise HTTPException(400,"В документе не распознано достаточно надёжное ФИО. Добавьте пациента вручную.")
     existing={str(name).casefold() for name in db.patients(fid)}
-    if candidate.casefold() in existing:
-        raise HTTPException(409,"Пациент с таким именем уже существует. Выберите существующую карточку.")
-    db.add_patient(fid,candidate)
+    # A previous attempt may have created the patient card before assignment failed.
+    # Reuse that exact card on retry so the pending document can still be filed.
+    if candidate.casefold() not in existing:
+        db.add_patient(fid,candidate)
     analysis=d.get("analysis") or {}
     kind=str(analysis.get("primary_type") or "не определено")
     title=str(analysis.get("display_title") or kind or d.get("name") or "Медицинский документ")
