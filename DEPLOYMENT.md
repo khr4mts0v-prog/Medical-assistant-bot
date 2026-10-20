@@ -13,11 +13,23 @@ Target: Ubuntu 24.04, Docker Compose, Nginx + HTTPS. The current low-cost test V
 6. Open the HTTPS endpoint, sign in, create/select a family, add a patient, and test a small synthetic PDF/image. Check that the original can be opened from the document list.
 7. Optional Yandex Disk: configure OAuth secrets and set `DOCUMENT_STORAGE_BACKEND=yandex`. Its callback must match the registered HTTPS URI exactly.
 
+## Production release gate
+
+Before a release that may contain real medical data, run `python3 scripts/check_production_env.py --env-file /path/to/.env`. The deploy script runs this check before backup/build/restart and fails closed; it never creates or edits secrets in `.env`.
+
+The preflight requires:
+- a unique web password of at least 20 characters, a session signing secret of at least 32 characters, and a valid `FERNET_KEY`;
+- demo login to be explicitly disabled with both demo variables empty, or configured with non-default unique credentials;
+- `.env` permissions that deny all group/other access;
+- when local storage is selected, explicit confirmation that the underlying volume and backups are encrypted at rest.
+
+`LOCAL_STORAGE_AT_REST_PROTECTED=true` is an operator attestation, not an automatic encryption mechanism. Set it only after verifying the actual VPS/provider storage and backup protections. If that cannot be verified, the release gate must remain blocked.
+
 ## Data and security
 
 - Keep port 8000 bound to 127.0.0.1; do not expose it directly to the internet. Use HTTPS via Nginx.
 - Back up `data/` and FERNET_KEY securely; test restoration. Keep the encryption key separate from database backups.
-- Local documents are not encrypted individually at rest. Files are stored with restrictive permissions on the host; restrict VPS and administrator access and use encrypted backups.
+- The database encrypts OCR text, keywords, analysis and pending-file bytes with Fernet. **Local originals and OCR sidecars are plaintext files** with restrictive file permissions; filesystem encryption is still required for production use. Restrict VPS and administrator access and use encrypted backups.
 - Never upload real medical records to this test MVP. It lacks per-person web accounts, rate limiting, a full security review, and comprehensive integration tests.
 - The browser login uses a signed, HttpOnly, Secure, SameSite=Lax cookie with a bounded lifetime. Legacy HTTP Basic clients remain supported. The web login still represents the configured web owner account; family memberships are stored in the existing family_members table using a negative numeric principal ID, separate from positive Telegram IDs.
 - AI analysis sends selected OCR text to Hugging Face after consent. Verify provider billing and privacy terms before enabling.
