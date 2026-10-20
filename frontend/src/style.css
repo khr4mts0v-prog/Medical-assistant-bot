@@ -55,7 +55,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .main-area{width:100%;max-width:920px;margin:0 auto;padding:calc(14px + env(safe-area-inset-top)) 18px calc(40px + env(safe-area-inset-bottom))}
 .topbar{display:flex;align-items:center;gap:12px;min-height:52px;margin:0 0 22px}
 .menu-button{width:44px;height:44px;flex-basis:44px}
-.topbar-title{font-size:15px;font-weight:750;letter-spacing:-.025em}
+.topbar-title{flex:1;min-width:0;font-size:15px;font-weight:750;letter-spacing:-.025em}
 .back-button{display:flex;align-items:center;gap:6px;border:0;border-radius:11px;background:transparent;padding:8px;color:var(--blue-dark);font-weight:650}
 .page-content{position:relative;min-height:60vh}
 .loading-line{position:fixed;z-index:70;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#8cb7ff,#3478df,#8cb7ff);background-size:200% 100%;animation:loading 1s linear infinite}
