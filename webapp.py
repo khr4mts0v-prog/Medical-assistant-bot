@@ -1325,6 +1325,21 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), ai_c
 
 
 
+@app.get("/api/families/{fid}/inbox")
+def review_inbox_api(fid:int,uid:int=Depends(current_user)):
+    """Minimal metadata for the React inbox; do not expose OCR text or file bytes."""
+    family(fid,uid)
+    rows=db.pending_documents(fid)
+    return {
+        "family_id":int(fid),
+        "patients":[{"name":str(name)} for name in db.patients(fid)],
+        "documents":[
+            {"id":int(row["id"]),"name":str(row["name"]),"created":str(row.get("created") or "")}
+            for row in rows
+        ],
+    }
+
+
 @app.get("/families/{fid}/inbox", response_class=HTMLResponse)
 def review_inbox(fid:int,uid:int=Depends(current_user)):
     family(fid,uid)
