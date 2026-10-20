@@ -440,12 +440,83 @@ function SettingsReactView({familyId,onNavigate}: {familyId:number|null;onNaviga
   </div>;
 }
 
+
+type InboxReviewPayload = {family_id:number;pending_id:number;source_name:string;created:string;ocr_text:string;patient_options:{name:string;birth_date:string}[];kinds:{value:string;label:string}[];kind:string;title:string;date:string;preview_url:string|null;preview_kind:'image'|'pdf'|'none';page_count:number};
+function InboxReviewReactView({familyId,pendingId,onNavigate}: {familyId:number;pendingId:number;onNavigate:(url:string)=>void}) {
+  const [data,setData]=useState<InboxReviewPayload|null>(null);
+  const [patient,setPatient]=useState('');
+  const [kind,setKind]=useState('не определено');
+  const [title,setTitle]=useState('');
+  const [date,setDate]=useState('');
+  const [busy,setBusy]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [deleting,setDeleting]=useState(false);
+  const [showOcr,setShowOcr]=useState(false);
+  const [error,setError]=useState('');
+  useEffect(()=>{
+    let active=true;setBusy(true);setError('');
+    fetch('/api/families/'+familyId+'/inbox/'+pendingId,{credentials:'same-origin',headers:{Accept:'application/json'},cache:'no-store'})
+      .then(async response=>{const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.detail||'Не удалось загрузить документ');return body as InboxReviewPayload;})
+      .then(body=>{if(active){setData(body);setPatient(body.patient_options[0]?.name||'');setKind(body.kind);setTitle(body.title);setDate(body.date||'');}})
+      .catch(e=>{if(active)setError(e instanceof Error?e.message:'Ошибка загрузки документа');})
+      .finally(()=>{if(active)setBusy(false);});
+    return ()=>{active=false;};
+  },[familyId,pendingId]);
+  const assign=async(event:React.FormEvent<HTMLFormElement>)=>{
+    event.preventDefault();if(!patient||saving)return;
+    setSaving(true);setError('');
+    try{
+      const form=new FormData();form.set('patient',patient);form.set('kind',kind);form.set('title',title);form.set('date',date);
+      const response=await fetch('/families/'+familyId+'/inbox/'+pendingId+'/assign',{method:'POST',body:form,credentials:'same-origin',redirect:'follow'});
+      if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.detail||'Не удалось сохранить документ (HTTP '+response.status+').');}
+      const target=new URL(response.url,window.location.origin);onNavigate(target.pathname+target.search);
+    }catch(e){setError(e instanceof Error?e.message:'Ошибка сохранения документа');}
+    finally{setSaving(false);}
+  };
+  const remove=async()=>{
+    if(deleting||!window.confirm('Удалить этот документ из входящих без возможности восстановления?'))return;
+    setDeleting(true);setError('');
+    try{
+      const form=new FormData();form.set('confirm','yes');
+      const response=await fetch('/families/'+familyId+'/inbox/'+pendingId+'/delete',{method:'POST',body:form,credentials:'same-origin',redirect:'follow'});
+      if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.detail||'Не удалось удалить документ (HTTP '+response.status+').');}
+      const target=new URL(response.url,window.location.origin);onNavigate(target.pathname+target.search);
+    }catch(e){setError(e instanceof Error?e.message:'Ошибка удаления документа');}
+    finally{setDeleting(false);}
+  };
+  return <div className="inbox-review-react-screen">
+    <header className="inbox-review-react-header"><div><div className="eyebrow">РУЧНАЯ ПРОВЕРКА</div><h1>Классификация документа</h1><p className="muted">Проверь распознанные данные и назначь документ нужному пациенту.</p></div><button type="button" className="button-link" onClick={()=>onNavigate('/families/'+familyId+'/inbox')}><Home size={16}/> К входящим</button></header>
+    {error&&<div className="error-banner" role="alert">{error}</div>}
+    {busy&&<div className="skeleton"><div/><div/><div/></div>}
+    {!busy&&data&&<>
+      <section className="card inbox-review-source"><div><div className="eyebrow">ИСХОДНЫЙ ФАЙЛ</div><h2>{data.source_name}</h2><p className="muted">Добавлен: {data.created||'дата не указана'}</p></div>
+        {data.preview_kind==='image'&&data.preview_url&&<a href={data.preview_url} target="_blank" rel="noopener" className="inbox-review-image-link"><img src={data.preview_url} alt="Предпросмотр исходного документа"/><span>Открыть полностью ↗</span></a>}
+        {data.preview_kind==='pdf'&&data.preview_url&&<div className="inbox-review-pdf">{data.page_count>0?Array.from({length:Math.min(data.page_count,100)},(_,i)=><figure key={i}><figcaption>Страница {i+1}{data.page_count>100?' (показаны первые 100 страниц)':' из '+data.page_count}</figcaption><img src={data.preview_url+'/page/'+(i+1)} alt={'Страница '+(i+1)} loading="lazy" decoding="async"/></figure>):<iframe src={data.preview_url+'#toolbar=1&navpanes=0'} title="Предпросмотр PDF" loading="lazy"/>}<p><a href={data.preview_url} target="_blank" rel="noopener">Открыть PDF отдельно ↗</a></p></div>}
+        {data.preview_kind==='none'&&<p className="muted">Предпросмотр для этого формата недоступен.</p>}
+        <button type="button" className="button-link inbox-review-ocr-toggle" onClick={()=>setShowOcr(v=>!v)}>{showOcr?'Скрыть OCR-текст':'Показать OCR-текст'}</button>
+        {showOcr&&<pre className="inbox-review-ocr">{data.ocr_text||'Текст не распознан.'}</pre>}
+      </section>
+      <form className="card inbox-review-form" onSubmit={assign}>
+        <h2>Данные для архива</h2>
+        <label htmlFor="inbox-review-patient">Пациент</label><select id="inbox-review-patient" value={patient} onChange={e=>setPatient(e.target.value)} required><option value="" disabled>Выбери пациента</option>{data.patient_options.map(p=><option key={p.name} value={p.name}>{p.name}{p.birth_date?' · рожд. '+p.birth_date:''}</option>)}</select>
+        {data.patient_options.length===0&&<p className="muted">Сначала создай карточку пациента.</p>}
+        <button type="button" className="button-link inbox-review-add-patient" onClick={()=>onNavigate('/families/'+familyId+'/patients/new')}>＋ Добавить пациента</button>
+        <label htmlFor="inbox-review-kind">Тип документа</label><select id="inbox-review-kind" value={kind} onChange={e=>setKind(e.target.value)} required>{data.kinds.map(k=><option key={k.value} value={k.value}>{k.label}</option>)}</select>
+        <label htmlFor="inbox-review-title">Название в архиве</label><input id="inbox-review-title" value={title} onChange={e=>setTitle(e.target.value)} required maxLength={180}/>
+        <label htmlFor="inbox-review-date">Дата документа (ДД-ММ-ГГГГ)</label><input id="inbox-review-date" value={date} onChange={e=>setDate(e.target.value)} maxLength={10} placeholder="17-03-2025"/>
+        <div className="inbox-review-actions"><button type="submit" disabled={saving||!patient}>{saving?'Сохраняем…':'Сохранить в историю пациента'}</button><button type="button" className="inbox-review-delete" onClick={()=>void remove()} disabled={deleting}>{deleting?'Удаляем…':'Удалить документ'}</button></div>
+      </form>
+    </>}
+  </div>;
+}
+
 function App() {
   const [path, setPath] = useState(location.pathname + location.search);
   const settingsRoute = path.split('?')[0] === '/settings';
   const patientRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)(?:\?[^#]*)?$/);
   const patientNewRoute = path.match(/^\/families\/(\d+)\/patients\/new(?:\?[^#]*)?$/);
   const patientEditRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)\/edit(?:\?[^#]*)?$/);
+  const inboxDetailRoute = path.match(/^\/families\/(\d+)\/inbox\/(\d+)(?:\?[^#]*)?$/);
   const inboxRoute = path.match(/^\/families\/(\d+)\/inbox(?:\?[^#]*)?$/);
   const documentEditRoute = path.match(/^\/families\/(\d+)\/documents\/(\d+)\/edit(?:\?[^#]*)?$/);
   const patientRouteData = patientRoute ? {familyId:Number(patientRoute[1]), patient:decodeURIComponent(patientRoute[2])} : null;
@@ -976,7 +1047,7 @@ function App() {
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
+        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
         {loading && screen && <div className="loading-line"/>}
       </section>}
     </main>
