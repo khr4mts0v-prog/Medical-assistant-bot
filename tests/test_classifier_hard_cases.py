@@ -24,6 +24,23 @@ class ClassificationHardCasesTests(unittest.TestCase):
             "не определено",
         )
 
+    def test_real_ultrasound_report_with_routine_referral_metadata_is_classified(self):
+        self.assert_primary(
+            "УЗИ ВНУТРЕННИХ ОРГАНОВ\\n"
+            "Направлен: амбулаторно.\\n"
+            "Печень: описание размеров, контуров, структуры и эхогенности.\\n"
+            "ЗАКЛЮЧЕНИЕ: исследование выполнено.",
+            "заключение УЗИ",
+        )
+
+    def test_patient_information_leaflet_does_not_become_an_imaging_report(self):
+        self.assert_primary(
+            "ПАМЯТКА ДЛЯ ПАЦИЕНТА\\n"
+            "Этот информационный лист не является направлением или заключением исследования.\\n"
+            "Протокол УЗИ, МРТ или анализы оформляются отдельно после выполнения процедур.",
+            "не определено",
+        )
+
     def test_medication_mention_is_not_a_prescription(self):
         result = self.assert_primary(
             "Пациент принимает препарат по ранее выданному назначению врача.",
@@ -44,6 +61,20 @@ class ClassificationHardCasesTests(unittest.TestCase):
             "заключение МРТ",
         )
         self.assertIn("заключение МРТ", result["document_types"])
+
+    def test_lab_report_title_is_not_invalidated_by_missing_personal_data(self):
+        self.assert_primary(
+            "УЧЕБНАЯ ЛАБОРАТОРИЯ\n"
+            "РЕЗУЛЬТАТЫ ЛАБОРАТОРНЫХ ИССЛЕДОВАНИЙ\n"
+            "Учебный образец; персональные данные отсутствуют.\n"
+            "Материал: венозная кровь; дата взятия: 08.10.2026.\n"
+            "Общий анализ крови\nГемоглобин: 128 г/л; референсный интервал 120–150.\n"
+            "Эритроциты: 4,31 × 10^12/л; лейкоциты: 6,4 × 10^9/л.\n"
+            "Тромбоциты: 271 × 10^9/л; гематокрит: 39,8 %.\n"
+            "СОЭ: 9 мм/ч. Результаты относятся только к учебному примеру.\n"
+            "Дата формирования отчёта: 08.10.2026.",
+            "лабораторный отчёт",
+        )
 
     def test_lab_report_with_common_ocr_spacing_noise(self):
         self.assert_primary(

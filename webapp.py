@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 import requests
 from fastapi import FastAPI, Depends, File, Form, HTTPException, UploadFile, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import database as db, tenancy
 from cloud import YaDiskClient
@@ -21,27 +21,106 @@ install_react_ui(app)
 @app.get("/manifest.webmanifest")
 def pwa_manifest():
     return Response(
-        '{"name":"Медицинский архив","short_name":"Медархив","description":"Личный семейный архив медицинских документов","lang":"ru","start_url":"/","scope":"/","display":"standalone","background_color":"#f4f7f5","theme_color":"#16794b","icons":[{"src":"/app-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}',
+        '{"name":"Семейный медицинский архив","short_name":"Медархив","description":"Личный семейный архив медицинских документов","lang":"ru","start_url":"/app","scope":"/","display":"standalone","background_color":"#f2f6ff","theme_color":"#0755e8","icons":[{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png","purpose":"any"},{"src":"/app-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}',
         media_type="application/manifest+json",
         headers={"Cache-Control":"no-cache"},
     )
 
 @app.get("/app-icon.svg")
 def pwa_icon():
-    return Response(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#16794b"/><path d="M224 112h64v112h112v64H288v112h-64V288H112v-64h112z" fill="#fff"/></svg>',
-        media_type="image/svg+xml",
-        headers={"Cache-Control":"public, max-age=86400"},
-    )
+    icon_path=Path(__file__).resolve().parent/"docs"/"assets"/"medical-assistant-icon-concept.svg"
+    if not icon_path.is_file():
+        raise HTTPException(500,"Approved PWA icon asset is missing")
+    return Response(icon_path.read_text(encoding="utf-8"),media_type="image/svg+xml",headers={"Cache-Control":"public, max-age=86400"})
+
+@app.get("/apple-touch-icon.png")
+def pwa_apple_touch_icon():
+    # 180px PNG rendition follows the same headset/stethoscope geometry as app-icon.svg.
+    from io import BytesIO
+    from PIL import Image, ImageDraw
+    image=Image.new("RGB",(180,180))
+    pixels=image.load()
+    for y in range(180):
+        for x in range(180):
+            t=(x+y)/358
+            pixels[x,y]=(int(22*(1-t)+7*t),int(139*(1-t)+85*t),int(250*(1-t)+232*t))
+    draw=ImageDraw.Draw(image)
+    white="#ffffff"
+    # Headset arch and cups
+    draw.arc((45,17,135,91),180,360,fill=white,width=8)
+    draw.rounded_rectangle((34,57,57,112),radius=12,fill=white)
+    draw.rounded_rectangle((123,57,146,112),radius=12,fill=white)
+    # Stethoscope ear tips and tubing, with the Y-junction and chestpiece
+    draw.ellipse((49,51,69,68),fill=white)
+    draw.ellipse((111,51,131,68),fill=white)
+    draw.line([(58,64),(58,88),(64,105),(77,116),(87,124),(90,135)],fill=white,width=8,joint="curve")
+    draw.line([(121,64),(121,88),(115,105),(103,116),(96,124)],fill=white,width=8,joint="curve")
+    # Boom microphone and capsule
+    draw.line([(137,104),(137,112),(130,123),(119,128)],fill=white,width=6,joint="curve")
+    draw.rounded_rectangle((109,119,131,133),radius=7,fill=white)
+    # Chestpiece: white outer ring, blue inner ring, white diaphragm
+    draw.ellipse((74,127,106,159),fill=white)
+    draw.ellipse((80,133,100,153),fill=(9,105,239))
+    draw.ellipse((83,136,97,150),fill=white)
+    buffer=BytesIO()
+    image.save(buffer,format="PNG",optimize=True)
+    return Response(buffer.getvalue(),media_type="image/png",headers={"Cache-Control":"public, max-age=604800"})
+
 
 @app.get("/sw.js")
 def pwa_service_worker():
     # Deliberately network-only: never cache private medical records or OCR text.
     script='self.addEventListener("install",e=>self.skipWaiting());self.addEventListener("activate",e=>e.waitUntil(self.clients.claim()));self.addEventListener("fetch",e=>{if(e.request.method!=="GET")return;e.respondWith(fetch(e.request));});'
     return Response(script,media_type="application/javascript",headers={"Cache-Control":"no-cache","Service-Worker-Allowed":"/"})
-security=HTTPBasic()
+security=HTTPBasic(auto_error=False)
+SESSION_COOKIE_NAME="medical_archive_session"
+SESSION_MAX_AGE=max(300,min(2592000,int(os.getenv("WEB_SESSION_MAX_AGE","604800"))))
+
+def _session_signing_key():
+    secret=os.getenv("WEB_SESSION_SECRET","").strip()
+    return secret.encode("utf-8") if len(secret)>=32 else None
+
+def _make_session(uid, expires_at=None):
+    key=_session_signing_key()
+    if not key:
+        raise RuntimeError("WEB_SESSION_SECRET must contain at least 32 characters")
+    expiry=int(expires_at if expires_at is not None else time.time()+SESSION_MAX_AGE)
+    payload=f"{int(uid)}:{expiry}:{secrets.token_urlsafe(18)}".encode("utf-8")
+    encoded=base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+    signature=hmac.new(key,encoded.encode("ascii"),hashlib.sha256).hexdigest()
+    return encoded+"."+signature
+
+def _read_session(token):
+    key=_session_signing_key()
+    if not key or not token or len(token)>2048:
+        return None
+    try:
+        encoded,signature=token.rsplit(".",1)
+        expected=hmac.new(key,encoded.encode("ascii"),hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature,expected):
+            return None
+        payload=base64.urlsafe_b64decode(encoded + "="*((4-len(encoded)%4)%4)).decode("utf-8")
+        uid,expiry,_nonce=payload.split(":",2)
+        uid=int(uid); expiry=int(expiry)
+        if uid==0 or expiry<=int(time.time()) or expiry>int(time.time())+2592000:
+            return None
+        return uid
+    except (ValueError, UnicodeDecodeError, TypeError):
+        return None
+
+def _safe_next_path(value):
+    value=str(value or "/")
+    return value if value.startswith("/") and not value.startswith("//") and "\r" not in value and "\n" not in value else "/"
+
+def _login_html(next_path="/", error="", status=200, consent_checked=False):
+    target=html.escape(_safe_next_path(next_path),quote=True)
+    message=f'<p class="error" role="alert">{html.escape(error)}</p>' if error else ""
+    body='''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0755e8"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/app-icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>Вход · Медицинский архив</title><style>:root{color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f2f6ff;color:#172b4d}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px}.card{width:min(100%,420px);padding:28px;border:1px solid #dce7f8;border-radius:24px;background:#fff;box-shadow:0 18px 60px #153b7814}.brand{display:flex;align-items:center;gap:12px;margin-bottom:24px;font-weight:750;font-size:1.1rem}.brand img{width:52px;height:52px;border-radius:14px;background:#0755e8}h1{font-size:1.65rem;letter-spacing:-.04em;margin:0 0 8px}p{color:#60718d;line-height:1.5}label{display:block;font-weight:650;margin:16px 0 6px}input{width:100%;padding:13px 14px;border:1px solid #d5e0f0;border-radius:12px;font:inherit;min-height:48px}button{width:100%;margin-top:22px;padding:13px;border:0;border-radius:12px;background:#0755e8;color:#fff;font:inherit;font-weight:700;min-height:48px}.error{padding:12px;border-radius:10px;background:#fff0f0;color:#a32424}</style></head><body><main class="card"><div class="brand"><img src="/app-icon.svg" alt=""><span>Medical Assistant</span></div><h1>Войти в архив</h1><p>Войдите, чтобы открыть семейный медицинский архив.</p>'''+message+'''<form method="post" action="/auth/login"><input type="hidden" name="next" value="'''+target+'''"><label for="username">Логин</label><input id="username" name="username" autocomplete="username" required autofocus><label for="password">Пароль</label><input id="password" name="password" type="password" autocomplete="current-password" required><label style="display:flex;gap:10px;align-items:flex-start;font-weight:500;line-height:1.45"><input type="checkbox" name="ai_consent" value="yes" style="width:20px;min-height:20px;flex:0 0 20px;margin-top:2px">Разрешаю передавать мой вопрос и релевантные медицинские фрагменты внешнему ИИ для подготовки ответа. Согласие можно отозвать в настройках. Без отметки общий вход в архив также доступен.</label><button type="submit">Войти</button></form></main></body></html>'''
+    return HTMLResponse(body,status_code=status,headers={"Cache-Control":"no-store"})
 WEB_USERNAME=os.getenv("WEB_USERNAME","").strip()
 WEB_PASSWORD=os.getenv("WEB_PASSWORD","")
+# Temporary shared demo credentials are retained for the private MVP testing phase.
+# Before public launch, set unique DEMO_USERNAME and DEMO_PASSWORD values in .env.
 DEMO_USERNAME=os.getenv("DEMO_USERNAME", "test").strip()
 DEMO_PASSWORD=os.getenv("DEMO_PASSWORD", "test")
 # Real web users occupy the negative 48-bit hash range; demo tenant identities
@@ -50,6 +129,11 @@ DEMO_UID_FLOOR=10**15
 DEMO_UID=-(DEMO_UID_FLOOR + int(hashlib.sha256(b"medical-archive-demo-tenant-v1").hexdigest()[:14],16))
 AUTH_FAILURES={}
 AUTH_FAILURES_LOCK=threading.Lock()
+# Expensive request limits are per authenticated identity and per operation. These are
+# process-local safeguards for this single-worker deployment, not a replacement for proxy limits.
+RATE_LIMIT_POLICIES = {"ai": (20, 60.0), "upload": (10, 60.0)}
+RATE_LIMIT_EVENTS = {}
+RATE_LIMIT_LOCK = threading.Lock()
 DEMO_CLEANUP_STARTED=False
 DEMO_MAX_ACTIVE_TENANTS=max(1,int(os.getenv("DEMO_MAX_ACTIVE_TENANTS","20")))
 DEMO_MAX_DOCUMENTS=max(1,int(os.getenv("DEMO_MAX_DOCUMENTS","10")))
@@ -93,7 +177,98 @@ async def demo_session_cookie(request: Request, call_next):
                         secure=True, samesite="lax", path="/")
     return response
 
-def current_user(request: Request, credentials: HTTPBasicCredentials=Depends(security))->int:
+@app.middleware("http")
+async def redirect_unauthenticated_browser_to_login(request: Request, call_next):
+    """Redirect browser page requests to the login screen without changing API semantics."""
+    response = await call_next(request)
+    path = request.url.path
+    excluded = {"/login", "/auth/login", "/auth/status", "/auth/logout"}
+    accepts_html = "text/html" in request.headers.get("accept", "").lower()
+    if (response.status_code == 401 and request.method in {"GET", "HEAD"}
+            and accepts_html and path not in excluded and not path.startswith("/api/")):
+        target = path
+        if request.url.query:
+            target += "?" + request.url.query
+        return RedirectResponse(url="/login?" + urlencode({"next": target}), status_code=303)
+    return response
+
+
+def _rate_limit_category(path, method):
+    if method.upper() != "POST":
+        return None
+    if path == "/api/intelligent-search":
+        return "ai"
+    if path == "/upload" or path.endswith("/upload"):
+        return "upload"
+    return None
+
+
+def _rate_limit_identity(request: Request):
+    session_uid = _read_session(request.cookies.get(SESSION_COOKIE_NAME, ""))
+    if session_uid is not None:
+        return "uid:" + str(session_uid)
+    demo_cookie = request.cookies.get("medical_demo_session", "")
+    if demo_cookie:
+        return "demo:" + hashlib.sha256(demo_cookie.encode()).hexdigest()[:24]
+    authorization = request.headers.get("authorization", "")
+    if authorization.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(authorization[6:], validate=True).decode("utf-8")
+            username = decoded.split(":", 1)[0].casefold()
+            return "basic:" + hashlib.sha256(username.encode()).hexdigest()[:24]
+        except (ValueError, UnicodeDecodeError):
+            pass
+    host = request.client.host if request.client else "unknown"
+    return "ip:" + str(host)
+
+
+def _consume_rate_limit(category, identity, now=None):
+    policy = RATE_LIMIT_POLICIES.get(category)
+    if not policy:
+        return False, 0
+    limit, window = policy
+    now = time.monotonic() if now is None else float(now)
+    key = (category, identity)
+    with RATE_LIMIT_LOCK:
+        if len(RATE_LIMIT_EVENTS) > 10000:
+            for old_key, old_events in list(RATE_LIMIT_EVENTS.items()):
+                fresh = [stamp for stamp in old_events if now - stamp < window]
+                if fresh:
+                    RATE_LIMIT_EVENTS[old_key] = fresh
+                else:
+                    RATE_LIMIT_EVENTS.pop(old_key, None)
+        events = [stamp for stamp in RATE_LIMIT_EVENTS.get(key, []) if now - stamp < window]
+        if len(events) >= limit:
+            RATE_LIMIT_EVENTS[key] = events
+            return True, max(1, int(window - (now - events[0]) + 0.999))
+        events.append(now)
+        RATE_LIMIT_EVENTS[key] = events
+        return False, 0
+
+
+@app.middleware("http")
+async def limit_expensive_requests(request: Request, call_next):
+    category = _rate_limit_category(request.url.path, request.method)
+    if category:
+        limited, retry_after = _consume_rate_limit(category, _rate_limit_identity(request))
+        if limited:
+            return JSONResponse(
+                {"detail": "Слишком много запросов. Подождите немного и повторите."},
+                status_code=429,
+                headers={"Retry-After": str(retry_after), "Cache-Control": "no-store"},
+            )
+    return await call_next(request)
+
+
+def current_user(request: Request, credentials: HTTPBasicCredentials|None=Depends(security))->int:
+    # A valid signed session takes precedence for PWA requests; legacy HTTP Basic remains supported.
+    if request and request.url.path!="/auth/login":
+        session_uid=_read_session(request.cookies.get(SESSION_COOKIE_NAME,""))
+        if session_uid is not None:
+            if is_demo_user(session_uid): _ensure_demo_tenant(session_uid)
+            return session_uid
+    if credentials is None:
+        raise HTTPException(401,"Not authenticated")
     ip = request.client.host if request and request.client else "unknown"
     now = time.monotonic()
     rate_key = ip + ":" + hashlib.sha256(credentials.username.encode()).hexdigest()[:16]
@@ -125,8 +300,56 @@ def current_user(request: Request, credentials: HTTPBasicCredentials=Depends(sec
         _ensure_demo_tenant(demo_uid)
         return demo_uid
     with AUTH_FAILURES_LOCK:
-        AUTH_FAILURES.setdefault(ip, []).append(now)
+        # Store failures under the same per-IP/per-username key used by the limiter above.
+        # Previously these were stored under bare IP, so the lookup never found them.
+        AUTH_FAILURES.setdefault(rate_key, []).append(now)
     raise HTTPException(401,"Invalid username or password",headers={"WWW-Authenticate":'Basic realm="Medical Archive"'})
+
+@app.get("/login",response_class=HTMLResponse,include_in_schema=False)
+def login_page(request:Request,next_path:str="/"):
+    if _read_session(request.cookies.get(SESSION_COOKIE_NAME,"")) is not None:
+        return RedirectResponse(_safe_next_path(next_path),status_code=303)
+    return _login_html(next_path)
+
+@app.post("/auth/login",include_in_schema=False)
+def create_login_session(request:Request,username:str=Form(...),password:str=Form(...),next_path:str=Form("/",alias="next"),ai_consent_granted:str=Form("",alias="ai_consent")):
+    if not _session_signing_key():
+        return _login_html(next_path,"Сессии не настроены. Администратору необходимо задать WEB_SESSION_SECRET длиной не менее 32 символов.",503)
+    credentials=HTTPBasicCredentials(username=username,password=password)
+    demo_ok=bool(DEMO_USERNAME and DEMO_PASSWORD and hmac.compare_digest(username.encode(),DEMO_USERNAME.encode()) and hmac.compare_digest(password.encode(),DEMO_PASSWORD.encode()))
+    demo_cookie=request.cookies.get("medical_demo_session","")
+    if demo_ok:
+        demo_cookie=demo_cookie or secrets.token_urlsafe(32)
+        request.state.medical_demo_session=demo_cookie
+    try:
+        uid=current_user(request,credentials)
+    except HTTPException:
+        return _login_html(next_path,"Неверный логин или пароль.",401)
+    if ai_consent_granted == "yes":
+        import ai_consent
+        ai_consent.set_consent(uid, True)
+    try:
+        token=_make_session(uid)
+    except RuntimeError:
+        return _login_html(next_path,"Не удалось создать защищённую сессию.",503)
+    response=RedirectResponse(_safe_next_path(next_path),status_code=303)
+    response.set_cookie(SESSION_COOKIE_NAME,token,max_age=SESSION_MAX_AGE,httponly=True,secure=True,samesite="lax",path="/")
+    if demo_ok:
+        response.set_cookie("medical_demo_session",demo_cookie,max_age=SESSION_MAX_AGE,httponly=True,secure=True,samesite="lax",path="/")
+    response.headers["Cache-Control"]="no-store"
+    return response
+
+@app.get("/auth/status",include_in_schema=False)
+def auth_status(uid:int=Depends(current_user)):
+    return Response('{"authenticated":true}',media_type="application/json",headers={"Cache-Control":"no-store"})
+
+@app.post("/auth/logout",include_in_schema=False)
+def logout():
+    response=RedirectResponse("/login",status_code=303)
+    response.delete_cookie(SESSION_COOKIE_NAME,path="/",secure=True,httponly=True,samesite="lax")
+    response.delete_cookie("medical_demo_session",path="/",secure=True,httponly=True,samesite="lax")
+    response.headers["Cache-Control"]="no-store"
+    return response
 
 def _cleanup_expired_demo_tenants_once():
     """Purge artifacts only for expired tenants explicitly marked as demo."""
@@ -184,7 +407,7 @@ def start_demo_cleanup_worker():
         DEMO_CLEANUP_STARTED = True
 
 def page(title,body,status=200):
-    return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#16794b"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Медархив"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/app-icon.svg" type="image/svg+xml"><title>"""+html.escape(title)+""" · Медицинский архив</title><style>
+    return HTMLResponse("""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0755e8"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="Медархив"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/app-icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>"""+html.escape(title)+""" · Семейный медицинский архив</title><style>
 :root{color-scheme:light;--bg:#f4f8ff;--fg:#172b4d;--card:#ffffff;--line:#e2eaf5;--muted:#6b7b94;--field:#f8fbff;--accent:#3478df;--accent-strong:#245fc0;--accent-soft:#e6f0ff;--warn:#a76800;--danger:#b42318;--shadow:0 5px 22px rgba(35,76,130,.065);--radius:18px}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -236,6 +459,16 @@ a:hover{color:var(--accent)}
 .upload-fill{height:100%;width:0;background:var(--accent);transition:width .12s}
 .upload-status{font-size:.9rem;color:var(--muted)}
 .patient-heading{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.patient-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:min(100%,520px)}
+.patient-actions .button-link{min-width:0;white-space:normal;overflow-wrap:normal;word-break:normal;text-align:center;line-height:1.25;padding:10px 8px}
+.patient-actions .patient-action-primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:750}
+.patient-actions .patient-action-primary:hover{background:var(--accent-strong);color:#fff}
+.document-card .document-main{flex:1 1 auto}
+.document-meta{font-size:.9rem;margin-top:3px}
+.document-finding{font-size:.94rem;margin:7px 0 2px;overflow-wrap:anywhere}
+.document-source-name{margin-top:6px;font-size:.8rem;color:var(--muted)}
+.document-source-name summary{cursor:pointer}
+.document-source-name span{display:block;overflow-wrap:anywhere;margin-top:4px}
 .button-link{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:10px;padding:9px 13px;min-height:42px;text-decoration:none;font-weight:620;background:var(--card)}
 .button-link:hover{border-color:var(--accent);color:var(--accent)}
 .tabs{display:flex;gap:5px;border-bottom:1px solid var(--line);margin:20px 0 16px;overflow-x:auto}
@@ -255,10 +488,73 @@ button[type=submit]{background:var(--accent);border-color:var(--accent);color:#f
 button[type=submit]:hover{background:var(--accent-strong)}
 #archive-search{flex:1 1 220px;width:auto}
 hr{border:0;border-top:1px solid var(--line);margin:18px 0}
-@media(max-width:600px){body{padding:17px 14px 34px}.home-actions{gap:10px}.home-action{aspect-ratio:1.05/1;min-height:120px;padding:11px;border-radius:17px;font-size:.96rem}.card{padding:16px;margin:12px 0;border-radius:15px}.home-search{padding:13px;margin-bottom:14px}.home-search .search-row{gap:7px}.home-search button{padding-inline:12px;font-size:.93rem}.document-row{align-items:flex-start;flex-direction:column}.tabs{gap:0}.tab{padding:10px 9px;font-size:.92rem}.timeline-date{margin-top:21px}.pending-thumbs{gap:8px}}
+@media(max-width:600px){body{padding:17px 14px 34px}.home-actions{gap:10px}.home-action{aspect-ratio:1.05/1;min-height:120px;padding:11px;border-radius:17px;font-size:.96rem}.card{padding:16px;margin:12px 0;border-radius:15px}.home-search{padding:13px;margin-bottom:14px}.home-search .search-row{gap:7px}.home-search button{padding-inline:12px;font-size:.93rem}.patient-heading{align-items:stretch}.patient-actions{width:100%;grid-template-columns:repeat(2,minmax(0,1fr))}.patient-actions .button-link{min-height:48px;padding:9px 6px;font-size:.92rem}.document-row{align-items:flex-start;flex-direction:row}.document-card .document-main{width:100%}.document-card>.button-link{flex:0 0 auto}.tabs{gap:0}.tab{padding:10px 9px;font-size:.92rem}.timeline-date{margin-top:21px}.pending-thumbs{gap:8px}}
 
 .app-shell{min-height:100vh}.app-sidebar{position:fixed;z-index:30;inset:0 auto 0 0;width:258px;padding:20px 14px;background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:22px;transform:translateX(-102%);transition:transform .22s ease;box-shadow:0 10px 36px rgba(35,76,130,.08)}.app-sidebar.open{transform:translateX(0)}.sidebar-brand{display:flex;gap:10px;align-items:center;padding:4px 8px 16px;font-weight:800;font-size:1.05rem}.brand-mark{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:#e2eeff;color:#2868c7;font-size:22px}.sidebar-nav{display:grid;gap:5px}.sidebar-nav a{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:11px;text-decoration:none;color:#526681;font-weight:650}.sidebar-nav a:hover,.sidebar-nav a.active{background:#eaf2ff;color:#245fc0}.sidebar-footer{margin-top:auto;border-top:1px solid var(--line);padding:14px 8px;color:var(--muted);font-size:.85rem}.sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(20,40,70,.25);z-index:29}.sidebar-backdrop.show{display:block}.app-topbar{display:flex;align-items:center;gap:12px;margin:0 0 22px}.menu-toggle{display:grid;place-items:center;flex:0 0 44px;width:44px;height:44px;padding:0;margin:0;background:#fff;border:1px solid var(--line);color:#2868c7;font-size:22px}.app-topbar-title{font-weight:750;font-size:1rem}.home-welcome{margin:8px 0 22px}.home-welcome h1{margin:0 0 6px}.home-welcome p{color:var(--muted);margin:0}.upload-dropzone{padding:28px 18px!important;text-align:center;background:#eef5ff!important;border:1.5px dashed #a9c9fa!important;box-shadow:none!important}.upload-dropzone h2{margin:8px 0}.patient-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}.patient-card{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--line);border-radius:15px;background:#fff;text-decoration:none;box-shadow:var(--shadow)}.patient-avatar{display:grid;place-items:center;flex:0 0 42px;width:42px;height:42px;border-radius:50%;background:#e2eeff;color:#2868c7;font-weight:800}.patient-card:nth-child(4n+2) .patient-avatar{background:#dcf5e9;color:#18845d}.patient-card:nth-child(4n+3) .patient-avatar{background:#eee6ff;color:#7450bd}.patient-card:nth-child(4n+4) .patient-avatar{background:#ffecd9;color:#b66b16}.patient-card:hover{border-color:#9fc3fb;transform:translateY(-1px)}
-@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}</style></head><body><div class="app-shell"><aside class="app-sidebar" id="app-sidebar" aria-label="Основная навигация"><div class="sidebar-brand"><span class="brand-mark">✚</span><span>Medical Assistant</span></div><nav class="sidebar-nav"><a href="/" class="active">⌂　Главная</a><a href="/#quick-upload">⇧　Загрузка</a><a href="/search">⌕　Поиск</a><a href="/#patients">♧　Пациенты</a><a href="/#inbox">▤　Входящие</a><a href="/#family-settings">⚙　Настройки</a></nav><div class="sidebar-footer">Семейный медицинский архив</div></aside><div class="sidebar-backdrop" id="sidebar-backdrop"></div><main class="app-content"><header class="app-topbar"><button type="button" class="menu-toggle" id="menu-toggle" aria-label="Открыть меню" aria-expanded="false">☰</button><span class="app-topbar-title">Медицинский архив</span></header><script>(function(){const s=document.getElementById("app-sidebar"),b=document.getElementById("sidebar-backdrop"),t=document.getElementById("menu-toggle");function close(){s.classList.remove("open");b.classList.remove("show");t.setAttribute("aria-expanded","false")}t.addEventListener("click",function(){const open=!s.classList.contains("open");s.classList.toggle("open",open);b.classList.toggle("show",open);t.setAttribute("aria-expanded",String(open))});b.addEventListener("click",close);document.addEventListener("keydown",e=>{if(e.key==="Escape")close()});s.querySelectorAll("a").forEach(a=>a.addEventListener("click",close))})();</script><script>if("serviceWorker" in navigator && location.protocol==="https:"){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}))}</script>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></main></div></body></html>""",status_code=status)
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}</style></head><body><div class="app-shell"><aside class="app-sidebar" id="app-sidebar" aria-label="Основная навигация"><div class="sidebar-brand"><span class="brand-mark">✚</span><span>Medical Assistant</span></div><nav class="sidebar-nav"><a href="/" class="active">⌂　Главная</a><a href="/#quick-upload">⇧　Загрузка</a><a href="/search">⌕　Поиск</a><a href="/#patients">♧　Пациенты</a><a href="/#inbox">▤　Входящие</a><a href="/#family-settings">⚙　Настройки</a></nav><div class="sidebar-footer">Семейный медицинский архив</div></aside><div class="sidebar-backdrop" id="sidebar-backdrop"></div><main class="app-content"><header class="app-topbar"><button type="button" class="menu-toggle" id="menu-toggle" aria-label="Открыть меню" aria-expanded="false">☰</button><span class="app-topbar-title">Семейный медицинский архив</span></header><script>(function(){const s=document.getElementById("app-sidebar"),b=document.getElementById("sidebar-backdrop"),t=document.getElementById("menu-toggle");function close(){s.classList.remove("open");b.classList.remove("show");t.setAttribute("aria-expanded","false")}t.addEventListener("click",function(){const open=!s.classList.contains("open");s.classList.toggle("open",open);b.classList.toggle("show",open);t.setAttribute("aria-expanded",String(open))});b.addEventListener("click",close);document.addEventListener("keydown",e=>{if(e.key==="Escape")close()});s.querySelectorAll("a").forEach(a=>a.addEventListener("click",close))})();</script><script>if("serviceWorker" in navigator && location.protocol==="https:"){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}))}</script>"""+body+"""<p class="muted"><small>Тестовый MVP. Не заменяет врача.</small></p></main></div></body></html>""",status_code=status)
+
+def format_document_count(count):
+    """Return a grammatically correct Russian document count."""
+    n = abs(int(count))
+    last_two = n % 100
+    if 11 <= last_two <= 14:
+        noun = "документов"
+    elif n % 10 == 1:
+        noun = "документ"
+    elif n % 10 in (2, 3, 4):
+        noun = "документа"
+    else:
+        noun = "документов"
+    return f"{int(count)} {noun}"
+
+
+def format_document_date(value):
+    """Present archive dates as DD.MM.YYYY while accepting legacy separators."""
+    import re
+    raw = str(value or "").strip()
+    match = re.fullmatch(r"(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})", raw)
+    if match:
+        return f"{int(match.group(1)):02d}.{int(match.group(2)):02d}.{match.group(3)}"
+    return raw or "Дата не указана"
+
+
+def document_card_metadata(document, analysis):
+    """Extract concise, explicitly labelled clinician/clinic and conclusion hints from OCR."""
+    import re
+    text = str(document.get("text") or "")
+    def first(patterns):
+        for pattern in patterns:
+            match = re.search(pattern, text, re.I | re.M)
+            if match:
+                value = re.sub(r"\s+", " ", match.group(1)).strip(" :;,—-")
+                if value and len(value) <= 100:
+                    return value
+        return ""
+    doctor = first([
+        r"(?:врач|выполнил[аи]?|исследование пров[её]л[аи]?)\s*[:—-]\s*([^\n;]{2,100})",
+        r"(?:подпись врача|врач-специалист)\s*[:—-]\s*([^\n;]{2,100})",
+    ])
+    clinic = first([
+        r"(?:медицинск(?:ая|ой) организация|наименование клиники|клиника|медцентр|медицинский центр)\s*[:—-]\s*([^\n;]{2,100})",
+    ])
+    finding = ""
+    a = analysis or {}
+    diagnoses = a.get("diagnoses") or []
+    if diagnoses:
+        finding = str(diagnoses[0]).strip()
+    if not finding:
+        finding = first([
+            r"(?:заключение|вывод|результат исследования|итог)\s*[:—-]\s*([^\n]{3,240})",
+            r"(?:диагноз)\s*[:—-]\s*([^\n]{3,240})",
+        ])
+    if finding:
+        finding = _format_ocr_preview(finding)
+    finding = re.sub(r"\s+", " ", finding).strip(" :;,—-")[:180] if finding else ""
+    parts = []
+    if doctor: parts.append("Врач: " + doctor)
+    if clinic: parts.append("Клиника: " + clinic)
+    return {"doctor": doctor, "clinic": clinic, "finding": finding, "metadata": " · ".join(parts)}
+
 
 def display_document_title(document, analysis):
     saved=(analysis or {}).get("display_title")
@@ -319,7 +615,11 @@ def home(request:Request,family_id:int|None=None,uid:int=Depends(current_user)):
         selected_for_actions = f["id"] if f else fs[0]["id"]
         pending_for_actions = len(db.pending_documents(selected_for_actions))
         patient_count = len(db.patients(selected_for_actions))
-        b.append('<nav class="home-actions" aria-label="Основные действия"><a class="home-action" href="/families/' + str(selected_for_actions) + '/inbox">▤ Входящие · на проверку (' + str(pending_for_actions) + ')</a><a class="home-action" href="#patients">♧ Пациенты (' + str(patient_count) + ')</a></nav>')
+        home_action_links = []
+        if pending_for_actions:
+            home_action_links.append('<a class="home-action" href="/families/' + str(selected_for_actions) + '/inbox">Входящие · на проверку (' + str(pending_for_actions) + ')</a>')
+        home_action_links.append('<a class="home-action" href="#patients">Пациенты (' + str(patient_count) + ')</a>')
+        b.append('<nav class="home-actions" aria-label="Основные действия">' + ''.join(home_action_links) + '</nav>')
         b.append('<section class="home-welcome"><h1>Добро пожаловать!</h1><p>Ваш семейный медицинский архив</p></section>')
         b.append('<form class="card row home-search" method="get" action="/search"><input type="hidden" name="family_id" value="' + str(selected_for_actions) + '"><label for="archive-search">⌕</label><input id="archive-search" type="search" name="q" placeholder="Найти документ, анализ, обследование…" required><button type="submit">Найти</button></form>')
     # Inbox-first workflow: files can be uploaded before opening a patient record.
@@ -331,16 +631,16 @@ def home(request:Request,family_id:int|None=None,uid:int=Depends(current_user)):
         )
         b.append(
             '<div class="card upload-dropzone" id="quick-upload"><div style="font-size:42px;color:#3478df">⇧</div><h2>Добавить документы</h2><p class="muted">PDF, фотографии и сканы. Можно выбрать несколько файлов сразу.</p>'
-            '<p class="muted">Статус обновляется после передачи файла и завершения распознавания и классификации.</p><label style="display:block;font-weight:400"><input id="ai-classification-consent" type="checkbox" style="width:auto;min-height:auto"> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label>'
+            '<p class="muted">Статус обновляется после передачи файла и завершения распознавания и классификации.</p><label id="upload-consent-label" style="display:block;font-weight:400"><input id="ai-classification-consent" type="checkbox" style="width:auto;min-height:auto"> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label>'
             '<select id="upload-family" hidden aria-hidden="true">' + upload_options + '</select>'
             '<input id="upload-files" type="file" accept="image/*,application/pdf,.tif,.tiff,.bmp" multiple hidden>' '<button type="button" id="choose-files">＋ Выбрать документы</button>'
             '<div id="upload-queue" aria-live="polite"></div>'
             '<small>До ' + str(upload_ui_limit_mb) + ' МБ на файл. OCR и классификация выполняются на сервере после передачи.</small></div>'
-            '<script>(function(){const input=document.getElementById("upload-files"),queue=document.getElementById("upload-queue"),family=document.getElementById("upload-family");let items=[],seq=0;document.getElementById("home-upload-trigger").addEventListener("click",function(){input.click()});'
+            '<script>(function(){const input=document.getElementById("upload-files"),queue=document.getElementById("upload-queue"),family=document.getElementById("upload-family");let items=[],seq=0;document.getElementById("choose-files").addEventListener("click",function(){input.click()});'
             'function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c]})}'
             'function render(){queue.innerHTML=items.map(function(x){return \'<div class="upload-item"><div class="upload-top"><div class="upload-name"><strong>\'+esc(x.file.name)+\'</strong><div class="upload-status">\'+(x.file.size/1048576).toFixed(2)+\' МБ · \'+esc(x.status)+\'</div></div><button class="upload-remove" type="button" data-remove="\'+x.id+\'" aria-label="Убрать файл из списка">×</button></div><div class="upload-track"><div class="upload-fill" style="width:\'+x.progress+\'%"></div></div><small>\'+x.progress+\'%</small></div>\'}).join("");queue.querySelectorAll("[data-remove]").forEach(function(b){b.addEventListener("click",function(){const id=Number(b.dataset.remove),item=items.find(function(x){return x.id===id});if(item&&item.xhr){item.cancelled=true;item.status="Отменено в браузере; результат сервера неизвестен";item.xhr.abort()}items=items.filter(function(x){return x.id!==id});render()})})}window.addEventListener("beforeunload",function(e){if(items.some(function(x){return x.xhr&&!x.cancelled})){e.preventDefault();e.returnValue=""}});'
             'function upload(item){item.status="Загрузка";const xhr=new XMLHttpRequest(),form=new FormData();item.xhr=xhr;form.append("family_id",family.value);form.append("files",item.file,item.file.name);form.append("ai_consent",document.getElementById("ai-classification-consent")?.checked?"true":"false");xhr.open("POST","/upload");xhr.upload.onprogress=function(e){if(e.lengthComputable){item.progress=Math.round(e.loaded/e.total*100);item.status=item.progress>=100?"Передан · обработка на сервере":"Загрузка";render()}};xhr.onload=function(){item.xhr=null;if(item.cancelled)return;item.progress=100;const body=(xhr.responseText||"").toLowerCase();if(xhr.status>=200&&xhr.status<300){if(body.includes("добавлен во входящие"))item.status="100% · OCR завершён · нужна ручная проверка";else if(body.includes("документ сохранён")||body.includes("файл уже есть в индексе"))item.status="100% · OCR и классификация завершены";else if(body.includes("дубликат")||body.includes("уже сохранён в архиве"))item.status="100% · дубликат";else {item.progress=95;item.status="Передан серверу · результат обработки не подтверждён"}}else {item.progress=Math.min(item.progress,95);item.status="Ошибка HTTP "+xhr.status}render()};xhr.onerror=function(){item.xhr=null;if(!item.cancelled){item.status="Ошибка сети";render()}};xhr.onabort=function(){item.xhr=null};xhr.send(form)}'
-            'document.getElementById("choose-files").addEventListener("click",function(){input.click()});input.addEventListener("change",function(){const selected=Array.from(input.files||[]);input.value="";selected.forEach(function(file){const item={id:++seq,file:file,status:"В очереди",progress:0,xhr:null,cancelled:false};if(!/\\.(pdf|png|jpe?g|webp|tiff?|bmp)$/i.test(file.name)){item.status="Формат не поддерживается";item.progress=0;items.push(item);render();return}if(file.size>'+str(upload_ui_limit_mb*1024*1024)+'){item.status="Превышен лимит размера";items.push(item);render();return}items.push(item);render();upload(item)})});'
+            r'input.addEventListener("change",function(){const selected=Array.from(input.files||[]);input.value="";selected.forEach(function(file){const item={id:++seq,file:file,status:"В очереди",progress:0,xhr:null,cancelled:false};if(!/\.(pdf|png|jpe?g|webp|tiff?|bmp)$/i.test(file.name)){item.status="Формат не поддерживается";item.progress=0;items.push(item);render();return}if(file.size>'+str(upload_ui_limit_mb*1024*1024)+'){item.status="Превышен лимит размера";items.push(item);render();return}items.push(item);render();upload(item)})});'
             '})();</script>'
         )
     if f:
@@ -355,11 +655,103 @@ def home(request:Request,family_id:int|None=None,uid:int=Depends(current_user)):
             ep=html.escape(p,quote=True)
             parts=p.split()
             short_patient=(parts[1] if len(parts)>=2 else (parts[0] if parts else p))
-            b.append(f'<a class="patient-card" href="/families/{fid}/patients/{ep}"><span class="patient-avatar">{html.escape((short_patient[:1] or "П").upper())}</span><span><strong>{html.escape(short_patient)}</strong><br><small class="muted">{db.document_count(fid,p)} документов</small></span></a>')
+            doc_count = db.document_count(fid,p)
+            b.append(f'<a class="patient-card" href="/families/{fid}/patients/{ep}"><span class="patient-avatar">{html.escape((short_patient[:1] or "П").upper())}</span><span><strong>{html.escape(short_patient)}</strong><br><small class="muted">{format_document_count(doc_count)}</small></span></a>')
         b.append('</div>')
     b.append('<div class="card" id="family-settings"><h2>Настройки архива</h2><form method="post" action="/families"><label>Название нового семейного архива<br><input name="name" required maxlength="80"></label> <button>Создать архив</button></form></div>')
     b.append('<div class="warn"><strong>Важно:</strong> не загружайте реальные медицинские документы до настройки резервного копирования и полной проверки прав доступа.</div>')
     return page("Главная","".join(b))
+
+
+@app.get("/api/search")
+def unified_search_api(q:str="",family_id:int|None=None,patient:str="",uid:int=Depends(current_user)):
+    """Search authorized patient documents and return only presentation metadata."""
+    import re
+    from urllib.parse import quote
+    fs=tenancy.families_for_user(uid)
+    if not fs:
+        return {"family_id":None,"family_name":"","query":q,"patient":"","patients":[],"needs_patient":False,
+                "ambiguous":False,"patient_choices":[],"results":[],"searched":False,"message":"Сначала создайте семейный архив и добавьте пациентов.","total":0}
+    allowed={int(x["id"]) for x in fs}
+    fid=int(family_id) if family_id is not None else int(fs[0]["id"])
+    if fid not in allowed:
+        raise HTTPException(403,"Нет доступа к этому семейному архиву")
+    family(fid,uid)
+    f=tenancy.get_family(fid) or {}
+    records=db.patient_records(fid)
+    patient_options=[{"name":str(p["name"]),"aliases":[str(a) for a in (p.get("aliases") or [])]} for p in records]
+    query=" ".join((q or "").split())[:300]
+    base={"family_id":fid,"family_name":str(f.get("name") or "Семейный архив"),"query":query,"patient":patient,
+          "patients":patient_options,"needs_patient":False,"ambiguous":False,"patient_choices":[],"results":[],
+          "searched":bool(query),"message":"","total":0}
+    if not query:
+        base["searched"]=False
+        return base
+    def norm(value):
+        return re.sub(r"[^0-9a-zа-яё]+"," ",str(value or "").casefold()).strip()
+    cleaned=norm(query)
+    chosen=next((p for p in records if p["name"]==patient),None) if patient else None
+    if chosen:
+        aliases=sorted((norm(a) for a in chosen.get("aliases",[]) if norm(a)),key=len,reverse=True)
+        for alias_norm in aliases:
+            if re.search(r"(?<![0-9a-zа-яё])"+re.escape(alias_norm)+r"(?![0-9a-zа-яё])",cleaned):
+                cleaned=re.sub(r"(?<![0-9a-zа-яё])"+re.escape(alias_norm)+r"(?![0-9a-zа-яё])"," ",cleaned,count=1).strip()
+                break
+    matched=[]
+    if not chosen:
+        for record in records:
+            for alias in record.get("aliases",[]):
+                alias_norm=norm(alias)
+                if alias_norm and re.search(r"(?<![0-9a-zа-яё])"+re.escape(alias_norm)+r"(?![0-9a-zа-яё])",cleaned):
+                    matched.append((len(alias_norm),record,alias_norm))
+        if matched:
+            longest=max(x[0] for x in matched)
+            candidates={x[1]["name"]:x[1] for x in matched if x[0]==longest}
+            if len(candidates)>1:
+                base.update({"needs_patient":True,"ambiguous":True,"patient_choices":sorted(candidates),
+                             "message":"Запрос совпал с несколькими пациентами. Выбери пациента; поиск не будет выполнен автоматически."})
+                return base
+            chosen=next(iter(candidates.values()))
+            alias=max((x[2] for x in matched if x[0]==longest),key=len)
+            cleaned=re.sub(r"(?<![0-9a-zа-яё])"+re.escape(alias)+r"(?![0-9a-zа-яё])"," ",cleaned,count=1).strip()
+    if not chosen:
+        base.update({"needs_patient":True,"patient_choices":[str(p["name"]) for p in records],
+                     "message":"Не удалось однозначно определить пациента. Выбери пациента, чтобы продолжить поиск."})
+        return base
+    type_patterns=[
+      (r"\b(?:анализы|анализ|лабораторн\w*|крови|мочи)\b","lab"),
+      (r"\b(?:узи|ультразвук\w*)\b","ultrasound"),
+      (r"\b(?:кт|компьютерн\w* томограф\w*)\b","ct"),
+      (r"\b(?:мрт|магнитно резонансн\w*)\b","mri"),
+      (r"\b(?:рентген|рентгенограф\w*)\b","xray"),
+      (r"\b(?:экг|электрокардиограмм\w*)\b","ecg"),
+      (r"\b(?:выписка|эпикриз)\b","discharge"),
+      (r"\b(?:назначения|рецепт|лекарств\w*)\b","prescription"),
+      (r"\b(?:прививки|вакцинац\w*)\b","vaccine")]
+    type_hint=None
+    for pattern,hint in type_patterns:
+        if re.search(pattern,cleaned):
+            type_hint=hint;cleaned=re.sub(pattern," ",cleaned).strip();break
+    rows=db.search(fid,chosen["name"]," ".join(cleaned.split()),1000)
+    if type_hint:
+        checks={"lab":("лаборатор","анализ","кров","моч"),"ultrasound":("узи","ультразвук"),
+                "ct":("кт","компьютерн"),"mri":("мрт","магнитно резонанс"),"xray":("рентген",),
+                "ecg":("экг","электрокардиограмм"),"discharge":("выпис","эпикриз"),
+                "prescription":("рецепт","назначен","лекарств"),"vaccine":("вакцин","привив")}
+        rows=[d for d in rows if any(term in norm(" ".join([str(d.get("kind") or ""),*map(str,(d.get("analysis") or {}).get("types",[])),*map(str,(d.get("analysis") or {}).get("document_types",[])),str((d.get("analysis") or {}).get("primary_category") or "")])) for term in checks[type_hint])]
+    results=[]
+    for d in rows:
+        analysis=d.get("analysis") or {}
+        title=display_document_title(d,analysis)
+        doc_id=int(d["id"])
+        results.append({"id":doc_id,"title":str(title),"kind":str(d.get("kind") or "не определено"),
+          "date":str(d.get("date") or ""),"text":str(d.get("text") or "")[:4000],
+          "url":f"/families/{fid}/documents/{doc_id}",
+          "patient_url":f"/families/{fid}/patients/{quote(str(chosen['name']),safe='')}"})
+    base.update({"patient":str(chosen["name"]),"results":results,"total":len(results),"searched":True,
+                 "message":"" if results else "Подходящие документы не найдены."})
+    return base
+
 
 @app.get("/search",response_class=HTMLResponse)
 def unified_search(q:str="",family_id:int|None=None,patient:str="",uid:int=Depends(current_user)):
@@ -445,8 +837,30 @@ def unified_search(q:str="",family_id:int|None=None,patient:str="",uid:int=Depen
         a=d.get("analysis") or {}
         title=display_document_title(d,a)
         link=f'<p><a href="/families/{fid}/documents/{int(d["id"])}">Открыть оригинал</a></p>' if (STORAGE_BACKEND=="local" or is_demo_user(uid)) and d.get("remote") else ""
-        b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Тип: {html.escape(str(d.get("kind") or "не определено"))}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}{link}<p><a href="/families/{fid}/patients/{__import__("urllib.parse",fromlist=["quote"]).quote(chosen["name"],safe="")}">История пациента</a></p><details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape((d.get("text") or "")[:4000])+'</pre></details></div>')
+        b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Тип: {html.escape(str(d.get("kind") or "не определено"))}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}{link}<p><a href="/families/{fid}/patients/{__import__("urllib.parse",fromlist=["quote"]).quote(chosen["name"],safe="")}">История пациента</a></p><details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape(_format_ocr_preview(d.get("text"))[:4000])+'</pre></details></div>')
     return page("Поиск по архиву","".join(b))
+
+
+@app.get("/api/settings")
+def archive_settings_api(family_id:int|None=None,updated:int=0,uid:int=Depends(current_user)):
+    """Return only settings metadata for the selected family archive."""
+    fs=tenancy.families_for_user(uid)
+    selected_id=family_id if family_id is not None else (int(fs[0]["id"]) if fs else None)
+    f=tenancy.get_family(selected_id) if selected_id is not None else None
+    if not f:
+        return {"family_id":None,"name":"","role":None,"can_rename":False,"is_demo":bool(is_demo_user(uid)),
+                "storage_label":"локально во временном демо-хранилище" if is_demo_user(uid) else ("Яндекс Диск" if STORAGE_BACKEND=="yandex" else "локально на VPS"),
+                "disk_connected":False,"can_connect_disk":False,"updated":False}
+    fid=int(f["id"])
+    family(fid,uid)
+    role=tenancy.role_for_user(fid,uid)
+    demo=bool(is_demo_user(uid))
+    connected=bool(STORAGE_BACKEND=="yandex" and tenancy.disk_connected(fid) and not demo)
+    storage_label="локально во временном демо-хранилище" if demo else ("Яндекс Диск" if STORAGE_BACKEND=="yandex" else "локально на VPS")
+    return {"family_id":fid,"name":str(f.get("name") or "Семейный архив"),"role":role,"can_rename":role=="owner",
+            "is_demo":demo,"storage_label":storage_label,"disk_connected":connected,
+            "can_connect_disk":not demo and STORAGE_BACKEND=="yandex" and not connected,"updated":bool(updated)}
+
 
 @app.get("/settings",response_class=HTMLResponse)
 def archive_settings(family_id:int|None=None,updated:int=0,uid:int=Depends(current_user)):
@@ -511,6 +925,24 @@ def new_patient_page(fid:int,uid:int=Depends(current_user)):
     return page("Новый пациент",body)
 
 
+
+@app.get("/api/families/{fid}/patients/{patient}/edit")
+def patient_editor_api(fid:int,patient:str,uid:int=Depends(current_user)):
+    """Return only the authorized patient fields needed by the React metadata editor."""
+    family(fid,uid)
+    record=next((p for p in db.patient_records(fid) if p["name"].casefold()==patient.casefold()),None)
+    if not record:
+        raise HTTPException(404,"Член семьи не найден")
+    from datetime import datetime
+    birth_date=""
+    try:
+        birth_date=datetime.strptime(record.get("birth_date") or "", "%d-%m-%Y").strftime("%Y-%m-%d")
+    except ValueError:
+        pass
+    aliases=[str(value) for value in (record.get("aliases") or []) if str(value).casefold()!=str(record.get("name") or "").casefold()]
+    return {"family_id":int(fid),"patient":str(record["name"]),"name":str(record["name"]),"birth_date":birth_date,"aliases":aliases}
+
+
 @app.get("/families/{fid}/patients/{patient}/edit",response_class=HTMLResponse)
 def edit_patient_page(fid:int,patient:str,uid:int=Depends(current_user)):
     family(fid,uid)
@@ -542,9 +974,130 @@ def save_patient_page(fid:int,patient:str,name:str=Form(...),birth_date:str=Form
         try: birth_date=datetime.strptime(birth_date,"%Y-%m-%d").strftime("%d-%m-%Y")
         except ValueError: raise HTTPException(400,"Проверьте дату рождения")
     alias_list=[x.strip() for x in (aliases or "").replace(";",",").split(",") if x.strip()]
-    try: db.update_patient_profile(fid,patient,name,birth_date or None,alias_list)
-    except ValueError as e: raise HTTPException(400,str(e))
-    return RedirectResponse("/families/"+str(fid)+"/patients/"+quote(" ".join(name.split()),safe="")+"?updated=1",status_code=303)
+    clean_new_name=" ".join(name.split()).strip()[:100]
+    old_prefix=new_prefix=None
+    moved_directory=None
+    from local_storage import DATA_ROOT, _component
+    if STORAGE_BACKEND == "local" and clean_new_name:
+        root=DATA_ROOT.resolve()
+        family_root=(root / f"family_{int(fid)}").resolve()
+        old_dir=root / f"family_{int(fid)}" / _component(patient)
+        new_dir=root / f"family_{int(fid)}" / _component(clean_new_name)
+        if root not in family_root.parents or family_root.parent != root:
+            raise HTTPException(400,"Каталог семейного архива вне хранилища")
+        old_prefix=str(old_dir)+os.sep
+        new_prefix=str(new_dir)+os.sep
+        if old_dir.resolve() != new_dir.resolve() and old_dir.exists():
+            if old_dir.is_symlink() or not old_dir.is_dir():
+                raise HTTPException(400,"Каталог пациента не является обычной директорией")
+            if new_dir.exists() or new_dir.is_symlink():
+                raise HTTPException(409,"Каталог с таким именем уже существует; переименование остановлено")
+            try:
+                os.replace(old_dir,new_dir)
+                moved_directory=(old_dir,new_dir)
+            except OSError:
+                logging.exception("Could not move local patient directory during rename")
+                raise HTTPException(500,"Не удалось переименовать каталог пациента; изменения не сохранены")
+    try:
+        db.update_patient_profile(
+            fid,patient,clean_new_name,birth_date or None,alias_list,
+            old_storage_prefix=old_prefix if moved_directory else None,
+            new_storage_prefix=new_prefix if moved_directory else None,
+        )
+    except ValueError as e:
+        if moved_directory:
+            try: os.replace(moved_directory[1],moved_directory[0])
+            except OSError: logging.exception("Failed to restore patient directory after rejected rename")
+        raise HTTPException(400,str(e))
+    except Exception:
+        if moved_directory:
+            try: os.replace(moved_directory[1],moved_directory[0])
+            except OSError: logging.exception("Failed to restore patient directory after failed rename")
+        logging.exception("Patient profile update failed")
+        raise HTTPException(500,"Не удалось сохранить изменения пациента; проверьте журнал приложения")
+    return RedirectResponse("/families/"+str(fid)+"/patients/"+quote(clean_new_name,safe="")+"?updated=1",status_code=303)
+
+@app.get("/api/home")
+def home_api(family_id:int|None=None,uid:int=Depends(current_user)):
+    """Minimal home/archive payload for the native React shell; metadata only."""
+    fs=tenancy.families_for_user(uid)
+    if is_demo_user(uid) and not fs:
+        _ensure_demo_tenant(uid)
+        fs=tenancy.families_for_user(uid)
+    if family_id is not None and not tenancy.role_for_user(family_id,uid):
+        raise HTTPException(403,"Нет доступа")
+    selected_id = family_id if family_id is not None else (int(fs[0]["id"]) if fs else None)
+    selected_family = tenancy.get_family(selected_id) if selected_id is not None else None
+    families=[]
+    for item in fs:
+        fid=int(item["id"])
+        families.append({"id":fid,"name":str(item.get("name") or "Семейный архив"),"selected":fid==selected_id})
+    patients=[]
+    pending_count=0
+    storage_label="локально на VPS" if STORAGE_BACKEND=="local" else "Яндекс Диск"
+    disk_connected=False
+    if selected_family:
+        fid=int(selected_family["id"])
+        patients=[]
+        for name in db.patients(fid):
+            parts=str(name).split()
+            short_name=parts[1] if len(parts)>=2 else (parts[0] if parts else str(name))
+            patients.append({"name":str(name),"short_name":short_name,"document_count":int(db.document_count(fid,name)),"url":f"/families/{fid}/patients/{str(name)}"})
+        pending_count=len(db.pending_documents(fid))
+        if STORAGE_BACKEND=="yandex" and not is_demo_user(uid):
+            disk_connected=bool(tenancy.disk_connected(fid))
+    return {
+        "families":families,
+        "selected_family_id":selected_id,
+        "family_name":str(selected_family.get("name") or "Семейный архив") if selected_family else "",
+        "patients":patients,
+        "pending_count":pending_count,
+        "storage_label":"локально во временном демо-хранилище" if is_demo_user(uid) else storage_label,
+        "disk_connected":disk_connected,
+        "is_demo":bool(is_demo_user(uid)),
+        "upload_limit_mb":min(MAX_UPLOAD_MB,DEMO_MAX_UPLOAD_MB) if is_demo_user(uid) else MAX_UPLOAD_MB,
+    }
+
+
+@app.get("/api/families/{fid}/patients/{patient}")
+def patient_detail_api(fid:int,patient:str,q:str="",view:str="timeline",uid:int=Depends(current_user)):
+    """Structured patient profile for the React UI; never expose storage paths or OCR text."""
+    family(fid,uid)
+    if patient not in db.patients(fid):
+        raise HTTPException(404,"Пациент не найден")
+    view = "tree" if view == "tree" else "timeline"
+    rows = db.search(fid,patient,q,limit=1000)
+    documents = []
+    for d in rows:
+        analysis = d.get("analysis") or {}
+        details = document_card_metadata(d, analysis)
+        documents.append({
+            "id": int(d["id"]),
+            "title": str(display_document_title(d, analysis)),
+            "kind": str(d.get("kind") or "не определено"),
+            "date": str(d.get("date") or ""),
+            "added": str(d.get("added") or ""),
+            "metadata": str(details.get("metadata") or ""),
+            "finding": str(details.get("finding") or ""),
+            "review_required": bool(analysis.get("review_required", False)),
+            "file_type": str(Path(str(d.get("name") or "")).suffix or "").lower(),
+            "url": f"/families/{fid}/documents/{int(d['id'])}/edit",
+        })
+    return {
+        "patient": patient,
+        "family_id": int(fid),
+        "query": q,
+        "view": view,
+        "document_count": len(documents),
+        "documents": documents,
+        "capabilities": {
+            "upload": not (STORAGE_BACKEND == "yandex" and not is_demo_user(uid) and not tenancy.disk_connected(fid)),
+            "patient_memory": True,
+            "document_selection": True,
+            "assistant": True,
+        },
+    }
+
 
 @app.get("/families/{fid}/patients/{patient}",response_class=HTMLResponse)
 def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,cleanup_warning:int=0,uid:int=Depends(current_user)):
@@ -556,7 +1109,7 @@ def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,
     from urllib.parse import quote
     safe_patient=quote(patient,safe="")
     base=f"/families/{fid}/patients/{safe_patient}"
-    b=[f'<p><a href="/?family_id={fid}">← К архиву</a></p>',f'<div class="patient-heading"><div><h2>{html.escape(patient)}</h2><p class="muted">Документов: {len(rows)}</p></div><div class="row"><a class="button-link" href="/families/{fid}/patients/{safe_patient}/edit">✎ Редактировать</a><a class="button-link" href="#patient-upload">＋ Добавить документы</a></div></div>']
+    b=[f'<p><a href="/?family_id={fid}">← К архиву</a></p>',f'<div class="patient-heading"><div><h2>{html.escape(patient)}</h2><p class="muted">{format_document_count(len(rows))}</p></div><div class="patient-actions"><a class="button-link patient-action-primary" href="#patient-assistant" data-patient-assistant="1" data-family-id="{fid}" data-patient="{html.escape(patient,quote=True)}">✦ Спросить ИИ</a><a class="button-link" href="/patient-memory?family_id={fid}&patient={safe_patient}">Память пациента</a><a class="button-link" href="/families/{fid}/patients/{safe_patient}/edit">Редактировать</a><a class="button-link" href="#patient-upload">＋ Добавить документы</a></div></div>']
     if deleted: b.append('<div class="notice-success" role="status">Документ удалён из архива.</div>')
     if cleanup_warning: b.append('<div class="notice-warning" role="status">Запись удалена, но временный файл не удалось окончательно очистить. Проверьте журнал приложения.</div>')
     b.append(f'<form class="card patient-search" method="get" action="{base}"><label for="patient-q">Поиск по документам пациента</label><div class="row"><input id="patient-q" type="search" name="q" value="{html.escape(q,quote=True)}" placeholder="Например: анализы, УЗИ, выписка"><input type="hidden" name="view" value="{view}"><button type="submit">Найти</button>')
@@ -577,19 +1130,25 @@ def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,
             try: return datetime.strptime(item[0],"%d-%m-%Y")
             except Exception: return datetime.min
         for date,docs in sorted(grouped.items(),key=sort_date,reverse=True):
-            b.append(f'<h3 class="timeline-date">{html.escape(date)}</h3>')
+            b.append(f'<h3 class="timeline-date">{html.escape(format_document_date(date))}</h3>')
             for d in docs:
-                title=display_document_title(d,d.get("analysis") or {}); did=int(d["id"])
-                b.append(f'<article class="document-row"><div class="document-main"><strong>{html.escape(str(title))}</strong><div class="muted">{html.escape(str(d.get("kind") or "не определено"))} · {html.escape(str(d.get("name") or ""))}</div></div><a class="button-link" href="/families/{fid}/documents/{did}/edit">Открыть</a></article>')
+                analysis = d.get("analysis") or {}
+                title=display_document_title(d,analysis); did=int(d["id"])
+                details = document_card_metadata(d, analysis)
+                meta = ('<div class="document-meta">' + html.escape(details["metadata"]) + '</div>') if details["metadata"] else ''
+                finding = ('<p class="document-finding">' + html.escape(details["finding"]) + '</p>') if details["finding"] else '<p class="document-finding muted">Откройте документ, чтобы посмотреть заключение.</p>'
+                b.append(f'<article class="document-row document-card"><div class="document-main"><strong>{html.escape(str(title))}</strong><div class="muted document-meta">{html.escape(str(d.get("kind") or "не определено"))} · {html.escape(format_document_date(d.get("date")))}</div>{meta}{finding}<details class="document-source-name"><summary>Имя исходного файла</summary><span>{html.escape(str(d.get("name") or ""))}</span></details></div><a class="button-link" href="/families/{fid}/documents/{did}/edit">Открыть</a></article>')
     else:
+        b.append('<section class="patient-document-tree" data-patient-document-tree><div class="document-selection-toolbar"><div><strong>Выбор документов для ИИ</strong><p class="muted">По умолчанию ИИ сам ищет подходящие документы этого пациента. Включите выбор, чтобы ограничить анализ только отмеченными файлами и памятью пациента.</p></div><button type="button" class="button-link" data-toggle-document-selection aria-pressed="false">Выбрать документы</button></div><div class="document-selection-active-note" data-selection-note hidden><strong>Режим выбора включён.</strong> ИИ будет анализировать только отмеченные документы и память этого пациента.</div>')
         grouped={}
         for d in rows: grouped.setdefault(str(d.get("kind") or "Не определено"),[]).append(d)
         for kind,docs in sorted(grouped.items(),key=lambda x:x[0].casefold()):
             b.append(f'<details class="tree-group" open><summary>{html.escape(kind)} <span class="muted">({len(docs)})</span></summary>')
             for d in sorted(docs,key=lambda x:str(x.get("date") or ""),reverse=True):
                 title=display_document_title(d,d.get("analysis") or {}); did=int(d["id"])
-                b.append(f'<div class="document-row"><div class="document-main"><strong>{html.escape(str(title))}</strong><div class="muted">{html.escape(str(d.get("date") or "Дата не указана"))}</div></div><a class="button-link" href="/families/{fid}/documents/{did}/edit">Открыть</a></div>')
+                b.append(f'<div class="document-row"><label class="document-select-label"><input type="checkbox" class="document-select-checkbox" data-document-id="{did}" aria-label="Выбрать документ {html.escape(str(title),quote=True)}"><span class="document-main"><strong>{html.escape(str(title))}</strong><span class="muted">{html.escape(format_document_date(d.get("date")))}</span></span></label><a class="button-link" href="/families/{fid}/documents/{did}/edit">Открыть</a></div>')
             b.append('</details>')
+        b.append('</section>')
     return page("Пациент","".join(b))
 
 @app.post("/families/{fid}/documents/{doc_id}/delete",response_class=HTMLResponse)
@@ -710,6 +1269,89 @@ def view_document_original(fid: int, doc_id: int, uid: int = Depends(current_use
     )
 
 
+@app.get("/families/{fid}/documents/{doc_id}/preview")
+def preview_document(fid: int, doc_id: int, uid: int = Depends(current_user)):
+    """Serve an authenticated image preview from local storage or a temporary Yandex download."""
+    family(fid, uid)
+    d = db.get_doc(fid, doc_id)
+    if not d:
+        raise HTTPException(404, "Документ не найден")
+    suffix = Path(str(d.get("name") or "")).suffix.lower()
+    media_types = {".png":"image/png", ".jpg":"image/jpeg", ".jpeg":"image/jpeg", ".webp":"image/webp", ".bmp":"image/bmp", ".tif":"image/tiff", ".tiff":"image/tiff"}
+    if suffix not in media_types:
+        raise HTTPException(415, "Предпросмотр доступен только для изображений")
+    from local_storage import DATA_ROOT, _component
+    import tempfile
+    patient = str(d.get("patient") or "")
+    if STORAGE_BACKEND == "local" or is_demo_user(uid):
+        root = DATA_ROOT.resolve()
+        expected = (root / f"family_{int(fid)}" / _component(patient)).resolve()
+        raw = Path(str(d.get("remote") or ""))
+        try:
+            resolved = raw.resolve(strict=True)
+            if root not in expected.parents or resolved.parent != expected or not resolved.is_file() or raw.is_symlink():
+                raise HTTPException(404, "Оригинал изображения не найден")
+        except OSError:
+            raise HTTPException(404, "Оригинал изображения не найден")
+        return FileResponse(resolved, media_type=media_types[suffix], headers={"Cache-Control":"private, no-store", "X-Content-Type-Options":"nosniff"})
+    # A cloud document must be fetched with the token belonging to its authorized family,
+    # never with a process-wide token that may point to another user's disk.
+    token = tenancy.get_yadisk_token(fid)
+    if not token or not d.get("remote"):
+        raise HTTPException(503, "Предпросмотр из облачного хранилища пока недоступен")
+    from cloud import YaDiskClient
+    temp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    temp_path = Path(temp.name); temp.close()
+    try:
+        YaDiskClient(token).download_file(str(d["remote"]), str(temp_path))
+        from fastapi.responses import FileResponse as _FileResponse
+        response = _FileResponse(temp_path, media_type=media_types[suffix], headers={"Cache-Control":"private, no-store", "X-Content-Type-Options":"nosniff"})
+        response.background = __import__("starlette.background", fromlist=["BackgroundTask"]).BackgroundTask(lambda: temp_path.unlink(missing_ok=True))
+        return response
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        logging.exception("Could not fetch private image preview")
+        raise HTTPException(502, "Не удалось получить оригинал изображения из хранилища")
+
+
+@app.get("/api/families/{fid}/documents/{doc_id}/edit")
+def document_editor_api(fid:int,doc_id:int,uid:int=Depends(current_user)):
+    """Authorized editor payload; OCR is exposed only to the user who can access this family/document."""
+    family(fid,uid)
+    d=db.get_doc(fid,doc_id)
+    if not d:
+        raise HTTPException(404,"Документ не найден")
+    from AIAnalise import DOCUMENT_TYPE_RULES
+    analysis=d.get("analysis") or {}
+    suffix=Path(str(d.get("name") or "")).suffix.lower()
+    preview_url=None
+    page_count=0
+    if suffix==".pdf":
+        if STORAGE_BACKEND=="local" or is_demo_user(uid):
+            preview_url=f"/families/{fid}/documents/{doc_id}/original"
+            try:
+                page_count=min(1000,int(_pdf_page_count(_read_verified_local_document_pdf(fid,d))))
+            except Exception as exc:
+                logging.warning("Document editor PDF page count unavailable (%s)",type(exc).__name__)
+                page_count=0
+    elif suffix in {".png",".jpg",".jpeg",".webp",".bmp",".tif",".tiff"}:
+        preview_url=f"/families/{fid}/documents/{doc_id}/preview"
+    return {
+        "family_id":int(fid),
+        "document_id":int(doc_id),
+        "patient":str(d.get("patient") or ""),
+        "source_name":str(d.get("name") or ""),
+        "kind":str(d.get("kind") or "не определено"),
+        "title":str(display_document_title(d,analysis)),
+        "date":str(d.get("date") or ""),
+        "ocr_text":_format_ocr_preview(d.get("text")),
+        "ocr_text_raw":str(d.get("text") or ""),
+        "kinds":["не определено"]+sorted(DOCUMENT_TYPE_RULES.keys()),
+        "preview_url":preview_url,
+        "page_count":page_count,
+    }
+
+
 @app.get("/families/{fid}/documents/{doc_id}/edit", response_class=HTMLResponse)
 def edit_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
     family(fid,uid)
@@ -732,15 +1374,21 @@ def edit_document(fid:int,doc_id:int,uid:int=Depends(current_user)):
             'style="display:block;width:100%;height:75vh;min-height:420px;border:1px solid #d8e2f0;border-radius:12px;background:#fff"></iframe>'
             '<p><a target="_blank" rel="noopener" href="' + viewer_url + '">Открыть PDF отдельно</a></p></section>'
         )
+    suffix = Path(str(d.get("name") or "")).suffix.lower()
+    if suffix in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}:
+        preview_url = f"/families/{fid}/documents/{doc_id}/preview"
+        body += ('<section class="card"><h3>Предпросмотр оригинала</h3><a href="' + preview_url + '" target="_blank" rel="noopener">Открыть изображение отдельно для увеличения</a>'
+                 '<img src="' + preview_url + '" alt="Оригинал документа" loading="lazy" style="display:block;width:100%;height:auto;max-height:75vh;object-fit:contain;margin-top:12px;border:1px solid #d8e2f0;border-radius:12px;background:#fff"></section>')
     body+="<form method=\"post\" action=\"/families/"+str(fid)+"/documents/"+str(doc_id)+"/edit\"><label>Тип обследования<br><select name=\"kind\" required>"+options+"</select></label><br>"
     body+="<label>Название для архива<br><input type=\"text\" name=\"title\" maxlength=\"180\" value=\""+html.escape(str(title),quote=True)+"\" required></label><br>"
     body+="<label>Дата документа (ДД-ММ-ГГГГ)<br><input type=\"text\" name=\"date\" maxlength=\"10\" placeholder=\"17-03-2025\" value=\""+html.escape(str(d.get("date") or ""),quote=True)+"\"></label>"
-    body+="<p class=\"muted\">Оригинал и первоначальный OCR-текст останутся без изменений.</p><button type=\"submit\">Сохранить изменения</button></form>"
+    body+="<label>Распознанный текст (OCR)<br><textarea name=\"ocr_text\" rows=\"12\" maxlength=\"100000\" style=\"width:100%;min-height:260px;resize:vertical;font:inherit;padding:12px;border:1px solid #d5e0f0;border-radius:12px;box-sizing:border-box\">"+html.escape(_format_ocr_preview(d.get("text")))+"</textarea></label>"
+    body+="<p class=\"muted\">Исходный файл не изменяется. Исправленный OCR будет использоваться для поиска и последующего анализа.</p><button type=\"submit\">Сохранить изменения</button></form>"
     body+='<form method="post" action="/families/'+str(fid)+'/documents/'+str(doc_id)+'/delete" onsubmit="return confirm(\'Удалить документ и его OCR-файл из архива? Это действие нельзя отменить.\')"><input type="hidden" name="confirm" value="yes"><button class="danger" type="submit">Удалить документ</button></form>'
     return page("Редактирование документа",body)
 
 @app.post("/families/{fid}/documents/{doc_id}/edit", response_class=HTMLResponse)
-def save_document_edit(fid:int,doc_id:int,kind:str=Form(...),title:str=Form(...),date:str=Form(""),uid:int=Depends(current_user)):
+def save_document_edit(fid:int,doc_id:int,kind:str=Form(...),title:str=Form(...),date:str=Form(""),ocr_text:str=Form("", max_length=100000),uid:int=Depends(current_user)):
     family(fid,uid)
     d=db.get_doc(fid,doc_id)
     if not d: raise HTTPException(404,"Документ не найден")
@@ -754,6 +1402,36 @@ def save_document_edit(fid:int,doc_id:int,kind:str=Form(...),title:str=Form(...)
         try: date=datetime.strptime(date,"%d-%m-%Y").strftime("%d-%m-%Y")
         except ValueError: raise HTTPException(400,"Дата должна быть в формате ДД-ММ-ГГГГ")
     analysis=d.get("analysis") or {}
+    ocr_text = str(ocr_text or "")
+    if ocr_text != str(d.get("text") or ""):
+        if not db.update_doc_text(fid, doc_id, ocr_text):
+            raise HTTPException(500, "Не удалось сохранить исправленный OCR-текст")
+        try:
+            if d.get("ocr_remote"):
+                if STORAGE_BACKEND == "local" or is_demo_user(uid):
+                    from local_storage import DATA_ROOT, _component
+                    root = DATA_ROOT.resolve()
+                    expected = (root / f"family_{int(fid)}" / _component(str(d.get("patient") or ""))).resolve()
+                    ocr_path = Path(str(d.get("ocr_remote")))
+                    resolved = ocr_path.resolve()
+                    if root not in expected.parents or resolved.parent != expected or ocr_path.is_symlink():
+                        raise ValueError("OCR path outside patient storage")
+                    resolved.write_text(ocr_text, encoding="utf-8")
+                else:
+                    # OCR sidecars belong to the same family-specific cloud account as the document.
+                    token = tenancy.get_yadisk_token(fid)
+                    if not token:
+                        raise ValueError("Family Yandex Disk token is not configured")
+                    import tempfile
+                    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tmp:
+                        tmp.write(ocr_text); temp_name = tmp.name
+                    try:
+                        YaDiskClient(token).upload_file(temp_name, str(d["ocr_remote"]))
+                    finally:
+                        Path(temp_name).unlink(missing_ok=True)
+        except Exception:
+            logging.exception("Updated OCR index but failed to update OCR sidecar for document %s", doc_id)
+            raise HTTPException(502, "Текст сохранён в индексе, но не удалось обновить OCR-файл в хранилище. Проверьте соединение и повторите сохранение.")
     analysis["primary_type"]=kind
     analysis["primary_category"]=DOCUMENT_TAXONOMY.get(kind,{}).get("category","не определено")
     analysis["taxonomy_path"]=[analysis["primary_category"],kind] if kind in DOCUMENT_TAXONOMY else []
@@ -892,6 +1570,21 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), ai_c
 
 
 
+@app.get("/api/families/{fid}/inbox")
+def review_inbox_api(fid:int,uid:int=Depends(current_user)):
+    """Minimal metadata for the React inbox; do not expose OCR text or file bytes."""
+    family(fid,uid)
+    rows=db.pending_documents(fid)
+    return {
+        "family_id":int(fid),
+        "patients":[{"name":str(name)} for name in db.patients(fid)],
+        "documents":[
+            {"id":int(row["id"]),"name":str(row["name"]),"created":str(row.get("created") or "")}
+            for row in rows
+        ],
+    }
+
+
 @app.get("/families/{fid}/inbox", response_class=HTMLResponse)
 def review_inbox(fid:int,uid:int=Depends(current_user)):
     family(fid,uid)
@@ -937,6 +1630,103 @@ def assign_selected_pending(fid:int,patient:str=Form(...),pending_ids:list[int]=
     body='<p><a href="/families/'+str(fid)+'/inbox">← Ко входящим</a></p><h2>Результат массового назначения</h2><div class="card"><ul>'+''.join(results)+'</ul></div>'
     return page("Массовое назначение",body)
 
+def _format_ocr_preview(value):
+    """Render serialized page/text records readably without altering ordinary OCR text."""
+    import ast
+
+    raw = str(value or "")
+    candidate = raw.strip()
+    if not candidate or candidate[0] not in "[{":
+        return raw
+    try:
+        parsed = ast.literal_eval(candidate)
+    except (SyntaxError, ValueError, TypeError):
+        return raw
+
+    records = parsed if isinstance(parsed, list) else [parsed]
+    if not records or not all(
+        isinstance(record, dict)
+        and "text" in record
+        and ("page" in record or len(records) == 1)
+        for record in records
+    ):
+        return raw
+
+    formatted = []
+    for index, record in enumerate(records, start=1):
+        page = record.get("page", index)
+        text = record.get("text")
+        if not isinstance(text, str):
+            return raw
+        formatted.append(f"--- Страница {page} ---\n{text.strip()}")
+    return "\n\n".join(formatted)
+
+
+def _read_verified_local_document_pdf(fid, document):
+    """Read a PDF only from the authorized patient's own local archive directory."""
+    from local_storage import DATA_ROOT, _component
+
+    root = DATA_ROOT.resolve()
+    patient = str(document.get("patient") or "")
+    expected = (root / f"family_{int(fid)}" / _component(patient)).resolve()
+    if root not in expected.parents:
+        raise HTTPException(400, "Каталог документа вне хранилища")
+    raw = Path(str(document.get("remote") or ""))
+    if not str(document.get("remote") or "") or raw.is_symlink():
+        raise HTTPException(404, "Оригинал PDF не найден")
+    try:
+        resolved = raw.resolve(strict=True)
+    except (OSError, ValueError):
+        raise HTTPException(404, "Оригинал PDF не найден")
+    if resolved.parent != expected or root not in resolved.parents or not resolved.is_file():
+        raise HTTPException(404, "Оригинал PDF не найден")
+    try:
+        return resolved.read_bytes()
+    except OSError:
+        raise HTTPException(404, "Оригинал PDF не найден")
+
+
+def _pdf_page_count(file_bytes):
+    import fitz
+    with fitz.open(stream=bytes(file_bytes), filetype="pdf") as document:
+        return len(document)
+
+
+def _render_pdf_page(file_bytes, page_number):
+    """Render one 1-based PDF page as a PNG for reliable mobile multi-page previews."""
+    import fitz
+    with fitz.open(stream=bytes(file_bytes), filetype="pdf") as document:
+        if page_number < 1 or page_number > len(document):
+            raise IndexError("PDF page out of range")
+        page = document.load_page(page_number - 1)
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(1.35, 1.35), alpha=False)
+        return pixmap.tobytes("png")
+
+
+@app.get("/families/{fid}/documents/{doc_id}/preview/page/{page_number}")
+def preview_document_pdf_page(fid:int,doc_id:int,page_number:int,uid:int=Depends(current_user)):
+    """Render an authenticated PDF page for the normal archived-document editor."""
+    family(fid,uid)
+    document=db.get_doc(fid,doc_id)
+    if not document:
+        raise HTTPException(404,"Документ не найден")
+    if Path(str(document.get("name") or "")).suffix.lower() != ".pdf":
+        raise HTTPException(415,"Предпросмотр страниц доступен только для PDF")
+    if STORAGE_BACKEND != "local" and not is_demo_user(uid):
+        raise HTTPException(503,"Встроенный просмотр страниц PDF пока поддерживает локальное хранилище")
+    try:
+        pdf_bytes=_read_verified_local_document_pdf(fid,document)
+        image_bytes=_render_pdf_page(pdf_bytes,page_number)
+    except HTTPException:
+        raise
+    except IndexError:
+        raise HTTPException(404,"Страница PDF не найдена")
+    except Exception as exc:
+        logging.warning("Archived PDF page render failed (%s)",type(exc).__name__)
+        raise HTTPException(422,"Не удалось отобразить страницу PDF")
+    return Response(content=image_bytes,media_type="image/png",headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
+
+
 @app.get("/families/{fid}/inbox/{pending_id}/preview")
 def preview_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)):
     family(fid,uid)
@@ -945,7 +1735,65 @@ def preview_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user
     ext=Path(d["name"]).suffix.lower()
     media={".pdf":"application/pdf",".jpg":"image/jpeg",".jpeg":"image/jpeg",".png":"image/png",".webp":"image/webp",".bmp":"image/bmp",".tif":"image/tiff",".tiff":"image/tiff"}.get(ext)
     if not media: raise HTTPException(415,"Предпросмотр формата недоступен")
-    return Response(content=d["file_bytes"],media_type=media,headers={"Content-Disposition":"inline; filename*=UTF-8''"+__import__("urllib.parse",fromlist=["quote"]).quote(d["name"])})
+    return Response(content=d["file_bytes"],media_type=media,headers={"Content-Disposition":"inline; filename*=UTF-8''"+__import__("urllib.parse",fromlist=["quote"]).quote(d["name"]),"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
+
+
+@app.get("/families/{fid}/inbox/{pending_id}/preview/page/{page_number}")
+def preview_pending_document_page(fid:int,pending_id:int,page_number:int,uid:int=Depends(current_user)):
+    family(fid,uid)
+    d=db.get_pending_doc(fid,pending_id)
+    if not d: raise HTTPException(404,"Документ не найден")
+    if Path(d["name"]).suffix.lower() != ".pdf": raise HTTPException(415,"Предпросмотр страниц доступен только для PDF")
+    try:
+        image_bytes = _render_pdf_page(d["file_bytes"], page_number)
+    except IndexError:
+        raise HTTPException(404,"Страница PDF не найдена")
+    except Exception as exc:
+        logging.warning("Pending PDF page render failed (%s)", type(exc).__name__)
+        raise HTTPException(422,"Не удалось отобразить страницу PDF")
+    return Response(content=image_bytes,media_type="image/png",headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
+
+
+@app.get("/api/families/{fid}/inbox/{pending_id}")
+def pending_document_review_api(fid:int,pending_id:int,uid:int=Depends(current_user)):
+    """Authorized metadata and preview references for manual inbox classification."""
+    family(fid,uid)
+    d=db.get_pending_doc(fid,pending_id)
+    if not d:
+        raise HTTPException(404,"Документ не найден во входящих")
+    from AIAnalise import DOCUMENT_TYPE_RULES
+    analysis=d.get("analysis") or {}
+    labels={"лабораторный отчёт":"Анализы","заключение УЗИ":"УЗИ","заключение КТ":"КТ","заключение МРТ":"МРТ",
+        "рентгенологическое заключение":"Рентген","направление":"Направление","протокол осмотра или приёма":"Приём врача",
+        "консультация специалиста":"Консультация врача","выписной эпикриз":"Выписка из стационара",
+        "выписка из медицинской карты":"Выписка из карты","назначение или рецепт":"Назначение / рецепт",
+        "заключение ЭКГ":"ЭКГ","эндоскопическое заключение":"Эндоскопия (ФГДС / колоноскопия)",
+        "патоморфологическое заключение":"Гистология / биопсия","операционный протокол":"Операция",
+        "медицинская справка":"Медицинская справка","справка о временной нетрудоспособности":"Больничный / справка",
+        "вакцинальный документ":"Прививки","история развития ребёнка":"История развития ребёнка",
+        "контрольная карта диспансерного наблюдения":"Диспансерное наблюдение","медицинская карта или наблюдение":"Медицинская карта",
+        "документ по беременности и родам":"Беременность и роды","медицинское свидетельство о рождении":"Свидетельство о рождении",
+        "медицинское свидетельство о смерти":"Свидетельство о смерти","санаторно-курортная документация":"Санаторий / реабилитация",
+        "не определено":"Не определено"}
+    kinds=["не определено"]+sorted(DOCUMENT_TYPE_RULES.keys())
+    ext=Path(d.get("name") or "").suffix.lower()
+    preview_kind="image" if ext in {".jpg",".jpeg",".png",".webp",".bmp",".tif",".tiff"} else ("pdf" if ext==".pdf" else "none")
+    page_count=0
+    if preview_kind=="pdf":
+        try:
+            page_count=min(1000,int(_pdf_page_count(d.get("file_bytes") or b"")))
+        except Exception:
+            page_count=0
+    patients=[{"name":str(p["name"]),"birth_date":str(p.get("birth_date") or "")} for p in db.patient_records(fid)]
+    current_kind=str(analysis.get("primary_type") or "не определено")
+    return {"family_id":int(fid),"pending_id":int(pending_id),"source_name":str(d.get("name") or "document"),
+        "created":str(d.get("created") or ""),"ocr_text":_format_ocr_preview(d.get("text"))[:12000],
+        "patient_options":patients,"kinds":[{"value":k,"label":labels.get(k,k[:1].upper()+k[1:])} for k in kinds],
+        "kind":current_kind if current_kind in kinds else "не определено",
+        "title":str(analysis.get("display_title") or analysis.get("primary_type") or d.get("name") or "Документ"),
+        "date":"","preview_url":f"/families/{fid}/inbox/{pending_id}/preview",
+        "preview_kind":preview_kind,"page_count":page_count}
+
 
 @app.get("/families/{fid}/inbox/{pending_id}", response_class=HTMLResponse)
 def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)):
@@ -963,10 +1811,20 @@ def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)
     if ext in {".jpg",".jpeg",".png",".webp",".bmp",".tif",".tiff"}:
         preview=f'<a class="document-preview-link" href="{preview_url}" target="_blank" rel="noopener" aria-label="Открыть изображение в полном размере"><img class="preview-image" src="{preview_url}" alt="Предпросмотр документа"><span>Нажмите, чтобы открыть полностью ↗</span></a>'
     elif ext==".pdf":
-        preview=f'<div class="pdf-preview"><div class="pdf-preview-toolbar">Предпросмотр PDF · прокрутите документ ниже</div><iframe src="{preview_url}#view=FitH" title="Предпросмотр PDF" loading="lazy"></iframe><p><a href="{preview_url}" target="_blank" rel="noopener">Открыть PDF отдельно ↗</a></p></div>'
+        try:
+            page_count = _pdf_page_count(d["file_bytes"])
+            page_cards = "".join(
+                f'<section class="pdf-preview-page"><div class="pdf-preview-page-label">Страница {page_number} из {page_count}</div>'
+                f'<img src="{preview_url}/page/{page_number}" alt="Страница {page_number} из {page_count}" loading="lazy" decoding="async"></section>'
+                for page_number in range(1, page_count + 1)
+            )
+            preview=f'<div class="pdf-preview pdf-preview-multipage"><div class="pdf-preview-toolbar">Предпросмотр PDF · {page_count} стр. · прокрутите все страницы</div><div class="pdf-preview-pages">{page_cards}</div><p><a href="{preview_url}" target="_blank" rel="noopener">Открыть исходный PDF отдельно ↗</a></p></div>'
+        except Exception as exc:
+            logging.warning("Pending PDF preview initialization failed (%s)", type(exc).__name__)
+            preview=f'<div class="pdf-preview"><div class="pdf-preview-toolbar">Предпросмотр PDF · встроенный просмотрщик</div><iframe src="{preview_url}#toolbar=1&navpanes=0&scrollbar=1" title="Предпросмотр PDF" loading="lazy"></iframe><p><a href="{preview_url}" target="_blank" rel="noopener">Открыть PDF отдельно ↗</a></p></div>'
     else:
         preview=""
-    body=f'<p><a href="/families/{fid}/inbox">← К входящим</a></p><h2>Классификация документа</h2><div class="card pending-review-card"><strong>Файл:</strong> {html.escape(d["name"])}{preview}<details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape(d["text"][:12000])}</pre></details></div>'
+    body=f'<p><a href="/families/{fid}/inbox">← К входящим</a></p><h2>Классификация документа</h2><div class="card pending-review-card"><strong>Файл:</strong> {html.escape(d["name"])}{preview}<details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{html.escape(_format_ocr_preview(d.get("text"))[:12000])}</pre></details></div>'
     body+=f'<p><a href="/families/{fid}/patients/new">＋ Добавить пациента</a></p>'
     body+=f'<form class="pending-classification-form" method="post" action="/families/{fid}/inbox/{pending_id}/assign"><label>Пациент<br><select name="patient" required>{patient_options}</select></label><label>Тип документа<br><select name="kind" required>{kind_options}</select></label><label>Название в архиве<br><input name="title" required maxlength="180" value="{html.escape(str(d["analysis"].get("display_title") or d["analysis"].get("primary_type") or d["name"]),quote=True)}"></label><label>Дата документа (ДД-ММ-ГГГГ)<br><input name="date" placeholder="17-03-2025" maxlength="10"></label><p><button type="submit">Сохранить в историю пациента</button></p></form>'
     body+=f'<form class="pending-delete-form" method="post" action="/families/{fid}/inbox/{pending_id}/delete" onsubmit="return confirm(\'Удалить этот документ из входящих без возможности восстановления?\')"><input type="hidden" name="confirm" value="yes"><button type="submit">Удалить документ</button></form>'
@@ -1019,19 +1877,33 @@ def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:st
     with tempfile.TemporaryDirectory() as td:
         local=Path(td)/Path(d["name"]).name
         local.write_bytes(d["file_bytes"])
-        if storage_backend=="local":
-            remote_path=save_local_file(fid,patient,stored,local)
-            ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(d["text"],encoding="utf-8")
-            ocr_path=save_local_file(fid,patient,ocr_stored,ocr_tmp)
-            remote,oremote=str(remote_path),str(ocr_path)
-        else:
-            disk=YaDiskClient(token); folder=f"{ROOT}/family_{fid}/{safe_name(patient)}"
-            docs,ocr=folder+"/docs",folder+"/OCR"; disk.ensure_folder(docs); disk.ensure_folder(ocr)
-            remote,oremote=docs+"/"+stored,ocr+"/"+ocr_stored
-            disk.upload_file(str(local),remote)
-            ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(d["text"],encoding="utf-8"); disk.upload_file(str(ocr_tmp),oremote)
-        if not db.add_doc(fid,patient,stored,kind,date,remote,oremote,d["text"],extract_keywords(d["text"],analysis),d["digest"],analysis=analysis):
-            raise HTTPException(409,"Не удалось добавить документ в историю; запись во входящих сохранена")
+        saved_paths=[]
+        try:
+            if storage_backend=="local":
+                remote_path=save_local_file(fid,patient,stored,local)
+                saved_paths.append(remote_path)
+                ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(d["text"],encoding="utf-8")
+                ocr_path=save_local_file(fid,patient,ocr_stored,ocr_tmp)
+                saved_paths.append(ocr_path)
+                remote,oremote=str(remote_path),str(ocr_path)
+            else:
+                disk=YaDiskClient(token); folder=f"{ROOT}/family_{fid}/{safe_name(patient)}"
+                docs,ocr=folder+"/docs",folder+"/OCR"; disk.ensure_folder(docs); disk.ensure_folder(ocr)
+                remote,oremote=docs+"/"+stored,ocr+"/"+ocr_stored
+                disk.upload_file(str(local),remote)
+                ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(d["text"],encoding="utf-8"); disk.upload_file(str(ocr_tmp),oremote)
+            if not db.add_doc(fid,patient,stored,kind,date,remote,oremote,d["text"],extract_keywords(d["text"],analysis),d["digest"],analysis=analysis):
+                raise HTTPException(409,"Не удалось добавить документ в историю; запись во входящих сохранена")
+        except Exception:
+            # If the index write fails, don't leave an orphaned original/OCR file.
+            # Only remove paths created by this request in local storage.
+            if storage_backend=="local":
+                for candidate in saved_paths:
+                    try:
+                        candidate.unlink()
+                    except FileNotFoundError:
+                        pass
+            raise
         db.delete_pending_doc(fid,pending_id)
         if storage_backend=="yandex":
             hp=Path(td)/"history.txt"; hp.write_text(db.history(fid,patient),encoding="utf-8"); disk.upload_file(str(hp),folder+"/history.txt")

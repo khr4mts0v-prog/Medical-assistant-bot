@@ -105,6 +105,7 @@ def update_patient_profile(fid, old_name, new_name, birth_date=None, aliases=Non
                   (new_name,birth_date or None,encrypted,int(row["id"]),int(fid)))
         if old_name.casefold()!=new_name.casefold():
             c.execute("UPDATE docs SET patient=? WHERE family_id=? AND patient=? COLLATE NOCASE",(new_name,int(fid),old_name))
+    _refresh_patient_memory(fid, new_name)
 
 def patient_aliases_configured(fid,name):
     with connect() as c:
@@ -148,6 +149,14 @@ def document_exists(fid, patient, digest):
                       (int(fid),patient,digest)).fetchone()
         return row is not None
 
+def _refresh_patient_memory(fid, patient):
+    """Best-effort derived-memory refresh; archive writes must succeed independently."""
+    try:
+        import patient_memory
+        patient_memory.refresh(int(fid), str(patient))
+    except Exception:
+        logging.exception("Patient memory refresh failed; it will rebuild on next read")
+
 def add_doc(fid,p,name,kind,date,remote,ocr_remote,text,keywords,digest,analysis=None):
     with connect() as c:
         cur=c.execute("""INSERT OR IGNORE INTO docs
@@ -157,7 +166,10 @@ def add_doc(fid,p,name,kind,date,remote,ocr_remote,text,keywords,digest,analysis
          cipher().encrypt(json.dumps(keywords,ensure_ascii=False).encode("utf-8")),
          cipher().encrypt(json.dumps(analysis,ensure_ascii=False).encode("utf-8")) if analysis else None,
          digest,datetime.now().isoformat()))
-        return cur.rowcount==1
+        inserted = cur.rowcount == 1
+    if inserted:
+        _refresh_patient_memory(fid, p)
+    return inserted
 
 def get_doc(fid, doc_id):
     """Return one document only when it belongs to the requested family."""
@@ -177,12 +189,35 @@ def get_doc(fid, doc_id):
         return None
     return d
 
+def update_doc_text(fid, doc_id, text):
+    """Persist manually corrected OCR text, encrypted at rest, and refresh derived patient memory."""
+    text = str(text or "")[:100000]
+    with connect() as c:
+        row = c.execute("SELECT patient FROM docs WHERE family_id=? AND id=?", (int(fid), int(doc_id))).fetchone()
+        if not row:
+            return False
+        patient = row["patient"]
+        encrypted = cipher().encrypt(text.encode("utf-8"))
+        cur = c.execute("UPDATE docs SET text=? WHERE family_id=? AND id=?", (encrypted, int(fid), int(doc_id)))
+        updated = cur.rowcount == 1
+    if updated:
+        _refresh_patient_memory(fid, patient)
+    return updated
+
+
 def update_doc_metadata(fid, doc_id, kind, date, analysis):
     """Update display metadata while preserving the original and OCR text."""
     with connect() as c:
+        row = c.execute("SELECT patient FROM docs WHERE family_id=? AND id=?", (int(fid), int(doc_id))).fetchone()
+        if not row:
+            return False
+        patient = row["patient"]
         cur=c.execute("UPDATE docs SET kind=?,date=?,analysis=? WHERE family_id=? AND id=?",
                       (kind,date,cipher().encrypt(json.dumps(analysis,ensure_ascii=False).encode("utf-8")),int(fid),int(doc_id)))
-        return cur.rowcount == 1
+        updated = cur.rowcount == 1
+    if updated:
+        _refresh_patient_memory(fid, patient)
+    return updated
 
 def search(fid,p,query="",limit=10):
     """Search OCR plus structured metadata. Multi-term matches rank above partial matches."""
@@ -220,6 +255,35 @@ def search(fid,p,query="",limit=10):
     if terms:
         out.sort(key=lambda d:(d["_search_score"],d.get("added") or ""),reverse=True)
     return out[:max(1,min(int(limit),1000))]
+
+
+def get_documents_by_ids(fid, patient, document_ids):
+    """Fetch exact document IDs within one family and patient, without search-result limits."""
+    ids = list(dict.fromkeys(int(value) for value in document_ids))
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    with connect() as c:
+        rows = c.execute(
+            "SELECT * FROM docs WHERE family_id=? AND patient=? COLLATE NOCASE AND id IN (" + placeholders + ")",
+            (int(fid), patient, *ids),
+        ).fetchall()
+    out = []
+    for row in rows:
+        d = dict(row)
+        try:
+            d["text"] = cipher().decrypt(d["text"]).decode("utf-8") if d.get("text") else ""
+            raw_keywords = cipher().decrypt(d["keywords"]).decode("utf-8") if d.get("keywords") else "[]"
+            d["keywords"] = json.loads(raw_keywords)
+            raw_analysis = cipher().decrypt(d["analysis"]).decode("utf-8") if d.get("analysis") else "{}"
+            d["analysis"] = json.loads(raw_analysis)
+        except Exception:
+            logging.exception("Cannot decrypt selected family document")
+            continue
+        out.append(d)
+    by_id = {int(row["id"]): row for row in out if row.get("id") is not None}
+    return [by_id[doc_id] for doc_id in ids if doc_id in by_id]
+
 
 def context(fid,p,query,limit=8):
     rows=search(fid,p,query,limit)
@@ -289,10 +353,26 @@ def delete_pending_doc(fid,pending_id):
 
 
 def delete_doc(fid, doc_id):
-    """Delete one document index row scoped to its family."""
+    """Delete one document index row scoped to its family and refresh derived memory."""
     with connect() as c:
+        row = c.execute("SELECT patient FROM docs WHERE family_id=? AND id=?", (int(fid), int(doc_id))).fetchone()
+        if not row:
+            return False
+        patient = row["patient"]
         cur=c.execute("DELETE FROM docs WHERE family_id=? AND id=?", (int(fid), int(doc_id)))
-        return cur.rowcount == 1
+        deleted = cur.rowcount == 1
+        if deleted:
+            try:
+                c.execute(
+                    "DELETE FROM patient_memory_edits WHERE family_id=? AND source_document_id=?",
+                    (int(fid), int(doc_id)),
+                )
+            except sqlite3.OperationalError:
+                # Memory feature may not have initialized its optional table yet.
+                pass
+    if deleted:
+        _refresh_patient_memory(fid, patient)
+    return deleted
 
 
 def family_document_count(fid):
