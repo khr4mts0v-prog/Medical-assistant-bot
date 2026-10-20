@@ -54,6 +54,7 @@ class AssistantChatGapTests(unittest.TestCase):
         self.assertIn("MEMORY_OLeg_ONLY", user_prompt)
         self.assertIn("SELECTED_OLeg_CBC", user_prompt)
         self.assertIn("SELECTED_OLeg_US", user_prompt)
+        self.assertIn("естественное короткое имя", system_prompt)
         self.assertNotIn("UNSELECTED", user_prompt)
         self.assertNotIn("Саша", user_prompt)
 
@@ -229,6 +230,13 @@ class AssistantChatGapTests(unittest.TestCase):
         records = [{"name": "Олег", "aliases": ["Олег"]}]
         self.assertEqual(assistant._mentioned_people(records, "А что у Олега?"), ["Олег"])
 
+    def test_sashka_forms_match_registered_alexander_and_full_name(self):
+        full_name = "Храмцов Александр Михайлович"
+        records = [{"name": full_name, "aliases": [full_name]}]
+        for question in ("Дай краткий анализ по Сашке", "Расскажи про Сашки", "Что известно о Сашке?"):
+            with self.subTest(question=question):
+                self.assertEqual(assistant._mentioned_people(records, question), [full_name])
+
     def test_document_patient_boundary_fails_closed(self):
         self.assertTrue(assistant._row_matches_patient({"patient": "Олег"}, "Олег"))
         self.assertTrue(assistant._row_matches_patient({"patient": " олег "}, "Олег"))
@@ -339,6 +347,19 @@ class AssistantChatGapTests(unittest.TestCase):
         self.assertEqual(parsed["answer"], "По найденным документам можно сделать предварительную сводку.")
         self.assertEqual(parsed["missing_documents"][0]["name"], "Заключение эпилептолога")
         self.assertEqual(parsed["data_completeness"], "partial")
+
+    def test_plain_answer_does_not_leak_structured_transport_fields(self):
+        raw = (
+            "В архиве есть несколько документов; выводы ограничены их содержимым.\n\n"
+            'missing_documents: [{"name": "заключение", "reason": "нет полного текста"}]\n'
+            'limitations: ["нельзя подтвердить диагноз"]\n'
+            'data_completeness: "partial"\n'
+            'memory_updates: []'
+        )
+        parsed = assistant._parse_structured_answer(raw)
+        self.assertEqual(parsed["answer"], "В архиве есть несколько документов; выводы ограничены их содержимым.")
+        for field in ("missing_documents", "limitations", "data_completeness", "memory_updates"):
+            self.assertNotIn(field, parsed["answer"])
 
     @patch("assistant_routes.db.search", return_value=[])
     def test_empty_retrieval_does_not_silently_fetch_entire_archive(self, search):

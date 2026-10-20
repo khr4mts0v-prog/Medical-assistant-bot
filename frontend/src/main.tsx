@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  ChevronRight, ClipboardCheck, FilePlus2, Home, Menu, Search, Plus,
-  Settings, Users, X, HeartPulse, Cloud, ShieldCheck, PanelLeftClose, BrainCircuit
+  AlertCircle, ChevronRight, ClipboardCheck, File, FileText, FilePlus2, Home, Image as ImageIcon, Menu, Search, Plus,
+  Settings, Users, X, HeartPulse, Cloud, ShieldCheck, PanelLeftClose, BrainCircuit, Upload
 } from 'lucide-react';
 import './style.css';
 
@@ -26,10 +26,22 @@ function readableAnswer(value: unknown): string {
       break;
     } catch { break; }
   }
+  // Do not show transport metadata if the model accidentally appends it to prose.
+  const internalFields = cleaned.search(/(?:^|\\n|\n)\s*(?:missing_documents|limitations|data_completeness|memory_updates)\s*:/i);
+  if (internalFields >= 0) cleaned = cleaned.slice(0, internalFields).trim();
   if (/^\s*\{/.test(cleaned) && /"(?:answer|missing_documents|data_completeness)"\s*:/.test(cleaned)) {
     return 'Не удалось корректно отобразить ответ модели. Повтори вопрос.';
   }
-  return cleaned;
+  return cleaned || 'Не удалось корректно отобразить ответ модели. Повтори вопрос.';
+}
+
+function ArchiveDocumentIcon({ name, size = 22 }: { name: string; size?: number }) {
+  const normalized = String(name || '').toLowerCase();
+  const isImage = /\.(?:png|jpe?g|webp|gif|tiff?|bmp|heic|heif)$/i.test(normalized);
+  const isPdf = /\.pdf$/i.test(normalized);
+  return <span className={'archive-document-icon '+(isImage ? 'is-image' : isPdf ? 'is-pdf' : 'is-other')} aria-hidden="true">
+    {isImage ? <ImageIcon size={size}/> : isPdf ? <FileText size={size}/> : <File size={size}/>}
+  </span>;
 }
 
 function extractContent(documentText: string): string {
@@ -189,7 +201,7 @@ function HomeReactView({familyId,onNavigate,onAsk}: {familyId:number|null;onNavi
       </section>}
       <section className="home-react-section home-react-upload-section">
         <div className="home-react-section-heading"><div><div className="eyebrow">ЗАГРУЗКА</div><h2>Добавить документы</h2><p className="muted">PDF, фотографии и сканы · до {payload.upload_limit_mb} МБ на файл.</p></div></div>
-        <div className="card home-react-upload"><label className="home-react-consent"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label><label className={'home-react-file-picker '+(uploadBusy?'disabled':'')}><FilePlus2 size={21}/><span>{uploadBusy?'Обработка загрузки…':'Выбрать документы'}</span><input type="file" accept="image/*,application/pdf,.tif,.tiff,.bmp" multiple disabled={uploadBusy||payload.families.length===0} onChange={e=>{void uploadFiles(e.target.files);e.currentTarget.value='';}}/></label>{uploadStatus&&<p className="home-react-upload-status" role="status">{uploadStatus}</p>}</div>
+        <div className="card home-react-upload"><label className="home-react-consent"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label><label className={'home-react-file-picker '+(uploadBusy?'disabled':'')}><Upload size={28}/><span className="home-react-file-picker-copy"><strong>{uploadBusy?'Передаём файлы…':'Загрузить документ'}</strong><small>{uploadBusy?'Файл отправляется на сервер':'Нажми, чтобы выбрать PDF, фото или скан'}</small></span><input type="file" accept="image/*,application/pdf,.tif,.tiff,.bmp" multiple disabled={uploadBusy||payload.families.length===0} onChange={e=>{void uploadFiles(e.target.files);e.currentTarget.value='';}}/></label>{uploadStatus&&<p className="home-react-upload-status" role="status">{uploadStatus}</p>}</div>
       </section>
       {payload.selected_family_id===null && <section className="home-react-section card home-react-no-family"><Users size={24}/><strong>Семейный архив ещё не выбран</strong><p>Создай или выбери архив в разделе «Настройки архива», затем добавь карточки членов семьи.</p><button type="button" onClick={()=>onNavigate('/settings')}>Открыть настройки архива</button></section>}
       <p className="home-react-safety"><ShieldCheck size={16}/> Перед загрузкой реальных медицинских документов проверь резервное копирование и права доступа.</p>
@@ -305,7 +317,7 @@ function DocumentEditorReactView({familyId,documentId,onNavigate}: {familyId:num
   </div>;
 }
 
-type PatientDocument = { id:number; title:string; kind:string; date:string; metadata:string; finding:string; review_required:boolean; url:string };
+type PatientDocument = { id:number; title:string; kind:string; date:string; metadata:string; finding:string; review_required:boolean; file_type?:string; url:string };
 type PatientPayload = { patient:string; family_id:number; query:string; view:string; document_count:number; documents:PatientDocument[]; capabilities:{upload:boolean;patient_memory:boolean;document_selection:boolean;assistant:boolean} };
 
 function PatientReactView({familyId, patient, onAsk}: {familyId:number; patient:string; onAsk:(selectedIds?:number[])=>void}) {
@@ -341,8 +353,8 @@ function PatientReactView({familyId, patient, onAsk}: {familyId:number; patient:
     {busy && <div className="skeleton"><div/><div/><div/></div>}
     {error && <div className="error-banner" role="alert">{error}<button type="button" onClick={()=>window.location.reload()}>Повторить</button></div>}
     {!busy && !error && payload?.documents.length===0 && <div className="card"><p>Документы не найдены.</p><p className="muted">Попробуй изменить запрос или загрузить документ.</p></div>}
-    {!busy && !error && view==='timeline' && payload && <div className="patient-react-documents">{payload.documents.map(doc=><article className="document-row document-card" key={doc.id}><div className="document-main"><strong>{doc.title}</strong><div className="muted document-meta">{doc.kind} · {doc.date || 'Дата не указана'}</div>{doc.metadata && <div className="document-meta">{doc.metadata}</div>}<p className="document-finding">{doc.finding || 'Открой документ, чтобы посмотреть заключение.'}</p>{doc.review_required && <span className="status-pill">Требуется проверка</span>}</div><a className="button-link" href={doc.url}>Открыть</a></article>)}</div>}
-    {!busy && !error && view==='tree' && payload && <div className="patient-react-tree">{Object.entries(grouped).sort(([a],[b])=>a.localeCompare(b,'ru')).map(([kind,docs])=><details className="tree-group" open key={kind}><summary>{kind} <span className="muted">({docs.length})</span></summary>{docs.map(doc=><div className="document-row" key={doc.id}>{selectionMode && <label className="document-select-label"><input type="checkbox" checked={selected.includes(doc.id)} onChange={event=>setSelected(current=>event.target.checked?[...current,doc.id]:current.filter(id=>id!==doc.id))}/></label>}<div className="document-main"><strong>{doc.title}</strong><span className="muted">{doc.date || 'Дата не указана'}</span></div><a className="button-link" href={doc.url}>Открыть</a></div>)}</details>)}</div>}
+    {!busy && !error && view==='timeline' && payload && <div className="patient-react-documents">{payload.documents.map(doc=><a className={'patient-document-button'+(doc.review_required?' needs-review':'')} key={doc.id} href={doc.url} aria-label={'Открыть документ '+doc.title}><ArchiveDocumentIcon name={doc.file_type||doc.title} size={24}/><div className="document-main"><div className="patient-document-title"><strong>{doc.title}</strong><ChevronRight size={18}/></div><div className="muted document-meta">{doc.kind} · {doc.date || 'Дата не указана'}</div>{doc.metadata && <div className="document-meta">{doc.metadata}</div>}<p className="document-finding">{doc.finding || 'Открой документ, чтобы посмотреть заключение.'}</p>{doc.review_required && <span className="patient-document-status review-required"><AlertCircle size={14}/> Требуется проверка</span>}</div></a>)}</div>}
+    {!busy && !error && view==='tree' && payload && <div className="patient-react-tree">{Object.entries(grouped).sort(([a],[b])=>a.localeCompare(b,'ru')).map(([kind,docs])=><details className="tree-group" open key={kind}><summary>{kind} <span className="muted">({docs.length})</span></summary>{docs.map(doc=><div className="patient-tree-document" key={doc.id}>{selectionMode && <label className="document-select-label"><input type="checkbox" checked={selected.includes(doc.id)} onChange={event=>setSelected(current=>event.target.checked?[...current,doc.id]:current.filter(id=>id!==doc.id))}/></label>}<a className={'patient-tree-document-link'+(doc.review_required?' needs-review':'')} href={doc.url}><ArchiveDocumentIcon name={doc.file_type||doc.title} size={19}/><span className="patient-tree-document-copy"><strong>{doc.title}</strong><span className="muted">{doc.date || 'Дата не указана'}</span>{doc.review_required&&<span className="patient-document-status review-required"><AlertCircle size={13}/> Требуется проверка</span>}</span><ChevronRight size={17}/></a></div>)}</details>)}</div>}
     {view==='tree' && selectionMode && selected.length>0 && <div className="patient-react-selection"><span>Отмечено документов: {selected.length}</span><button type="button" onClick={()=>{onAsk(selected);}}>Спросить ИИ по выбранным</button></div>}
   </div>;
 }
@@ -710,6 +722,15 @@ function App() {
   const [toast, setToast] = useState('');
   const contentRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<string[]>([]);
+  const smartComposeFormRef = useRef<HTMLFormElement>(null);
+  const autoSubmitPendingRef = useRef(false);
+
+  useEffect(() => {
+    if (!smartSearchOpen || !smartQuery.trim() || smartBusy || !autoSubmitPendingRef.current) return;
+    autoSubmitPendingRef.current = false;
+    // Submit the prefilled homepage question once the chat form has mounted.
+    smartComposeFormRef.current?.requestSubmit();
+  }, [smartSearchOpen, smartQuery, smartBusy]);
 
   useEffect(() => {
     if (!assistantRoute) return;
@@ -1137,7 +1158,7 @@ function App() {
               </section>}
               {turn.result?.documents && turn.result.mode !== 'general_medical' && <details className="smart-extra-details smart-documents"><summary>{turn.result.mode === 'analysis' ? 'Документы-источники' : 'Найденные документы'} · {turn.result.documents.length}</summary>
                 {turn.result.documents.length === 0 ? <p className="muted">Подходящих документов не найдено.</p> : turn.result.documents.map((doc:any) => <a className="smart-document" href={doc.url} key={doc.id} onClick={event => {event.preventDefault();setSmartSearchOpen(false);navigate(doc.url);}}>
-                  <span className="smart-document-date">{doc.date || 'Дата не указана'}</span><strong>{doc.name}</strong><span>{doc.patient} · {doc.kind}</span><span className="smart-document-open">Открыть документ <ChevronRight size={16}/></span>
+                  <ArchiveDocumentIcon name={doc.name} size={22}/><span className="smart-document-copy"><span className="smart-document-date">{doc.date || 'Дата не указана'}</span><strong>{doc.name}</strong><span>{doc.patient} · {doc.kind}</span></span><span className="smart-document-open">Открыть документ <ChevronRight size={16}/></span>
                 </a>)}
               </details>}
             </article>)}
@@ -1145,7 +1166,7 @@ function App() {
           {smartBusy && <div className="smart-search-loading" role="status"><span className="smart-spinner"/>Ищу документы и готовлю ответ…</div>}
           {smartError && <div className="error-banner" role="alert">{smartError}</div>}
           {smartResult?.needs_consent && <p className="smart-consent-note">{smartResult.message}</p>}
-          <form className="smart-search-form smart-chat-compose" onSubmit={async event => {
+          <form ref={smartComposeFormRef} className="smart-search-form smart-chat-compose" onSubmit={async event => {
             event.preventDefault();
             const submittedQuestion = smartQuery.trim();
             if (!submittedQuestion) return;
@@ -1240,7 +1261,7 @@ function App() {
       <header className="topbar">
         <button className="icon-button menu-button" onClick={() => setMenuOpen(true)} aria-label="Открыть меню"><Menu size={23}/></button>
         {!isHome && <button className="home-button" onClick={() => navigate(HOME)} aria-label="На главную" title="Домой"><Home size={18}/>Домой</button>}
-        <div className="topbar-title">Семейный медицинский архив</div>
+        <div className="topbar-title">{patientRouteData ? patientRouteData.patient : 'Семейный медицинский архив'}</div>
       </header>
       {settingsOpen ? <section className="settings-view">
         <div className="eyebrow">ПАРАМЕТРЫ</div><h1>Настройки архива</h1><p className="lead">Управление семейным архивом и хранением документов.</p>
@@ -1271,7 +1292,7 @@ function App() {
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')} style={assistantRoute ? {display:'none'} : undefined}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} onAsk={(query,selectedFamilyId)=>{setPatientAssistantScope(null);setAssistantFamilyId(selectedFamilyId);setDocumentSelectionActive(false);setSelectedDocumentIds([]);setSmartConversation([]);setSmartQuery(query);setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : searchRoute ? <SearchReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : memoryRouteData && memoryRouteData.familyId>0 && memoryRouteData.patient ? <PatientMemoryReactView familyId={memoryRouteData.familyId} patient={memoryRouteData.patient} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
+        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} onAsk={(query,selectedFamilyId)=>{autoSubmitPendingRef.current=true;setPatientAssistantScope(null);setAssistantFamilyId(selectedFamilyId);setDocumentSelectionActive(false);setSelectedDocumentIds([]);setSmartConversation([]);setSmartQuery(query);setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : searchRoute ? <SearchReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : memoryRouteData && memoryRouteData.familyId>0 && memoryRouteData.patient ? <PatientMemoryReactView familyId={memoryRouteData.familyId} patient={memoryRouteData.patient} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
         {loading && screen && <div className="loading-line"/>}
       </section>}
     </main>
