@@ -54,6 +54,17 @@ class RequestRateLimitTests(unittest.TestCase):
         self.assertTrue(identity.startswith("demo:"))
         self.assertNotIn("secret-cookie-value", identity)
 
+    def test_http_middleware_returns_429_after_ai_limit(self):
+        from fastapi.testclient import TestClient
+
+        with patch.dict(webapp.RATE_LIMIT_POLICIES, {"ai": (1, 60.0)}):
+            with TestClient(webapp.app) as client:
+                first = client.post("/api/intelligent-search", json={})
+                second = client.post("/api/intelligent-search", json={})
+        self.assertEqual(first.status_code, 401)
+        self.assertEqual(second.status_code, 429)
+        self.assertIn("Retry-After", second.headers)
+
 
 if __name__ == "__main__":
     unittest.main()
