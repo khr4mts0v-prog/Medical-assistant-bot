@@ -875,3 +875,18 @@ button.home-react-stat{cursor:pointer}
 .archive-search-empty h2{margin:0;font-size:19px}
 .archive-search-empty p{margin:0;line-height:1.5}
 @media(max-width:600px){.archive-search-header{flex-direction:column}.archive-search-header>.button-link{align-self:flex-start}.archive-search-input-row{flex-direction:column}.archive-search-input-row button{width:100%}.archive-search-result-heading{flex-direction:column}.archive-search-result-actions{flex-direction:column}.archive-search-result-actions button{width:100%}}
+
+
+/* Native React assistant entry screen */
+.assistant-entry-screen{display:flex;flex-direction:column;align-items:flex-start;gap:14px;max-width:820px;width:100%;margin:clamp(12px,5vh,56px) auto;padding:clamp(20px,4vw,38px);border:1px solid var(--line,#dbe3ee);border-radius:24px;background:linear-gradient(145deg,#fff 0%,#f5f9ff 100%);box-shadow:0 12px 40px rgba(32,72,130,.07)}
+.assistant-entry-icon{display:flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:18px;background:#e6efff;color:#2865bd}
+.assistant-entry-screen h1{margin:0;font-size:clamp(27px,4vw,38px);line-height:1.12;letter-spacing:-.04em}
+.assistant-entry-screen>p{margin:0;max-width:650px;line-height:1.6}
+.assistant-entry-features{display:flex;flex-direction:column;gap:13px;width:100%;margin:6px 0}
+.assistant-entry-features>div{display:flex;align-items:flex-start;gap:12px;padding:13px 14px;border:1px solid #e4ebf5;border-radius:13px;background:rgba(255,255,255,.85);color:#2865bd}
+.assistant-entry-features span{display:flex;flex-direction:column;gap:3px;color:var(--text,#1d2939)}
+.assistant-entry-features strong{font-size:14px}
+.assistant-entry-features small{font-size:13px;line-height:1.5;color:var(--muted,#64748b)}
+.assistant-entry-start{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:46px;padding:10px 18px}
+.assistant-entry-screen .assistant-entry-disclaimer{font-size:12px;color:var(--muted,#64748b)}
+@media(max-width:600px){.assistant-entry-screen{margin:0 auto;padding:20px;border-radius:18px}.assistant-entry-start{width:100%}}
