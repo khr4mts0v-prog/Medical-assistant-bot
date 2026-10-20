@@ -587,6 +587,97 @@ def home(request:Request,family_id:int|None=None,uid:int=Depends(current_user)):
     b.append('<div class="warn"><strong>Важно:</strong> не загружайте реальные медицинские документы до настройки резервного копирования и полной проверки прав доступа.</div>')
     return page("Главная","".join(b))
 
+
+@app.get("/api/search")
+def unified_search_api(q:str="",family_id:int|None=None,patient:str="",uid:int=Depends(current_user)):
+    """Search authorized patient documents and return only presentation metadata."""
+    import re
+    from urllib.parse import quote
+    fs=tenancy.families_for_user(uid)
+    if not fs:
+        return {"family_id":None,"family_name":"","query":q,"patient":"","patients":[],"needs_patient":False,
+                "ambiguous":False,"patient_choices":[],"results":[],"searched":False,"message":"Сначала создайте семейный архив и добавьте пациентов.","total":0}
+    allowed={int(x["id"]) for x in fs}
+    fid=int(family_id) if family_id is not None else int(fs[0]["id"])
+    if fid not in allowed:
+        raise HTTPException(403,"Нет доступа к этому семейному архиву")
+    family(fid,uid)
+    f=tenancy.get_family(fid) or {}
+    records=db.patient_records(fid)
+    patient_options=[{"name":str(p["name"]),"aliases":[str(a) for a in (p.get("aliases") or [])]} for p in records]
+    query=" ".join((q or "").split())[:300]
+    base={"family_id":fid,"family_name":str(f.get("name") or "Семейный архив"),"query":query,"patient":patient,
+          "patients":patient_options,"needs_patient":False,"ambiguous":False,"patient_choices":[],"results":[],
+          "searched":bool(query),"message":"","total":0}
+    if not query:
+        base["searched"]=False
+        return base
+    def norm(value):
+        return re.sub(r"[^0-9a-zа-яё]+"," ",str(value or "").casefold()).strip()
+    cleaned=norm(query)
+    chosen=next((p for p in records if p["name"]==patient),None) if patient else None
+    if chosen:
+        aliases=sorted((norm(a) for a in chosen.get("aliases",[]) if norm(a)),key=len,reverse=True)
+        for alias_norm in aliases:
+            if re.search(r"(?<![0-9a-zа-яё])"+re.escape(alias_norm)+r"(?![0-9a-zа-яё])",cleaned):
+                cleaned=re.sub(r"(?<![0-9a-zа-яё])"+re.escape(alias_norm)+r"(?![0-9a-zа-яё])"," ",cleaned,count=1).strip()
+                break
+    matched=[]
+    if not chosen:
+        for record in records:
+            for alias in record.get("aliases",[]):
+                alias_norm=norm(alias)
+                if alias_norm and re.search(r"(?<![0-9a-zа-яё])"+re.escape(alias_norm)+r"(?![0-9a-zа-яё])",cleaned):
+                    matched.append((len(alias_norm),record,alias_norm))
+        if matched:
+            longest=max(x[0] for x in matched)
+            candidates={x[1]["name"]:x[1] for x in matched if x[0]==longest}
+            if len(candidates)>1:
+                base.update({"needs_patient":True,"ambiguous":True,"patient_choices":sorted(candidates),
+                             "message":"Запрос совпал с несколькими пациентами. Выбери пациента; поиск не будет выполнен автоматически."})
+                return base
+            chosen=next(iter(candidates.values()))
+            alias=max((x[2] for x in matched if x[0]==longest),key=len)
+            cleaned=re.sub(r"(?<![0-9a-zа-яё])"+re.escape(alias)+r"(?![0-9a-zа-яё])"," ",cleaned,count=1).strip()
+    if not chosen:
+        base.update({"needs_patient":True,"patient_choices":[str(p["name"]) for p in records],
+                     "message":"Не удалось однозначно определить пациента. Выбери пациента, чтобы продолжить поиск."})
+        return base
+    type_patterns=[
+      (r"\b(?:анализы|анализ|лабораторн\w*|крови|мочи)\b","lab"),
+      (r"\b(?:узи|ультразвук\w*)\b","ultrasound"),
+      (r"\b(?:кт|компьютерн\w* томограф\w*)\b","ct"),
+      (r"\b(?:мрт|магнитно резонансн\w*)\b","mri"),
+      (r"\b(?:рентген|рентгенограф\w*)\b","xray"),
+      (r"\b(?:экг|электрокардиограмм\w*)\b","ecg"),
+      (r"\b(?:выписка|эпикриз)\b","discharge"),
+      (r"\b(?:назначения|рецепт|лекарств\w*)\b","prescription"),
+      (r"\b(?:прививки|вакцинац\w*)\b","vaccine")]
+    type_hint=None
+    for pattern,hint in type_patterns:
+        if re.search(pattern,cleaned):
+            type_hint=hint;cleaned=re.sub(pattern," ",cleaned).strip();break
+    rows=db.search(fid,chosen["name"]," ".join(cleaned.split()),1000)
+    if type_hint:
+        checks={"lab":("лаборатор","анализ","кров","моч"),"ultrasound":("узи","ультразвук"),
+                "ct":("кт","компьютерн"),"mri":("мрт","магнитно резонанс"),"xray":("рентген",),
+                "ecg":("экг","электрокардиограмм"),"discharge":("выпис","эпикриз"),
+                "prescription":("рецепт","назначен","лекарств"),"vaccine":("вакцин","привив")}
+        rows=[d for d in rows if any(term in norm(" ".join([str(d.get("kind") or ""),*map(str,(d.get("analysis") or {}).get("types",[])),*map(str,(d.get("analysis") or {}).get("document_types",[])),str((d.get("analysis") or {}).get("primary_category") or "")])) for term in checks[type_hint])]
+    results=[]
+    for d in rows:
+        analysis=d.get("analysis") or {}
+        title=display_document_title(d,analysis)
+        doc_id=int(d["id"])
+        results.append({"id":doc_id,"title":str(title),"kind":str(d.get("kind") or "не определено"),
+          "date":str(d.get("date") or ""),"text":str(d.get("text") or "")[:4000],
+          "url":f"/families/{fid}/documents/{doc_id}",
+          "patient_url":f"/families/{fid}/patients/{quote(str(chosen['name']),safe='')}"})
+    base.update({"patient":str(chosen["name"]),"results":results,"total":len(results),"searched":True,
+                 "message":"" if results else "Подходящие документы не найдены."})
+    return base
+
+
 @app.get("/search",response_class=HTMLResponse)
 def unified_search(q:str="",family_id:int|None=None,patient:str="",uid:int=Depends(current_user)):
     fs=tenancy.families_for_user(uid)
