@@ -511,6 +511,7 @@ _GENERIC_PERSON_REFERENCE_STEMS = (
     "назначен", "результат", "лекарств", "препарат", "здоров", "болезн", "обследован",
     "консультац", "прием", "приём", "температур", "ребен", "ребён", "спастич",
     "давлен", "кров", "моч", "рост", "вес", "парацетамол", "ибупрофен", "врач",
+    "вс", "кажд", "последн", "люб", "семь", "пациент", "член", "родствен", "люд",
 )
 
 
@@ -524,7 +525,7 @@ def _looks_like_unresolved_person_question(question):
         return False
     # This is only a routing hint. The selected identity must still be returned from
     # the current family's candidate list and validated below after explicit AI consent.
-    for match in re.finditer(r"\b(?:про|обо?|по|для|у)\s+([а-яё][а-яё-]{1,})\b", q):
+    for match in re.finditer(r"\b(?:про|обо?|о|по|для|у)\s+([а-яё][а-яё-]{1,})\b", q):
         target = match.group(1)
         if target not in _GENERIC_PERSON_REFERENCE_OBJECTS and not target.startswith(_GENERIC_PERSON_REFERENCE_STEMS):
             return True
