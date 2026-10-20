@@ -875,3 +875,12 @@ button.home-react-stat{cursor:pointer}
 .archive-search-empty h2{margin:0;font-size:19px}
 .archive-search-empty p{margin:0;line-height:1.5}
 @media(max-width:600px){.archive-search-header{flex-direction:column}.archive-search-header>.button-link{align-self:flex-start}.archive-search-input-row{flex-direction:column}.archive-search-input-row button{width:100%}.archive-search-result-heading{flex-direction:column}.archive-search-result-actions{flex-direction:column}.archive-search-result-actions button{width:100%}}
+
+
+/* Native full-page React assistant route reuses the same consent-aware chat workflow. */
+.assistant-route-scrim{position:fixed;inset:0;z-index:120;display:flex;align-items:stretch;justify-content:center;padding:0;background:var(--surface,#f5f8fc)}
+.assistant-route-chat{width:min(980px,100%);height:100dvh;max-height:100dvh;border:0;border-radius:0;box-shadow:none;display:flex;flex-direction:column}
+.assistant-route-chat .app-modal-header{padding:20px 24px;border-bottom:1px solid var(--line);background:var(--surface,#fff)}
+.assistant-route-chat .smart-search-body{width:100%;max-width:900px;margin:0 auto;flex:1;padding:16px 24px 24px}
+.assistant-route-chat .smart-chat-compose{position:sticky;bottom:0;background:var(--surface,#fff)}
+@media(max-width:600px){.assistant-route-chat .app-modal-header{padding:14px 14px 12px}.assistant-route-chat .smart-search-body{padding:12px 12px 16px}}

@@ -2083,7 +2083,14 @@ def install_assistant_routes(app, current_user, family_guard):
             ai_consent.set_consent(uid, True)
         consent_granted = ai_consent.get(uid)["granted"]
         if needs_analysis and not consent_granted:
-            return JSONResponse({"error": "Согласие на внешний ИИ не дано. Выйдите из архива и войдите снова, отметив согласие на странице авторизации. Можно продолжить пользоваться локальным поиском без внешнего ИИ."}, status_code=403)
+            # Let the React chat request an explicit, in-context confirmation. No medical
+            # fragments are sent to the provider until the user checks the consent box and
+            # submits again; the affirmative request is persisted above on the next call.
+            return JSONResponse({
+                "needs_consent": True,
+                "message": "Для медицинского анализа требуется отдельное согласие на передачу вопроса и релевантных фрагментов документов внешнему ИИ-провайдеру. Пока согласие не подтверждено, медицинские данные не отправляются.",
+                "mode": "consent_required",
+            })
 
         measurement_proposals = []
         # A patient-card scope overrides retrieval, but must not silently reassign a
