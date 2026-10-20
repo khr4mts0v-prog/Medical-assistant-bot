@@ -67,6 +67,19 @@ class AssistantChatGapTests(unittest.TestCase):
             self.assertEqual([row["id"] for row in selected], [10])
             search.assert_not_called()
 
+    def test_inflected_first_name_inside_full_name_resolves_registered_patient(self):
+        people = [{"name": "Храмцов Олег Михайлович", "aliases": []}]
+        self.assertEqual(
+            assistant._mentioned_people(people, "Расскажи про Олега все что знаешь"),
+            ["Храмцов Олег Михайлович"],
+        )
+
+    def test_everything_you_know_phrase_requests_full_archive_history(self):
+        question = "Расскажи про Олега все что знаешь"
+        self.assertTrue(assistant._explicit_full_history(question))
+        plan = assistant._fallback_plan(question)
+        self.assertTrue(plan["allow_full_history"])
+
     def test_summary_request_routes_to_analysis(self):
         self.assertTrue(assistant._needs_ai_analysis("Дай краткую сводку по УЗИ Саши"))
 
