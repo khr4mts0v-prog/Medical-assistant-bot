@@ -520,6 +520,46 @@ def explicit_document_date(text):
         except ValueError: pass
     return ""
 
+@app.get("/api/home")
+def home_dashboard_api(uid:int=Depends(current_user)):
+    """Structured data for the native React home screen; never expose document contents or storage paths."""
+    fs=tenancy.families_for_user(uid)
+    if is_demo_user(uid) and not fs:
+        _ensure_demo_tenant(uid)
+        fs=tenancy.families_for_user(uid)
+    upload_ui_limit_mb=min(MAX_UPLOAD_MB, DEMO_MAX_UPLOAD_MB) if is_demo_user(uid) else MAX_UPLOAD_MB
+    families=[]
+    for item in fs:
+        fid=int(item["id"])
+        patients=[]
+        for patient_name in db.patients(fid):
+            patients.append({
+                "name": patient_name,
+                "document_count": int(db.document_count(fid,patient_name)),
+                "url": f"/families/{fid}/patients/{patient_name}",
+            })
+        families.append({
+            "id": fid,
+            "name": str(item["name"]),
+            "patients": patients,
+            "patient_count": len(patients),
+            "pending_count": len(db.pending_documents(fid)),
+            "disk_connected": bool(tenancy.disk_connected(fid)),
+            "url": f"/?family_id={fid}",
+            "inbox_url": f"/families/{fid}/inbox",
+            "new_patient_url": f"/families/{fid}/patients/new",
+            "connect_disk_url": f"/families/{fid}/connect-disk",
+        })
+    return {
+        "families": families,
+        "demo_mode": bool(is_demo_user(uid)),
+        "storage_backend": str(STORAGE_BACKEND),
+        "upload_limit_mb": int(upload_ui_limit_mb),
+        "can_create_family": not is_demo_user(uid),
+        "warning": "Не загружайте реальные медицинские документы до настройки резервного копирования и полной проверки прав доступа.",
+    }
+
+
 @app.get("/",response_class=HTMLResponse)
 def home(request:Request,family_id:int|None=None,uid:int=Depends(current_user)):
     # Browser entry serves the React shell; same-origin SPA requests ask for legacy HTML fragments.
@@ -810,48 +850,6 @@ def save_patient_page(fid:int,patient:str,name:str=Form(...),birth_date:str=Form
         logging.exception("Patient profile update failed")
         raise HTTPException(500,"Не удалось сохранить изменения пациента; проверьте журнал приложения")
     return RedirectResponse("/families/"+str(fid)+"/patients/"+quote(clean_new_name,safe="")+"?updated=1",status_code=303)
-
-@app.get("/api/home")
-def home_api(family_id:int|None=None,uid:int=Depends(current_user)):
-    """Minimal home/archive payload for the native React shell; metadata only."""
-    fs=tenancy.families_for_user(uid)
-    if is_demo_user(uid) and not fs:
-        _ensure_demo_tenant(uid)
-        fs=tenancy.families_for_user(uid)
-    if family_id is not None and not tenancy.role_for_user(family_id,uid):
-        raise HTTPException(403,"Нет доступа")
-    selected_id = family_id if family_id is not None else (int(fs[0]["id"]) if fs else None)
-    selected_family = tenancy.get_family(selected_id) if selected_id is not None else None
-    families=[]
-    for item in fs:
-        fid=int(item["id"])
-        families.append({"id":fid,"name":str(item.get("name") or "Семейный архив"),"selected":fid==selected_id})
-    patients=[]
-    pending_count=0
-    storage_label="локально на VPS" if STORAGE_BACKEND=="local" else "Яндекс Диск"
-    disk_connected=False
-    if selected_family:
-        fid=int(selected_family["id"])
-        patients=[]
-        for name in db.patients(fid):
-            parts=str(name).split()
-            short_name=parts[1] if len(parts)>=2 else (parts[0] if parts else str(name))
-            patients.append({"name":str(name),"short_name":short_name,"document_count":int(db.document_count(fid,name)),"url":f"/families/{fid}/patients/{str(name)}"})
-        pending_count=len(db.pending_documents(fid))
-        if STORAGE_BACKEND=="yandex" and not is_demo_user(uid):
-            disk_connected=bool(tenancy.disk_connected(fid))
-    return {
-        "families":families,
-        "selected_family_id":selected_id,
-        "family_name":str(selected_family.get("name") or "Семейный архив") if selected_family else "",
-        "patients":patients,
-        "pending_count":pending_count,
-        "storage_label":"локально во временном демо-хранилище" if is_demo_user(uid) else storage_label,
-        "disk_connected":disk_connected,
-        "is_demo":bool(is_demo_user(uid)),
-        "upload_limit_mb":min(MAX_UPLOAD_MB,DEMO_MAX_UPLOAD_MB) if is_demo_user(uid) else MAX_UPLOAD_MB,
-    }
-
 
 @app.get("/api/families/{fid}/patients/{patient}")
 def patient_detail_api(fid:int,patient:str,q:str="",view:str="timeline",uid:int=Depends(current_user)):
