@@ -31,7 +31,7 @@ class UnifiedSearchApiTests(unittest.TestCase):
             patch.object(webapp.db, "search", return_value=[{"id": 7, "kind": "Анализы", "date": "2026-01-02", "text": "гемоглобин", "analysis": {}, "file_bytes": b"private"}]),
             patch.object(webapp, "display_document_title", return_value="Общий анализ крови"),
         ):
-            response = self.client.get("/api/search?family_id=1&q=%D0%A1%D0%B0%D1%88%D0%B0%20%D0%B3%D0%B5%D0%BC%D0%BE%D0%B3%D0%BB%D0%BE%D0%B1%D0%B8%D0%BD")
+            response = self.client.get("/api/search?family_id=1&patient=%D0%A1%D0%B0%D1%88%D0%B0&q=%D0%B3%D0%B5%D0%BC%D0%BE%D0%B3%D0%BB%D0%BE%D0%B1%D0%B8%D0%BD")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["patient"], "Саша")
