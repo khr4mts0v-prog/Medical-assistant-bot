@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed preflight for deploying the private medical archive with real data."""
+"""Fail-closed environment preflight for testing or production deployments."""
 import argparse
 import os
 import stat
@@ -23,7 +23,9 @@ def parse_env(path):
     return values
 
 
-def validate(values):
+def validate(values, mode="production"):
+    if mode not in {"testing", "production"}:
+        return ["mode must be testing or production."]
     errors = []
     for key in ("WEB_USERNAME", "WEB_PASSWORD", "WEB_SESSION_SECRET", "FERNET_KEY",
                 "DEMO_USERNAME", "DEMO_PASSWORD", "DOCUMENT_STORAGE_BACKEND"):
@@ -50,17 +52,18 @@ def validate(values):
     if bool(demo_user) != bool(demo_password):
         errors.append("DEMO_USERNAME and DEMO_PASSWORD must both be empty to disable demo login, or both be configured.")
     elif demo_user and demo_password:
-        if demo_user.casefold() == "test" or demo_password.casefold() == "test":
-            errors.append("Default demo credentials are forbidden for production; disable demo login or set unique credentials.")
-        if len(demo_password) < 20:
-            errors.append("DEMO_PASSWORD must contain at least 20 characters when demo login is enabled.")
+        if mode == "production":
+            if demo_user.casefold() == "test" or demo_password.casefold() == "test":
+                errors.append("Default demo credentials are forbidden for production; disable demo login or set unique credentials.")
+            if len(demo_password) < 20:
+                errors.append("DEMO_PASSWORD must contain at least 20 characters when demo login is enabled.")
         if demo_user == username and demo_password == password:
             errors.append("Demo credentials must differ from the main web account.")
 
     backend = values.get("DOCUMENT_STORAGE_BACKEND", "").strip().casefold()
     if backend not in {"local", "yandex"}:
         errors.append("DOCUMENT_STORAGE_BACKEND must be explicitly set to local or yandex.")
-    elif backend == "local" and values.get("LOCAL_STORAGE_AT_REST_PROTECTED", "").strip().casefold() != "true":
+    elif mode == "production" and backend == "local" and values.get("LOCAL_STORAGE_AT_REST_PROTECTED", "").strip().casefold() != "true":
         errors.append(
             "Local originals and OCR sidecars are plaintext files. Verify host-volume encryption or equivalent protection, "
             "then explicitly set LOCAL_STORAGE_AT_REST_PROTECTED=true."
@@ -71,6 +74,7 @@ def validate(values):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", required=True)
+    parser.add_argument("--mode", choices=("testing", "production"), default="production")
     args = parser.parse_args()
     path = Path(args.env_file)
     if not path.is_file() or not os.access(path, os.R_OK):
@@ -81,7 +85,7 @@ def main():
         print("FAIL: .env permissions must deny all group/other access (recommended mode 600).", file=sys.stderr)
         return 2
     try:
-        errors = validate(parse_env(path))
+        errors = validate(parse_env(path), mode=args.mode)
     except (OSError, UnicodeError) as exc:
         print(f"FAIL: could not read .env ({type(exc).__name__}).", file=sys.stderr)
         return 2
@@ -89,7 +93,7 @@ def main():
         for error in errors:
             print("FAIL: " + error, file=sys.stderr)
         return 1
-    print("PASS: production environment preflight. Secret values were not displayed.")
+    print(f"PASS: {args.mode} environment preflight. Secret values were not displayed.")
     return 0
 
 
