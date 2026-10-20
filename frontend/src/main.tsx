@@ -534,7 +534,7 @@ function ScrollablePdfPreview({pageCount,pageUrl,originalUrl}: ScrollablePdfPrev
   </div>;
 }
 
-type InboxReviewPayload = {family_id:number;pending_id:number;source_name:string;created:string;ocr_text:string;patient_options:{name:string;birth_date:string}[];kinds:{value:string;label:string}[];kind:string;title:string;date:string;preview_url:string|null;preview_kind:'image'|'pdf'|'none';page_count:number};
+type InboxReviewPayload = {family_id:number;pending_id:number;source_name:string;created:string;ocr_text:string;patient_options:{name:string;birth_date:string}[];suggested_patient_name:string;kinds:{value:string;label:string}[];kind:string;title:string;date:string;preview_url:string|null;preview_kind:'image'|'pdf'|'none';page_count:number};
 function InboxReviewReactView({familyId,pendingId,onNavigate}: {familyId:number;pendingId:number;onNavigate:(url:string)=>void}) {
   const [data,setData]=useState<InboxReviewPayload|null>(null);
   const [patient,setPatient]=useState('');
@@ -544,6 +544,7 @@ function InboxReviewReactView({familyId,pendingId,onNavigate}: {familyId:number;
   const [busy,setBusy]=useState(true);
   const [saving,setSaving]=useState(false);
   const [deleting,setDeleting]=useState(false);
+  const [creatingPatient,setCreatingPatient]=useState(false);
   const [showOcr,setShowOcr]=useState(false);
   const [error,setError]=useState('');
   useEffect(()=>{
@@ -565,6 +566,19 @@ function InboxReviewReactView({familyId,pendingId,onNavigate}: {familyId:number;
       const target=new URL(response.url,window.location.origin);onNavigate(target.pathname+target.search);
     }catch(e){setError(e instanceof Error?e.message:'Ошибка сохранения документа');}
     finally{setSaving(false);}
+  };
+  const createSuggestedPatient=async()=>{
+    if(creatingPatient||!data?.suggested_patient_name)return;
+    const confirmed=window.confirm('Создать карточку пациента «'+data.suggested_patient_name+'» и сохранить этот документ в его истории?');
+    if(!confirmed)return;
+    setCreatingPatient(true);setError('');
+    try{
+      const form=new FormData();form.set('confirm','yes');
+      const response=await fetch('/families/'+familyId+'/inbox/'+pendingId+'/create-patient',{method:'POST',body:form,credentials:'same-origin',redirect:'follow'});
+      if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.detail||'Не удалось создать пациента (HTTP '+response.status+').');}
+      const target=new URL(response.url,window.location.origin);onNavigate(target.pathname+target.search);
+    }catch(e){setError(e instanceof Error?e.message:'Ошибка создания пациента');}
+    finally{setCreatingPatient(false);}
   };
   const remove=async()=>{
     if(deleting||!window.confirm('Удалить этот документ из входящих без возможности восстановления?'))return;
@@ -592,8 +606,9 @@ function InboxReviewReactView({familyId,pendingId,onNavigate}: {familyId:number;
       <form className="card inbox-review-form" onSubmit={assign}>
         <h2>Данные для архива</h2>
         <label htmlFor="inbox-review-patient">Пациент</label><select id="inbox-review-patient" value={patient} onChange={e=>setPatient(e.target.value)} required><option value="" disabled>Выбери пациента</option>{data.patient_options.map(p=><option key={p.name} value={p.name}>{p.name}{p.birth_date?' · рожд. '+p.birth_date:''}</option>)}</select>
-        {data.patient_options.length===0&&<p className="muted">Сначала создай карточку пациента.</p>}
-        <button type="button" className="button-link inbox-review-add-patient" onClick={()=>onNavigate('/families/'+familyId+'/patients/new')}>＋ Добавить пациента</button>
+        {data.patient_options.length===0&&<p className="muted">Сначала создай карточку пациента или подтверди распознанное имя ниже.</p>}
+        {data.suggested_patient_name&&<section className="notice-warning inbox-review-suggested-patient"><strong>Возможно, это новый пациент</strong><p>В документе распознано ФИО: <strong>{data.suggested_patient_name}</strong>.</p><p className="muted">Проверь имя по оригиналу. Карточка появится только после твоего подтверждения.</p><button type="button" onClick={()=>void createSuggestedPatient()} disabled={creatingPatient}>{creatingPatient?'Создаём карточку и сохраняем…':'Да, создать пациента и сохранить документ'}</button></section>}
+        <button type="button" className="button-link inbox-review-add-patient" onClick={()=>onNavigate('/families/'+familyId+'/patients/new')}>＋ Добавить пациента вручную</button>
         <label htmlFor="inbox-review-kind">Тип документа</label><select id="inbox-review-kind" value={kind} onChange={e=>setKind(e.target.value)} required>{data.kinds.map(k=><option key={k.value} value={k.value}>{k.label}</option>)}</select>
         <label htmlFor="inbox-review-title">Название в архиве</label><input id="inbox-review-title" value={title} onChange={e=>setTitle(e.target.value)} required maxLength={180}/>
         <label htmlFor="inbox-review-date">Дата документа (ДД-ММ-ГГГГ)</label><input id="inbox-review-date" value={date} onChange={e=>setDate(e.target.value)} maxLength={10} placeholder="17-03-2025"/>
