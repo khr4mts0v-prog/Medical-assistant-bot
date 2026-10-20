@@ -393,8 +393,56 @@ function PatientEditorReactView({familyId,patient,onNavigate}: {familyId:number;
   </div>;
 }
 
+
+type SettingsPayload = {family_id:number|null;name:string;role:string|null;can_rename:boolean;is_demo:boolean;storage_label:string;disk_connected:boolean;can_connect_disk:boolean;updated:boolean};
+function SettingsReactView({familyId,onNavigate}: {familyId:number|null;onNavigate:(url:string)=>void}) {
+  const [data,setData]=useState<SettingsPayload|null>(null);
+  const [name,setName]=useState('');
+  const [busy,setBusy]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [error,setError]=useState('');
+  useEffect(()=>{
+    let active=true;setBusy(true);setError('');
+    const query=familyId===null?'':'?family_id='+encodeURIComponent(String(familyId));
+    fetch('/api/settings'+query,{credentials:'same-origin',headers:{Accept:'application/json'}})
+      .then(async response=>{const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.detail||'Не удалось загрузить настройки архива');return body as SettingsPayload;})
+      .then(body=>{if(active){setData(body);setName(body.name);}})
+      .catch(e=>{if(active)setError(e instanceof Error?e.message:'Ошибка загрузки настроек');})
+      .finally(()=>{if(active)setBusy(false);});
+    return ()=>{active=false;};
+  },[familyId]);
+  const save=async(event:React.FormEvent<HTMLFormElement>)=>{
+    event.preventDefault();if(!data?.family_id||!data.can_rename)return;
+    setSaving(true);setError('');
+    try{
+      const form=new FormData();form.set('family_id',String(data.family_id));form.set('name',name);
+      const response=await fetch('/settings',{method:'POST',body:form,credentials:'same-origin',redirect:'follow'});
+      if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.detail||'Не удалось сохранить настройки (HTTP '+response.status+').');}
+      const target=new URL(response.url,window.location.origin);
+      onNavigate(target.pathname+target.search);
+    }catch(e){setError(e instanceof Error?e.message:'Ошибка сохранения настроек');}
+    finally{setSaving(false);}
+  };
+  return <div className="settings-react-screen">
+    <header className="settings-react-header"><div><div className="eyebrow">УПРАВЛЕНИЕ АРХИВОМ</div><h1>Настройки архива</h1><p className="muted">Параметры семейного медицинского архива и хранения документов.</p></div><button type="button" className="button-link" onClick={()=>onNavigate(data?.family_id? '/?family_id='+data.family_id:'/')}>← На главную</button></header>
+    {error&&<div className="error-banner" role="alert">{error}</div>}
+    {busy?<div className="skeleton"><div/><div/><div/></div>:data&&!data.family_id?<section className="card"><h2>Семейный архив не создан</h2><p>Сначала создай архив, чтобы настраивать его параметры.</p><button type="button" onClick={()=>onNavigate('/')}>Перейти на главную</button></section>:data&&<>
+      {data.is_demo&&<div className="notice-warning"><strong>Демо-режим.</strong> Временный архив хранится локально и автоматически очищается примерно через 2 часа. Используй только тестовые документы.</div>}
+      {data.updated&&<div className="notice-success" role="status">Название архива сохранено.</div>}
+      <form className="card settings-react-card" onSubmit={save}>
+        <div className="settings-react-card-icon"><Users size={20}/></div><div className="settings-react-card-body"><h2>Название архива</h2><p className="muted">Название, которое отображается в семейной навигации.</p><label htmlFor="settings-family-name">Название архива</label><input id="settings-family-name" name="name" value={name} onChange={e=>setName(e.target.value)} maxLength={80} required disabled={!data.can_rename}/>{data.can_rename?<button type="submit" disabled={saving}>{saving?'Сохраняем…':'Сохранить название'}</button>:<p className="muted">Переименовывать архив может только владелец.</p>}</div>
+      </form>
+      <section className="card settings-react-card"><div className="settings-react-card-icon"><Cloud size={20}/></div><div className="settings-react-card-body"><h2>Хранение документов</h2><p>Текущий режим: <strong>{data.storage_label}</strong></p>
+        {data.is_demo?<p className="muted">Подключение внешнего хранилища отключено для демо-аккаунта.</p>:data.storage_label==='Яндекс Диск'?<><p>{data.disk_connected?'Яндекс Диск подключён.':'Яндекс Диск ещё не подключён.'}</p>{data.can_connect_disk&&<button type="button" onClick={()=>onNavigate('/families/'+data.family_id+'/connect-disk')}>Подключить Яндекс Диск</button>}</>:<p className="muted">Подключение Яндекс Диска добавим отдельным этапом; сейчас используется локальное хранилище.</p>}
+      </div></section>
+      <section className="card settings-react-card"><div className="settings-react-card-icon"><ShieldCheck size={20}/></div><div className="settings-react-card-body"><h2>Резервное копирование</h2><p>Перед загрузкой реальных медицинских документов проверь наличие внешней резервной копии и возможность восстановления.</p></div></section>
+    </>}
+  </div>;
+}
+
 function App() {
   const [path, setPath] = useState(location.pathname + location.search);
+  const settingsRoute = path.split('?')[0] === '/settings';
   const patientRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)(?:\?[^#]*)?$/);
   const patientNewRoute = path.match(/^\/families\/(\d+)\/patients\/new(?:\?[^#]*)?$/);
   const patientEditRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)\/edit(?:\?[^#]*)?$/);
@@ -928,7 +976,7 @@ function App() {
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
+        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
         {loading && screen && <div className="loading-line"/>}
       </section>}
     </main>

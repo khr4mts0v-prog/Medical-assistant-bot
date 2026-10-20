@@ -798,3 +798,20 @@ button.home-react-stat{cursor:pointer}
 .patient-editor-form-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px}
 .patient-editor-form-actions button{min-height:42px}
 @media(max-width:600px){.patient-editor-header{flex-direction:column}.patient-editor-header>.button-link{align-self:flex-start}.patient-editor-form-actions{flex-direction:column;align-items:stretch}.patient-editor-form-actions>*{width:100%;justify-content:center}}
+
+
+/* Native React archive settings */
+.settings-react-screen{display:flex;flex-direction:column;gap:18px;max-width:940px;width:100%;margin:0 auto}
+.settings-react-header{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
+.settings-react-header h1{margin:5px 0 8px;font-size:clamp(26px,4vw,34px);letter-spacing:-.035em}
+.settings-react-header p{margin:0;line-height:1.5}
+.settings-react-card{display:flex;align-items:flex-start;gap:15px}
+.settings-react-card-icon{display:flex;align-items:center;justify-content:center;flex:0 0 44px;width:44px;height:44px;border-radius:13px;background:#eaf2ff;color:#2865bd}
+.settings-react-card-body{display:flex;flex:1;min-width:0;flex-direction:column;align-items:flex-start;gap:9px}
+.settings-react-card-body h2{margin:0;font-size:18px}
+.settings-react-card-body p{margin:0;line-height:1.5}
+.settings-react-card-body label{margin-top:4px;font-size:13px;font-weight:650}
+.settings-react-card-body input{width:100%;max-width:540px;min-height:44px;padding:10px 12px;border:1px solid var(--line,#dbe3ee);border-radius:10px;background:var(--surface,#fff);color:inherit;font:inherit}
+.settings-react-card-body input:disabled{background:#f6f8fb;color:#68778b}
+.settings-react-card-body button{min-height:40px}
+@media(max-width:600px){.settings-react-header{flex-direction:column}.settings-react-header>.button-link{align-self:flex-start}.settings-react-card{gap:10px;padding:14px}.settings-react-card-icon{flex-basis:38px;width:38px;height:38px}.settings-react-card-body{min-width:0}.settings-react-card-body input{max-width:none}.settings-react-card-body button{width:100%}}
