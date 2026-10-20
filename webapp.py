@@ -674,6 +674,28 @@ def unified_search(q:str="",family_id:int|None=None,patient:str="",uid:int=Depen
         b.append(f'<div class="card"><strong>{html.escape(str(title))}</strong><br>Тип: {html.escape(str(d.get("kind") or "не определено"))}<br>Дата: {html.escape(str(d.get("date") or "не указана"))}{link}<p><a href="/families/{fid}/patients/{__import__("urllib.parse",fromlist=["quote"]).quote(chosen["name"],safe="")}">История пациента</a></p><details><summary>Показать OCR-текст</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+html.escape((d.get("text") or "")[:4000])+'</pre></details></div>')
     return page("Поиск по архиву","".join(b))
 
+
+@app.get("/api/settings")
+def archive_settings_api(family_id:int|None=None,updated:int=0,uid:int=Depends(current_user)):
+    """Return only settings metadata for the selected family archive."""
+    fs=tenancy.families_for_user(uid)
+    selected_id=family_id if family_id is not None else (int(fs[0]["id"]) if fs else None)
+    f=tenancy.get_family(selected_id) if selected_id is not None else None
+    if not f:
+        return {"family_id":None,"name":"","role":None,"can_rename":False,"is_demo":bool(is_demo_user(uid)),
+                "storage_label":"локально во временном демо-хранилище" if is_demo_user(uid) else ("Яндекс Диск" if STORAGE_BACKEND=="yandex" else "локально на VPS"),
+                "disk_connected":False,"can_connect_disk":False,"updated":False}
+    fid=int(f["id"])
+    family(fid,uid)
+    role=tenancy.role_for_user(fid,uid)
+    demo=bool(is_demo_user(uid))
+    connected=bool(STORAGE_BACKEND=="yandex" and tenancy.disk_connected(fid) and not demo)
+    storage_label="локально во временном демо-хранилище" if demo else ("Яндекс Диск" if STORAGE_BACKEND=="yandex" else "локально на VPS")
+    return {"family_id":fid,"name":str(f.get("name") or "Семейный архив"),"role":role,"can_rename":role=="owner",
+            "is_demo":demo,"storage_label":storage_label,"disk_connected":connected,
+            "can_connect_disk":not demo and STORAGE_BACKEND=="yandex" and not connected,"updated":bool(updated)}
+
+
 @app.get("/settings",response_class=HTMLResponse)
 def archive_settings(family_id:int|None=None,updated:int=0,uid:int=Depends(current_user)):
     fs=tenancy.families_for_user(uid)
