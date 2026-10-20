@@ -46,7 +46,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .nav-subitem{display:block;width:100%;padding:9px 10px;border:0;border-radius:9px;background:transparent;color:var(--muted);text-align:left;font-size:13px;line-height:1.35;overflow-wrap:anywhere}
 .nav-subitem:hover,.nav-subitem-all{background:var(--blue-soft);color:var(--blue-dark)}
 .nav-subitem-empty{padding:8px 10px;color:var(--muted);font-size:12px}
-.home-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:7px 11px;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--blue-dark);font-size:13px;font-weight:650;white-space:nowrap}
+.home-button{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;min-height:38px;padding:0;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--blue-dark);white-space:nowrap;flex:0 0 38px}
 .home-button-active{background:var(--blue-soft);border-color:transparent}
 
 .sidebar-spacer{flex:1}

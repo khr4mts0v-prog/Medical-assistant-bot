@@ -271,6 +271,7 @@ function DocumentEditorReactView({familyId,documentId,onNavigate}: {familyId:num
   const [ocrText,setOcrText]=useState('');
   const [busy,setBusy]=useState(true);
   const [saving,setSaving]=useState(false);
+  const [deleting,setDeleting]=useState(false);
   const [error,setError]=useState('');
   useEffect(()=>{
     let active=true;
@@ -282,6 +283,22 @@ function DocumentEditorReactView({familyId,documentId,onNavigate}: {familyId:num
       .finally(()=>{if(active)setBusy(false);});
     return ()=>{active=false;};
   },[familyId,documentId]);
+  const deleteDocument=async()=>{
+    if(!data||deleting||saving)return;
+    const documentLabel=data.title.trim()||data.source_name.trim()||'Документ без названия';
+    const patientLabel=data.patient.trim()||'неизвестный пациент';
+    if(!window.confirm('Точно удалить документ «'+documentLabel+'» у пациента «'+patientLabel+'»?\n\nБудут удалены запись документа и его локальные OCR/исходные файлы. Действие нельзя отменить.'))return;
+    setDeleting(true);setError('');
+    try{
+      const form=new FormData();form.set('confirm','yes');
+      const response=await fetch('/families/'+familyId+'/documents/'+documentId+'/delete',{method:'POST',body:form,credentials:'same-origin',redirect:'follow'});
+      if(!response.ok)throw new Error('Удаление не подтверждено сервером (HTTP '+response.status+').');
+      const finalUrl=new URL(response.url,location.origin);
+      if(finalUrl.pathname.indexOf('/families/'+familyId+'/patients/')!==0||!finalUrl.searchParams.has('deleted'))throw new Error('Сервер не подтвердил удаление. Документ считается не удалённым.');
+      onNavigate(finalUrl.pathname+finalUrl.search);
+    }catch(e){setError(e instanceof Error?e.message:'Не удалось удалить документ');}
+    finally{setDeleting(false);}
+  };
   const save=async(event:React.FormEvent<HTMLFormElement>)=>{
     event.preventDefault();
     if(!data)return;
@@ -311,7 +328,7 @@ function DocumentEditorReactView({familyId,documentId,onNavigate}: {familyId:num
         <label>Дата документа (ДД-ММ-ГГГГ)<input value={date} onChange={e=>setDate(e.target.value)} maxLength={10} placeholder="17-03-2025" inputMode="numeric"/></label>
         <label>Распознанный текст (OCR)<textarea value={ocrText} onChange={e=>setOcrText(e.target.value)} maxLength={100000} rows={14}/></label>
         <p className="muted">OCR-текст доступен только в авторизованной карточке документа. Сохранение выполняется существующим backend-обработчиком.</p>
-        <div className="document-editor-actions"><button type="submit" disabled={saving}>{saving?'Сохраняем…':'Сохранить изменения'}</button><button type="button" className="secondary" onClick={()=>onNavigate(data?'/families/'+familyId+'/patients/'+encodeURIComponent(data.patient):'/')}>Отмена</button></div>
+         <div className="document-editor-actions"><button type="submit" disabled={saving||deleting}>{saving?"Сохраняем…":"Сохранить изменения"}</button><button type="button" className="secondary" disabled={saving||deleting} onClick={()=>onNavigate(data?"/families/"+familyId+"/patients/"+encodeURIComponent(data.patient):"/")}>Отмена</button><button type="button" className="danger" disabled={saving||deleting} onClick={deleteDocument}>{deleting?"Удаляем…":"Удалить документ"}</button></div>
       </section>
     </form>}
   </div>;
@@ -1260,7 +1277,7 @@ function App() {
     <main className="main-area">
       <header className="topbar">
         <button className="icon-button menu-button" onClick={() => setMenuOpen(true)} aria-label="Открыть меню"><Menu size={23}/></button>
-        {!isHome && <button className="home-button" onClick={() => navigate(HOME)} aria-label="На главную" title="Домой"><Home size={18}/>Домой</button>}
+        {!isHome && <button className="home-button" onClick={() => navigate(HOME)} aria-label="На главную" title="Домой"><Home size={18}/></button>}
         <div className="topbar-title">{patientRouteData ? patientRouteData.patient : 'Семейный медицинский архив'}</div>
       </header>
       {settingsOpen ? <section className="settings-view">
