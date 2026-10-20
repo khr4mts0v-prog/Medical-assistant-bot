@@ -557,6 +557,7 @@ function App() {
   const [path, setPath] = useState(location.pathname + location.search);
   const settingsRoute = path.split('?')[0] === '/settings';
   const searchRoute = path.split('?')[0] === '/search';
+  const assistantRoute = path.split('?')[0] === '/assistant';
   const patientRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)(?:\?[^#]*)?$/);
   const patientNewRoute = path.match(/^\/families\/(\d+)\/patients\/new(?:\?[^#]*)?$/);
   const patientEditRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)\/edit(?:\?[^#]*)?$/);
@@ -590,6 +591,18 @@ function App() {
   const [toast, setToast] = useState('');
   const contentRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    if (!assistantRoute) return;
+    const params = new URLSearchParams(path.split('?')[1] || '');
+    const familyId = Number(params.get('family_id') || 0);
+    const patient = (params.get('patient') || '').trim();
+    setPatientAssistantScope(patient && familyId > 0 ? {familyId, patient} : null);
+    setDocumentSelectionActive(false);
+    setSelectedDocumentIds([]);
+    setSmartConversation([]); setSmartQuery(''); setSmartResult(null); setSmartError(''); setSmartConsent(false);
+    setSmartSearchOpen(true);
+  }, [assistantRoute, path]);
 
   useEffect(() => {
     let active = true;
@@ -907,13 +920,13 @@ function App() {
 
   return <div className="app-frame">
     {toast && <div className="app-toast" role="status" aria-live="polite"><span className="app-toast-check">✓</span><span>{toast}</span></div>}
-    {smartSearchOpen && <div className="modal-scrim smart-search-scrim" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !smartBusy) setSmartSearchOpen(false); }}>
-      <section className="app-modal smart-search-modal smart-chat-modal" role="dialog" aria-modal="true" aria-label="ИИ-чат по медицинскому архиву">
+    {smartSearchOpen && <div className={'modal-scrim smart-search-scrim' + (assistantRoute ? ' assistant-route-scrim' : '')} role="presentation" onMouseDown={event => { if (!assistantRoute && event.target === event.currentTarget && !smartBusy) setSmartSearchOpen(false); }}>
+      <section className={'app-modal smart-search-modal smart-chat-modal' + (assistantRoute ? ' assistant-route-chat' : '')} role="dialog" aria-modal="true" aria-label="ИИ-чат по медицинскому архиву">
         <header className="app-modal-header">
           <div><span className="modal-eyebrow">{patientAssistantScope ? 'КАРТОЧКА ПАЦИЕНТА' : 'СЕМЕЙНЫЙ АРХИВ'}</span><h2>{patientAssistantScope ? 'ИИ по пациенту: ' + patientAssistantScope.patient : 'ИИ-ассистент'}</h2><p className="smart-search-subtitle">{patientAssistantScope ? (documentSelectionActive ? 'Режим выбора: анализирую только отмеченные документы и память этого пациента.' : 'Поиск и анализ ограничены этим пациентом; по умолчанию ИИ сам подберёт релевантные документы и учтёт его память.') : 'Задавай вопросы обычным языком. Сначала ответ, ниже — документы, на которых он основан.'}</p></div>
           <div className="smart-chat-head-actions">
             <button type="button" className="icon-button" aria-label="Новый диалог" title="Новый диалог" disabled={smartBusy} onClick={() => {setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);}}><Plus size={19}/></button>
-            <button type="button" className="icon-button" aria-label="Закрыть чат" onClick={() => setSmartSearchOpen(false)}><X size={20}/></button>
+            <button type="button" className="icon-button" aria-label={assistantRoute ? 'Вернуться в архив' : 'Закрыть чат'} onClick={() => { if (assistantRoute) { void navigate('/'); setSmartSearchOpen(false); } else setSmartSearchOpen(false); }}><X size={20}/></button>
           </div>
         </header>
         <div className="smart-search-body smart-chat-body">
@@ -1089,7 +1102,7 @@ function App() {
           <p className="muted">Согласие сохраняется для учётной записи и действует для следующих вопросов, пока вы его не отзовёте. Настройку можно изменить здесь в любое время.</p>
         </div></article>
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
-      </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')}>
+      </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')} style={assistantRoute ? {display:'none'} : undefined}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
         {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : searchRoute ? <SearchReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
         {loading && screen && <div className="loading-line"/>}
