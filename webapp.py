@@ -12,7 +12,7 @@ from local_storage import save_file as save_local_file
 from ocr import ocr_file
 from AIAnalise import analyze_document, extract_keywords, classify_with_ai
 from utils import format_filename, normalize_extension, parse_date_from_text, safe_name
-from document_metadata import extract_registered_patient, extract_patient_birth_date, extract_patient_candidate
+from document_metadata import extract_registered_patient, extract_patient_birth_date, extract_patient_candidate, extract_document_date
 
 app=FastAPI(title="Medical Archive", docs_url=None, redoc_url=None)
 from react_ui import install_react_ui
