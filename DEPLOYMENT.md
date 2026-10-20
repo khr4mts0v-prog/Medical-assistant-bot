@@ -32,7 +32,7 @@ The preflight requires:
 - The database encrypts OCR text, keywords, analysis and pending-file bytes with Fernet. **Local originals and OCR sidecars are plaintext files** with restrictive file permissions; filesystem encryption is still required for production use. Restrict VPS and administrator access and use encrypted backups.
 - Do not treat this MVP as publicly production-ready until the full security review and integration-test gates are complete. Web access currently uses a configured owner account rather than per-person web accounts. AI and upload endpoints have process-local rate limits, which must be complemented by reverse-proxy limits and are not a substitute for a full security review.
 - The browser login uses a signed, HttpOnly, Secure, SameSite=Lax cookie with a bounded lifetime. Legacy HTTP Basic clients remain supported. The web login still represents the configured web owner account; family memberships are stored in the existing family_members table using a negative numeric principal ID, separate from positive Telegram IDs.
-- AI analysis sends selected OCR text to Hugging Face after consent. Verify provider billing and privacy terms before enabling.
+- The assistant uses the configured external provider (`AI_PROVIDER=polza` or `huggingface`). Only send questions and relevant medical fragments after explicit consent; verify the selected provider's retention, privacy, data-processing terms, and billing before enabling it.
 
 ## Tests
 
