@@ -26,7 +26,7 @@ class ProviderHttpErrorTests(unittest.TestCase):
             patch.object(ai_provider.requests, "post", return_value=response),
             patch.object(ai_provider.ai_trace_log, "emit") as emit,
         ):
-            with self.assertRaisesRegex(ai_provider.requests.HTTPError, r"HTTP 429 \\(polza/test/model\\)"):
+            with self.assertRaisesRegex(ai_provider.requests.HTTPError, r"HTTP 429 \(polza/test/model\)"):
                 ai_provider.chat_completion([{"role": "user", "content": "hello"}])
 
         emit.assert_called_once()
