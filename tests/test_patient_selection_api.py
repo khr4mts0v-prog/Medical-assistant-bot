@@ -98,8 +98,9 @@ class TestPatientSelectionApi:
         assert response.json() == {"ok": True, "status": "rejected"}
         reject.assert_called_once_with(1, "Олег", 101)
 
-    def test_unknown_person_lookup_is_answered_locally_without_calling_model(self):
-        with patch("assistant_routes.chat_completion") as completion, \
+    def test_unmatched_person_name_is_resolved_against_local_candidates_without_document_retrieval(self):
+        not_found = '{"decision":"not_found","candidate_indices":[],"confidence":"high"}'
+        with patch("assistant_routes.chat_completion", return_value=not_found) as completion, \
              patch("assistant_routes._planner") as planner, \
              patch("assistant_routes._retrieve") as retrieve:
             response = self.client.post("/api/intelligent-search", json={
@@ -108,10 +109,12 @@ class TestPatientSelectionApi:
             })
         assert response.status_code == 200, response.text
         payload = response.json()
+        assert payload["mode"] == "patient_clarification"
         assert payload["documents"] == []
-        assert "не могу подтверждать или опровергать" in payload["answer"]
+        assert "Не удалось надёжно сопоставить" in payload["answer"]
         assert "Мария — член семьи" not in payload["answer"]
-        completion.assert_not_called()
+        assert [choice["name"] for choice in payload["patient_choices"]] == ["Олег", "Саша"]
+        completion.assert_called_once()
         planner.assert_not_called()
         retrieve.assert_not_called()
 
