@@ -238,6 +238,36 @@ class AssistantChatGapTests(unittest.TestCase):
         self.assertIn("Что по крови у Саши?", history[0])
         self.assertNotIn("гемоглобин 110", history[0])
 
+    def test_conversation_history_requires_matching_family_and_patient_scope(self):
+        raw = [
+            {"family_id": 1, "patient_scope": "Саша", "question": "Вопрос Саши", "answer": "Ответ Саши"},
+            {"family_id": 1, "patient_scope": "Олег", "question": "Вопрос Олега", "answer": "Ответ Олега"},
+            {"family_id": 2, "patient_scope": "Саша", "question": "Чужая семья", "answer": "Чужой ответ"},
+            {"family_id": 1, "patient_scope": None, "question": "Семейный чат", "answer": "Общий ответ"},
+        ]
+        self.assertEqual(
+            assistant._normalize_conversation(raw, 1, "Саша"),
+            [{"question": "Вопрос Саши", "answer": "Ответ Саши"}],
+        )
+        self.assertEqual(
+            assistant._normalize_conversation(raw, 1, None),
+            [{"question": "Семейный чат", "answer": "Общий ответ"}],
+        )
+
+    def test_conversation_history_rejects_malformed_untagged_and_oversized_entries(self):
+        raw = [
+            {"question": "Без family ID", "answer": "Не принимать"},
+            {"family_id": "not-an-id", "patient_scope": None, "question": "Некорректный ID"},
+            {"family_id": 1, "patient_scope": None, "question": "   ", "answer": "Пустой вопрос"},
+        ] + [
+            {"family_id": 1, "patient_scope": None, "question": f"Вопрос {i}", "answer": "A" * 1000}
+            for i in range(7)
+        ]
+        normalized = assistant._normalize_conversation(raw, 1, None)
+        self.assertEqual(len(normalized), 5)
+        self.assertEqual([turn["question"] for turn in normalized], [f"Вопрос {i}" for i in range(2, 7)])
+        self.assertEqual(len(normalized[-1]["answer"]), 900)
+
     def test_same_patient_followup_keeps_dialogue_answer_as_non_evidence(self):
         history = assistant._history_for_current_patient(
             {"question": "Что по крови у Саши?", "answer": "Гемоглобин 110."},
