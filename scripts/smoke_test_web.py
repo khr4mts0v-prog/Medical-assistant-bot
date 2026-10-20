@@ -65,6 +65,10 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
+def demo_login_enabled(env):
+    return bool(env.get("DEMO_USERNAME", "").strip() and env.get("DEMO_PASSWORD", ""))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
@@ -80,7 +84,7 @@ def main():
 
     demo_username = env.get("DEMO_USERNAME", "").strip()
     demo_password = env.get("DEMO_PASSWORD", "")
-    demo_enabled = bool(demo_username and demo_password)
+    demo_enabled = demo_login_enabled(env)
 
     if demo_enabled:
         demo_auth = (demo_username, demo_password)
