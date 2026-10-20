@@ -240,6 +240,62 @@ function InboxReactView({familyId,onNavigate}: {familyId:number;onNavigate:(url:
   </div>;
 }
 
+
+type DocumentEditorPayload = {family_id:number;document_id:number;patient:string;source_name:string;kind:string;title:string;date:string;ocr_text:string;kinds:string[];preview_url:string|null};
+function DocumentEditorReactView({familyId,documentId,onNavigate}: {familyId:number;documentId:number;onNavigate:(url:string)=>void}) {
+  const [data,setData]=useState<DocumentEditorPayload|null>(null);
+  const [kind,setKind]=useState('');
+  const [title,setTitle]=useState('');
+  const [date,setDate]=useState('');
+  const [ocrText,setOcrText]=useState('');
+  const [busy,setBusy]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [error,setError]=useState('');
+  useEffect(()=>{
+    let active=true;
+    setBusy(true);setError('');
+    fetch('/api/families/'+familyId+'/documents/'+documentId+'/edit',{credentials:'same-origin',headers:{Accept:'application/json'}})
+      .then(async response=>{const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.detail||'Не удалось загрузить документ');return body as DocumentEditorPayload;})
+      .then(body=>{if(active){setData(body);setKind(body.kind);setTitle(body.title);setDate(body.date);setOcrText(body.ocr_text);}})
+      .catch(e=>{if(active)setError(e instanceof Error?e.message:'Ошибка загрузки документа');})
+      .finally(()=>{if(active)setBusy(false);});
+    return ()=>{active=false;};
+  },[familyId,documentId]);
+  const save=async(event:React.FormEvent<HTMLFormElement>)=>{
+    event.preventDefault();
+    if(!data)return;
+    setSaving(true);setError('');
+    try{
+      const form=new FormData();
+      form.set('kind',kind);form.set('title',title);form.set('date',date);form.set('ocr_text',ocrText);
+      const response=await fetch('/families/'+familyId+'/documents/'+documentId+'/edit',{method:'POST',body:form,credentials:'same-origin',redirect:'follow'});
+      if(!response.ok)throw new Error('Сохранение не подтверждено сервером (HTTP '+response.status+'). Проверь дату и повтори попытку.');
+      const finalUrl=new URL(response.url,location.origin);
+      if(finalUrl.pathname.indexOf('/families/'+familyId+'/patients/')!==0)throw new Error('Сервер не подтвердил сохранение. Данные не считаются сохранёнными.');
+      onNavigate(finalUrl.pathname+finalUrl.search);
+    }catch(e){setError(e instanceof Error?e.message:'Не удалось сохранить изменения');}
+    finally{setSaving(false);}
+  };
+  return <div className="document-editor-react">
+    <button type="button" className="inbox-back-link" onClick={()=>onNavigate(data?'/families/'+familyId+'/patients/'+encodeURIComponent(data.patient):'/?family_id='+familyId)}>← Назад к документам</button>
+    <div className="document-editor-heading"><div className="eyebrow">МЕДИЦИНСКИЙ АРХИВ</div><h1>Редактирование документа</h1><p>Исправления метаданных и OCR влияют на поиск и последующий анализ. Исходный файл не изменяется.</p></div>
+    {error&&<div className="error-banner" role="alert">{error}<button type="button" onClick={()=>onNavigate(location.pathname+location.search)}>Повторить загрузку</button></div>}
+    {busy&&<div className="skeleton"><div/><div/><div/></div>}
+    {!busy&&data&&<form className="document-editor-form" onSubmit={save}>
+      <section className="card document-editor-source"><div><span className="muted">Пациент</span><strong>{data.patient}</strong></div><div><span className="muted">Исходный файл</span><strong>{data.source_name}</strong></div></section>
+      {data.preview_url&&<section className="card document-editor-preview"><h2>Предпросмотр оригинала</h2>{data.preview_url.endsWith('/original')?<iframe src={data.preview_url+'#toolbar=1&navpanes=0&scrollbar=1'} title="Оригинал PDF" loading="lazy"/>:<a href={data.preview_url} target="_blank" rel="noopener noreferrer"><img src={data.preview_url} alt="Предпросмотр оригинала"/></a>}</section>}
+      <section className="card document-editor-fields">
+        <label>Тип документа<select value={kind} onChange={e=>setKind(e.target.value)} required>{data.kinds.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+        <label>Название в архиве<input value={title} onChange={e=>setTitle(e.target.value)} maxLength={180} required/></label>
+        <label>Дата документа (ДД-ММ-ГГГГ)<input value={date} onChange={e=>setDate(e.target.value)} maxLength={10} placeholder="17-03-2025" inputMode="numeric"/></label>
+        <label>Распознанный текст (OCR)<textarea value={ocrText} onChange={e=>setOcrText(e.target.value)} maxLength={100000} rows={14}/></label>
+        <p className="muted">OCR-текст доступен только в авторизованной карточке документа. Сохранение выполняется существующим backend-обработчиком.</p>
+        <div className="document-editor-actions"><button type="submit" disabled={saving}>{saving?'Сохраняем…':'Сохранить изменения'}</button><button type="button" className="secondary" onClick={()=>onNavigate(data?'/families/'+familyId+'/patients/'+encodeURIComponent(data.patient):'/')}>Отмена</button></div>
+      </section>
+    </form>}
+  </div>;
+}
+
 type PatientDocument = { id:number; title:string; kind:string; date:string; metadata:string; finding:string; review_required:boolean; url:string };
 type PatientPayload = { patient:string; family_id:number; query:string; view:string; document_count:number; documents:PatientDocument[]; capabilities:{upload:boolean;patient_memory:boolean;document_selection:boolean;assistant:boolean} };
 
@@ -286,6 +342,7 @@ function App() {
   const [path, setPath] = useState(location.pathname + location.search);
   const patientRoute = path.match(/^\/families\/(\d+)\/patients\/([^/?]+)(?:\?[^#]*)?$/);
   const inboxRoute = path.match(/^\/families\/(\d+)\/inbox(?:\?[^#]*)?$/);
+  const documentEditRoute = path.match(/^\/families\/(\d+)\/documents\/(\d+)\/edit(?:\?[^#]*)?$/);
   const patientRouteData = patientRoute ? {familyId:Number(patientRoute[1]), patient:decodeURIComponent(patientRoute[2])} : null;
   const [screen, setScreen] = useState<Screen | null>(null);
   const [loading, setLoading] = useState(true);
@@ -814,7 +871,7 @@ function App() {
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
+        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
         {loading && screen && <div className="loading-line"/>}
       </section>}
     </main>
