@@ -101,6 +101,93 @@ async function fetchScreen(url: string): Promise<Screen> {
 }
 
 
+type HomePatient = {name:string;short_name:string;document_count:number;url:string};
+type HomeFamily = {id:number;name:string;selected:boolean};
+type HomePayload = {families:HomeFamily[];selected_family_id:number|null;family_name:string;patients:HomePatient[];pending_count:number;storage_label:string;disk_connected:boolean;is_demo:boolean;upload_limit_mb:number};
+
+function HomeReactView({familyId,onNavigate}: {familyId:number|null;onNavigate:(url:string)=>void}) {
+  const [payload,setPayload] = useState<HomePayload|null>(null);
+  const [busy,setBusy] = useState(true);
+  const [error,setError] = useState('');
+  const [consent,setConsent] = useState(false);
+  const [uploadBusy,setUploadBusy] = useState(false);
+  const [uploadStatus,setUploadStatus] = useState('');
+  const [refreshKey,setRefreshKey] = useState(0);
+  const [familyName,setFamilyName] = useState('');
+  const [createFamilyOpen,setCreateFamilyOpen] = useState(false);
+  const [createBusy,setCreateBusy] = useState(false);
+  const [createError,setCreateError] = useState('');
+  useEffect(() => {
+    let active=true;
+    setBusy(true); setError('');
+    const query=familyId===null?'':'?family_id='+encodeURIComponent(String(familyId));
+    fetch('/api/home'+query,{credentials:'same-origin',headers:{Accept:'application/json'}})
+      .then(async response=>{const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.detail||'Не удалось загрузить семейный архив');return data as HomePayload;})
+      .then(data=>{if(active)setPayload(data);})
+      .catch(e=>{if(active)setError(e instanceof Error?e.message:'Ошибка загрузки архива');})
+      .finally(()=>{if(active)setBusy(false);});
+    return ()=>{active=false;};
+  },[familyId,refreshKey]);
+  const uploadFiles=async (files:FileList|null) => {
+    if(!files?.length || !payload?.selected_family_id)return;
+    const chosen=Array.from(files);
+    setUploadBusy(true);setUploadStatus('Передаём файлы серверу…');
+    try {
+      const data=new FormData();
+      data.append('family_id',String(payload.selected_family_id));
+      data.append('ai_consent',consent?'true':'false');
+      chosen.forEach(file=>data.append('files',file,file.name));
+      const response=await fetch('/upload',{method:'POST',body:data,credentials:'same-origin'});
+      const body=await response.text();
+      if(!response.ok)throw new Error('Ошибка загрузки (HTTP '+response.status+'). '+body.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().slice(0,180));
+      const lower=body.toLowerCase();
+      setUploadStatus(lower.includes('добавлен во входящие')?'Файлы переданы; часть документов ожидает ручной проверки.':'Файлы переданы серверу. Проверь входящие и карточки пациентов.');
+      window.setTimeout(()=>setRefreshKey(v=>v+1),1200);
+    } catch(e) {setUploadStatus(e instanceof Error?e.message:'Не удалось загрузить файлы');}
+    finally {setUploadBusy(false);}
+  };
+  const createFamily=async (event:React.FormEvent<HTMLFormElement>)=>{
+    event.preventDefault();setCreateBusy(true);setCreateError('');
+    try {
+      const form=new FormData();form.set('name',familyName);
+      const response=await fetch('/families',{method:'POST',body:form,credentials:'same-origin',redirect:'follow'});
+      if(!response.ok)throw new Error('Не удалось создать архив (HTTP '+response.status+').');
+      setCreateFamilyOpen(false);setFamilyName('');setRefreshKey(v=>v+1);
+      if(response.url){const url=new URL(response.url);if(url.pathname==='/'&&url.search)onNavigate(url.pathname+url.search);}
+    } catch(e){setCreateError(e instanceof Error?e.message:'Ошибка создания архива');}
+    finally{setCreateBusy(false);}
+  };
+  return <div className="home-react-screen">
+    <section className="home-react-hero"><div><div className="eyebrow">СЕМЕЙНЫЙ МЕДИЦИНСКИЙ АРХИВ</div><h1>Всё важное о здоровье — в одном месте</h1><p>Документы, обследования и история семьи с быстрым поиском и помощью ИИ.</p></div><div className="home-react-hero-icon"><HeartPulse size={34}/></div></section>
+    {payload?.is_demo && <div className="notice-warning"><strong>Демо-режим.</strong> Используй только тестовые документы. Данные демо-архива автоматически удаляются после периода бездействия.</div>}
+    {error && <div className="error-banner" role="alert">{error}<button type="button" onClick={()=>setRefreshKey(v=>v+1)}>Повторить</button></div>}
+    {busy && <div className="skeleton"><div/><div/><div/></div>}
+    {!busy && payload && <>
+      <section className="home-react-section">
+        <div className="home-react-section-heading"><div><div className="eyebrow">ПРОСТРАНСТВО ДАННЫХ</div><h2>Семейные архивы</h2></div><button type="button" className="button-link" onClick={()=>setCreateFamilyOpen(v=>!v)}><Plus size={16}/> Создать архив</button></div>
+        <div className="home-react-family-list">{payload.families.map(family=><button type="button" key={family.id} className={'home-react-family '+(family.id===payload.selected_family_id?'selected':'')} onClick={()=>onNavigate('/?family_id='+family.id)}><span className="home-react-family-icon"><Users size={19}/></span><span className="home-react-family-copy"><strong>{family.name}</strong><small>{family.id===payload.selected_family_id?'Открыт сейчас':'Открыть архив'}</small></span>{family.id===payload.selected_family_id&&<span className="home-react-family-current">Выбран</span>}</button>)}
+          {payload.families.length===0 && <div className="card"><p>Пока нет семейных архивов. Создай первый, чтобы начать.</p></div>}
+        </div>
+        {createFamilyOpen && <form className="card home-react-create-family" onSubmit={createFamily}><label htmlFor="home-family-name">Название нового архива</label><div className="row"><input id="home-family-name" value={familyName} onChange={e=>setFamilyName(e.target.value)} maxLength={80} required placeholder="Например, Семья"/><button type="submit" disabled={createBusy}>{createBusy?'Создаём…':'Создать'}</button></div>{createError&&<p className="error-text" role="alert">{createError}</p>}</form>}
+      </section>
+      {payload.selected_family_id!==null && <section className="home-react-section">
+        <div className="home-react-section-heading"><div><div className="eyebrow">АРХИВ</div><h2>{payload.family_name}</h2><p className="muted">Хранение документов: {payload.storage_label}{payload.disk_connected?' · диск подключён':''}</p></div></div>
+        <div className="home-react-stats"><button type="button" onClick={()=>onNavigate('/families/'+payload.selected_family_id+'/inbox')} className="home-react-stat"><ClipboardCheck size={19}/><span><strong>{payload.pending_count}</strong><small>Входящие на проверку</small></span></button><div className="home-react-stat"><Users size={19}/><span><strong>{payload.patients.length}</strong><small>Пациентов</small></span></div></div>
+        {payload.pending_count>0&&<button type="button" className="home-react-inbox" onClick={()=>onNavigate('/families/'+payload.selected_family_id+'/inbox')}><ClipboardCheck size={18}/> Проверить входящие документы <ChevronRight size={17}/></button>}
+        <div className="home-react-section-heading home-react-patients-heading"><div><h2>Члены семьи</h2><p className="muted">Выбери пациента, чтобы открыть документы и медицинскую историю.</p></div><button type="button" className="button-link" onClick={()=>onNavigate('/families/'+payload.selected_family_id+'/patients/new')}><Plus size={16}/> Добавить</button></div>
+        <div className="home-react-patient-grid">{payload.patients.map(patient=><button type="button" className="home-react-patient" key={patient.name} onClick={()=>onNavigate(patient.url)}><span className="patient-avatar">{(patient.short_name||'П').slice(0,1).toUpperCase()}</span><span className="home-react-patient-copy"><strong>{patient.short_name}</strong><small>{patient.document_count} документов</small></span><ChevronRight size={17}/></button>)}
+          {payload.patients.length===0&&<div className="card home-react-empty"><Users size={24}/><strong>Пока нет карточек пациентов</strong><p>Добавь члена семьи, чтобы хранить его документы отдельно.</p><button type="button" onClick={()=>onNavigate('/families/'+payload.selected_family_id+'/patients/new')}>Добавить первого пациента</button></div>}
+        </div>
+      </section>}
+      <section className="home-react-section">
+        <div className="home-react-section-heading"><div><div className="eyebrow">ЗАГРУЗКА</div><h2>Добавить документы</h2><p className="muted">PDF, фотографии и сканы · до {payload.upload_limit_mb} МБ на файл.</p></div></div>
+        <div className="card home-react-upload"><label className="home-react-consent"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label><label className={'home-react-file-picker '+(uploadBusy?'disabled':'')}><FilePlus2 size={21}/><span>{uploadBusy?'Обработка загрузки…':'Выбрать документы'}</span><input type="file" accept="image/*,application/pdf,.tif,.tiff,.bmp" multiple disabled={uploadBusy||payload.families.length===0} onChange={e=>{void uploadFiles(e.target.files);e.currentTarget.value='';}}/></label>{uploadStatus&&<p className="home-react-upload-status" role="status">{uploadStatus}</p>}</div>
+      </section>
+      <p className="home-react-safety"><ShieldCheck size={16}/> Перед загрузкой реальных медицинских документов проверь резервное копирование и права доступа.</p>
+    </>}
+  </div>;
+}
+
 type PatientDocument = { id:number; title:string; kind:string; date:string; metadata:string; finding:string; review_required:boolean; url:string };
 type PatientPayload = { patient:string; family_id:number; query:string; view:string; document_count:number; documents:PatientDocument[]; capabilities:{upload:boolean;patient_memory:boolean;document_selection:boolean;assistant:boolean} };
 
@@ -674,7 +761,7 @@ function App() {
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
+        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
         {loading && screen && <div className="loading-line"/>}
       </section>}
     </main>
