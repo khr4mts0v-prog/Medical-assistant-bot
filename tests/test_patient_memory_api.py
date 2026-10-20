@@ -27,7 +27,9 @@ class PatientMemoryProposalApiTests(unittest.TestCase):
         with (
             patch.object(assistant_routes.tenancy, "families_for_user", return_value=[{"id": 1}]),
             patch.object(assistant_routes.db, "patients", return_value=["Саша"]),
-            patch.object(webapp, "family"),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(assistant_routes.tenancy, "role_for_user", return_value="owner"),
+            patch.object(assistant_routes.tenancy, "get_family", return_value={"id": 1}),
             patch.object(assistant_routes.patient_memory, "accept_proposal", return_value=77) as accept,
         ):
             response = self.client.post("/api/patient-memory/proposal-action", json={
@@ -52,7 +54,9 @@ class PatientMemoryProposalApiTests(unittest.TestCase):
         with (
             patch.object(assistant_routes.tenancy, "families_for_user", return_value=[{"id": 1}]),
             patch.object(assistant_routes.db, "patients", return_value=["Маша"]),
-            patch.object(webapp, "family"),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(assistant_routes.tenancy, "role_for_user", return_value="owner"),
+            patch.object(assistant_routes.tenancy, "get_family", return_value={"id": 1}),
             patch.object(assistant_routes.patient_memory, "accept_proposal") as accept,
         ):
             response = self.client.post("/api/patient-memory/proposal-action", json={
@@ -65,7 +69,9 @@ class PatientMemoryProposalApiTests(unittest.TestCase):
         with (
             patch.object(assistant_routes.tenancy, "families_for_user", return_value=[{"id": 1}]),
             patch.object(assistant_routes.db, "patients", return_value=["Саша"]),
-            patch.object(webapp, "family"),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(assistant_routes.tenancy, "role_for_user", return_value="owner"),
+            patch.object(assistant_routes.tenancy, "get_family", return_value={"id": 1}),
             patch.object(assistant_routes.patient_memory, "reject_proposal") as reject,
             patch.object(assistant_routes.patient_memory, "accept_proposal") as accept,
         ):
