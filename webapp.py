@@ -1850,10 +1850,13 @@ def create_patient_from_pending_document(fid:int,pending_id:int,confirm:str=Form
     candidate=" ".join(str((d.get("analysis") or {}).get("suggested_patient_name") or "").split()).strip()
     if not candidate:
         raise HTTPException(400,"В документе не распознано достаточно надёжное ФИО. Добавьте пациента вручную.")
-    existing={str(name).casefold() for name in db.patients(fid)}
-    # A previous attempt may have created the patient card before assignment failed.
-    # Reuse that exact card on retry so the pending document can still be filed.
-    if candidate.casefold() not in existing:
+    existing_names={str(name).casefold():str(name) for name in db.patients(fid)}
+    # Reuse the canonical spelling of an existing card on retry. Otherwise a
+    # case-only OCR variation could pass the duplicate check but fail exact
+    # patient validation inside assign_pending_document.
+    if candidate.casefold() in existing_names:
+        candidate=existing_names[candidate.casefold()]
+    else:
         db.add_patient(fid,candidate)
     analysis=d.get("analysis") or {}
     kind=str(analysis.get("primary_type") or "не определено")
