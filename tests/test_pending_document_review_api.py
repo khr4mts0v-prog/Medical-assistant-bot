@@ -139,5 +139,36 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
         )
 
 
+    def test_retry_uses_existing_patient_canonical_spelling(self):
+        from fastapi.responses import RedirectResponse
+        canonical = "Иванова Мария Сергеевна"
+        candidate = "ИВАНОВА МАРИЯ СЕРГЕЕВНА"
+        with (
+            patch.object(webapp, "family"),
+            patch.object(webapp.db, "get_pending_doc", return_value={
+                "id": 12, "name": "discharge.pdf", "text": "Дата заключения: 12.05.2026",
+                "analysis": {"suggested_patient_name": candidate,
+                             "primary_type": "выписной эпикриз", "display_title": "Выписка"},
+            }),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(webapp.db, "patients", return_value=[canonical]),
+            patch.object(webapp.db, "add_patient") as add_patient,
+            patch.object(webapp, "extract_document_date", return_value="12-05-2026"),
+            patch.object(webapp, "assign_pending_document", return_value=RedirectResponse(
+                "/families/1/patients/Иванова Мария Сергеевна", status_code=303
+            )) as assign,
+        ):
+            response = self.client.post(
+                "/families/1/inbox/12/create-patient",
+                data={"confirm": "yes"},
+                follow_redirects=False,
+            )
+        self.assertEqual(response.status_code, 303)
+        add_patient.assert_not_called()
+        assign.assert_called_once_with(
+            1, 12, canonical, "выписной эпикриз", "Выписка", "12-05-2026", 123
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
