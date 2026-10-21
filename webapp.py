@@ -1842,15 +1842,16 @@ def create_patient_from_pending_document(fid:int,pending_id:int,confirm:str=Form
         raise HTTPException(400,"Создание пациента не подтверждено")
     if is_demo_user(uid):
         tenancy.refresh_demo_expiry(fid)
-        if len(db.patients(fid)) >= DEMO_MAX_PATIENTS:
-            raise HTTPException(413, f"В демо можно создать не более {DEMO_MAX_PATIENTS} карточек пациентов")
     d=db.get_pending_doc(fid,pending_id)
     if not d:
         raise HTTPException(404,"Документ не найден во входящих")
     candidate=" ".join(str((d.get("analysis") or {}).get("suggested_patient_name") or "").split()).strip()
     if not candidate:
         raise HTTPException(400,"В документе не распознано достаточно надёжное ФИО. Добавьте пациента вручную.")
-    existing_names={str(name).casefold():str(name) for name in db.patients(fid)}
+    patient_names=db.patients(fid)
+    existing_names={str(name).casefold():str(name) for name in patient_names}
+    if is_demo_user(uid) and candidate.casefold() not in existing_names and len(patient_names) >= DEMO_MAX_PATIENTS:
+        raise HTTPException(413, f"В демо можно создать не более {DEMO_MAX_PATIENTS} карточек пациентов")
     # Reuse the canonical spelling of an existing card on retry. Otherwise a
     # case-only OCR variation could pass the duplicate check but fail exact
     # patient validation inside assign_pending_document.
