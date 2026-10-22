@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 TMP = tempfile.TemporaryDirectory()
 os.environ["LOCAL_STORAGE_PATH"] = os.path.join(TMP.name, "documents")
