@@ -41,6 +41,14 @@ class PatientDialogueRegressionTests(unittest.TestCase):
         # A request that already specifies a medical topic should search it directly.
         self.assertFalse(assistant_routes._looks_like_patient_topic_ellipsis("А теперь по Саше по крови", ["Саша"]))
 
+    def test_duplicate_custom_alias_is_ambiguous_without_distinguishing_name(self):
+        records = [
+            {"name": "Дмитрий Иванов", "aliases": ["Дмитрий Иванов", "Димка"]},
+            {"name": "Денис Петров", "aliases": ["Денис Петров", "Димка"]},
+        ]
+        self.assertTrue(assistant_routes._has_ambiguous_custom_alias_reference(records, "Сравни документы Димка"))
+        self.assertFalse(assistant_routes._has_ambiguous_custom_alias_reference(records, "Сравни документы Дмитрия Иванова и Дениса Петрова"))
+
     def test_standalone_general_definition_is_not_a_followup(self):
         self.assertFalse(assistant_routes._looks_like_contextual_medical_followup("Что такое ферритин?"))
 
