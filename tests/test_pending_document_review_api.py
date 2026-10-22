@@ -274,5 +274,41 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
             add_doc.assert_not_called()
 
 
+    def test_local_files_are_removed_when_database_rejects_insert(self):
+        import tempfile
+        from pathlib import Path
+        import local_storage
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            pending = {
+                "id": 12, "name": "scan.pdf", "file_bytes": b"synthetic bytes",
+                "text": "synthetic OCR", "digest": "c" * 64, "analysis": {},
+            }
+            with (
+                patch.object(local_storage, "DATA_ROOT", root),
+                patch.object(webapp, "family"),
+                patch.object(webapp, "is_demo_user", return_value=False),
+                patch.object(webapp, "STORAGE_BACKEND", "local"),
+                patch.object(webapp.db, "get_pending_doc", return_value=pending),
+                patch.object(webapp.db, "patients", return_value=["Саша"]),
+                patch.object(webapp.db, "document_exists", return_value=False),
+                patch.object(webapp.db, "add_doc", return_value=False),
+                patch.object(webapp.db, "delete_pending_doc") as delete_pending,
+                patch.object(webapp, "format_filename", return_value="scan.pdf"),
+                patch.object(webapp, "normalize_extension", return_value="pdf"),
+                patch.object(webapp, "extract_keywords", return_value=[]),
+            ):
+                with self.assertRaises(webapp.HTTPException) as caught:
+                    webapp.assign_pending_document(
+                        1, 12, "Саша", "не определено", "Скан", "", uid=123
+                    )
+            self.assertEqual(caught.exception.status_code, 409)
+            patient_dir = root / "family_1" / "Саша"
+            self.assertTrue(patient_dir.exists())
+            self.assertEqual(list(patient_dir.iterdir()), [])
+            delete_pending.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
