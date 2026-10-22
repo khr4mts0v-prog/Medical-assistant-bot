@@ -134,5 +134,24 @@ class LocalStorageTests(unittest.TestCase):
                         local_storage.save_file(1, "Sasha", "original.bin", source)
                 self.assertEqual(list((root / "family_1" / "Sasha").iterdir()), [])
 
+    def test_file_is_removed_if_private_permissions_cannot_be_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "archive"
+            source = Path(tmp) / "source.bin"
+            source.write_bytes(b"medical document")
+            real_open = Path.open
+            real_chmod = Path.chmod
+
+            def chmod_path(path, mode, *args, **kwargs):
+                if path.name == "original.bin":
+                    raise OSError("synthetic chmod failure")
+                return real_chmod(path, mode, *args, **kwargs)
+
+            with patch.object(local_storage, "DATA_ROOT", root.resolve()):
+                with patch.object(Path, "chmod", autospec=True, side_effect=chmod_path):
+                    with self.assertRaisesRegex(OSError, "synthetic chmod failure"):
+                        local_storage.save_file(1, "Sasha", "original.bin", source)
+                self.assertEqual(list((root / "family_1" / "Sasha").iterdir()), [])
+
 if __name__ == "__main__":
     unittest.main()
