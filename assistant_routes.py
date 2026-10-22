@@ -550,6 +550,10 @@ def _looks_like_patient_topic_ellipsis(question, mentioned_people):
         r"\b(болит|беспокоит|принимает|можно|нужно|стоит|дать|помогает|хуже|лучше)\b", q
     ):
         return False
+    # A bare switch such as "а теперь по Саше" inherits the prior topic.
+    # The topic guard above keeps complete medical requests independent.
+    if re.fullmatch(r"(?:(?:а\s+)?теперь\s+|(?:а|и|но)\s+|теперь\s+)?по\s+.+?", q):
+        return True
     # Full requests such as 'Расскажи про пользователя Тест' remain independent requests.
     return bool(re.fullmatch(
         r"(?:(?:а|и|но|теперь)\s+)?(?:(?:что|как)\s+)?у\s+.+?",
