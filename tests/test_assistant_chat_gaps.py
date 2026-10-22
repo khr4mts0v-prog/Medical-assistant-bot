@@ -5,6 +5,21 @@ import assistant_routes as assistant
 
 
 class AssistantChatGapTests(unittest.TestCase):
+    def test_general_ai_provider_failure_is_not_misclassified_as_a_successful_answer(self):
+        for answer in (
+            "Не удалось получить ответ ИИ: ошибка провайдера.",
+            "Не задан ключ провайдера.",
+            "Сервис ИИ временно не смог обработать запрос. Попробуйте ещё раз позже.",
+        ):
+            with self.subTest(answer=answer):
+                self.assertTrue(assistant._is_ai_provider_error(answer))
+
+    def test_ordinary_and_truncated_answers_are_not_provider_failures(self):
+        self.assertFalse(assistant._is_ai_provider_error("Ответ по найденным документам."))
+        self.assertFalse(assistant._is_ai_provider_error(
+            "Частичный ответ.\n\n⚠️ Ответ мог быть обрезан лимитом генерации."
+        ))
+
     def test_patient_card_scope_is_validated_and_cannot_resolve_to_another_family_member(self):
         self.assertEqual(assistant._resolve_patient_scope(["Олег", "Саша"], "Олег"), "Олег")
         self.assertEqual(assistant._resolve_patient_scope(["Олег", "Саша"], ""), "")
