@@ -11,28 +11,38 @@ const HOME = '/';
 
 // Last-resort presentation guard: never render a serialized structured answer as chat prose.
 function readableAnswer(value: unknown): string {
-  let cleaned = String(value ?? '').trim();
-  if (!cleaned) return '';
-  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  // Some compatible models double-serialize the structured response. Unwrap only answer
-  // envelopes, with a bound to avoid loops; never display the JSON payload as chat prose.
-  for (let depth = 0; depth < 3; depth += 1) {
+  const fallback = 'Не удалось корректно отобразить ответ модели. Повтори вопрос.';
+  let current: unknown = value;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current && typeof current === 'object' && !Array.isArray(current)) {
+      const record = current as Record<string, unknown>;
+      if (typeof record.answer === 'string' && record.answer.trim()) { current = record.answer; continue; }
+      return fallback;
+    }
+    if (typeof current !== 'string') break;
+    let cleaned = current.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    if (!cleaned) return '';
     try {
-      const parsed = JSON.parse(cleaned);
-      if (parsed && typeof parsed === 'object' && typeof parsed.answer === 'string' && parsed.answer.trim()) {
-        cleaned = parsed.answer.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-        continue;
+      const parsed: unknown = JSON.parse(cleaned);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const record = parsed as Record<string, unknown>;
+        if (typeof record.answer === 'string' && record.answer.trim()) { current = record.answer; continue; }
       }
-      break;
-    } catch { break; }
+    } catch {
+      // Recover the answer string if a provider appended malformed transport metadata.
+      const match = cleaned.match(/^\s*\{[\s\S]*?"answer"\s*:\s*("(?:\\.|[^"\\])*")/i);
+      if (match) {
+        try { const extracted: unknown = JSON.parse(match[1]); if (typeof extracted === 'string' && extracted.trim()) { current = extracted; continue; } }
+        catch { /* use safe fallback below */ }
+      }
+    }
+    if (/^\s*[\[{]/.test(cleaned) && /"(?:answer|missing_documents|data_completeness|limitations|memory_updates)"\s*:/.test(cleaned)) return fallback;
+    const internalFields = cleaned.search(/(?:^|,\s*|\\n|\n)\s*"?\s*(?:missing_documents|limitations|data_completeness|memory_updates)\s*"?\s*:/i);
+    if (internalFields >= 0) cleaned = cleaned.slice(0, internalFields).trim();
+    if (/^\s*[\[{]/.test(cleaned)) return fallback;
+    return cleaned || fallback;
   }
-  // Do not show transport metadata if the model accidentally appends it to prose.
-  const internalFields = cleaned.search(/(?:^|\\n|\n)\s*(?:missing_documents|limitations|data_completeness|memory_updates)\s*:/i);
-  if (internalFields >= 0) cleaned = cleaned.slice(0, internalFields).trim();
-  if (/^\s*\{/.test(cleaned) && /"(?:answer|missing_documents|data_completeness)"\s*:/.test(cleaned)) {
-    return 'Не удалось корректно отобразить ответ модели. Повтори вопрос.';
-  }
-  return cleaned || 'Не удалось корректно отобразить ответ модели. Повтори вопрос.';
+  return typeof current === 'string' && current.trim() ? current.trim() : fallback;
 }
 
 function ArchiveDocumentIcon({ name, size = 22 }: { name: string; size?: number }) {
@@ -337,7 +347,7 @@ function DocumentEditorReactView({familyId,documentId,onNavigate}: {familyId:num
 type PatientDocument = { id:number; title:string; kind:string; date:string; metadata:string; finding:string; review_required:boolean; file_type?:string; url:string };
 type PatientPayload = { patient:string; family_id:number; query:string; view:string; document_count:number; documents:PatientDocument[]; capabilities:{upload:boolean;patient_memory:boolean;document_selection:boolean;assistant:boolean} };
 
-function PatientReactView({familyId, patient, onAsk}: {familyId:number; patient:string; onAsk:(selectedIds?:number[])=>void}) {
+function PatientReactView({familyId, patient, pendingCleanupWarning, onNavigate, onAsk}: {familyId:number; patient:string; pendingCleanupWarning:boolean; onNavigate:(url:string)=>void; onAsk:(selectedIds?:number[])=>void}) {
   const [query,setQuery] = useState('');
   const [view,setView] = useState<'timeline'|'tree'>('timeline');
   const [payload,setPayload] = useState<PatientPayload|null>(null);
@@ -363,6 +373,7 @@ function PatientReactView({familyId, patient, onAsk}: {familyId:number; patient:
     <div className="patient-react-header"><div><div className="eyebrow">КАРТОЧКА ПАЦИЕНТА</div><h1>{patient}</h1><p className="lead">{payload ? payload.document_count+' документов в архиве' : 'Документы и медицинская история'}</p></div>
       <div className="patient-react-actions" aria-label="Действия с пациентом"><button type="button" className="patient-action patient-action-primary" onClick={() => onAsk()}><BrainCircuit size={17}/> Спросить ИИ</button><a className="patient-action patient-action-secondary" href={'/patient-memory?family_id='+familyId+'&patient='+encodeURIComponent(patient)}>Память пациента</a><a className="patient-action patient-action-secondary" href={base+'/edit'}>Редактировать</a><button type="button" className="patient-action patient-action-secondary" onClick={() => document.getElementById('patient-react-upload')?.scrollIntoView({behavior:'smooth',block:'start'})}><Plus size={17}/> Добавить документы</button></div>
     </div>
+    {pendingCleanupWarning && <div className="notice-warning" role="status"><strong>Документ сохранён, но очередь проверки не очищена.</strong><p>Запись может остаться во входящих. При повторной обработке приложение проверит дубликат, не создавая вторую запись.</p><button type="button" onClick={()=>onNavigate('/families/'+familyId+'/patients/'+encodeURIComponent(patient))}>Закрыть предупреждение</button></div>}
     <form className="card patient-react-search" onSubmit={event=>event.preventDefault()}><label htmlFor="patient-react-q">Поиск по документам пациента</label><div className="row"><input id="patient-react-q" type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Например: анализы, УЗИ, выписка"/>{query && <button type="button" onClick={()=>setQuery('')}>Сбросить</button>}</div></form>
     {payload?.capabilities.upload && <section id="patient-react-upload" className="card patient-react-upload"><h2>Добавить документы</h2><form method="post" encType="multipart/form-data" action={base+'/upload'}><input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp" required/><label><input type="checkbox" name="ai_consent" value="true"/> Разрешаю отправить OCR-текст внешнему ИИ для уточнения типа документа</label><button type="submit">Загрузить и распознать</button></form></section>}
     <div className="patient-react-tabs" role="tablist" aria-label="Вид документов"><button type="button" role="tab" aria-selected={view==='timeline'} className={view==='timeline'?'active':''} onClick={()=>setView('timeline')}>Хронология</button><button type="button" role="tab" aria-selected={view==='tree'} className={view==='tree'?'active':''} onClick={()=>setView('tree')}>Дерево документов</button></div>
@@ -524,7 +535,7 @@ function ScrollablePdfPreview({pageCount,pageUrl,originalUrl}: ScrollablePdfPrev
   </div>;
 }
 
-type InboxReviewPayload = {family_id:number;pending_id:number;source_name:string;created:string;ocr_text:string;patient_options:{name:string;birth_date:string}[];kinds:{value:string;label:string}[];kind:string;title:string;date:string;preview_url:string|null;preview_kind:'image'|'pdf'|'none';page_count:number};
+type InboxReviewPayload = {family_id:number;pending_id:number;source_name:string;created:string;ocr_text:string;patient_options:{name:string;birth_date:string}[];suggested_patient_name:string;kinds:{value:string;label:string}[];kind:string;title:string;date:string;preview_url:string|null;preview_kind:'image'|'pdf'|'none';page_count:number};
 function InboxReviewReactView({familyId,pendingId,onNavigate}: {familyId:number;pendingId:number;onNavigate:(url:string)=>void}) {
   const [data,setData]=useState<InboxReviewPayload|null>(null);
   const [patient,setPatient]=useState('');
@@ -534,6 +545,7 @@ function InboxReviewReactView({familyId,pendingId,onNavigate}: {familyId:number;
   const [busy,setBusy]=useState(true);
   const [saving,setSaving]=useState(false);
   const [deleting,setDeleting]=useState(false);
+  const [creatingPatient,setCreatingPatient]=useState(false);
   const [showOcr,setShowOcr]=useState(false);
   const [error,setError]=useState('');
   useEffect(()=>{
@@ -555,6 +567,19 @@ function InboxReviewReactView({familyId,pendingId,onNavigate}: {familyId:number;
       const target=new URL(response.url,window.location.origin);onNavigate(target.pathname+target.search);
     }catch(e){setError(e instanceof Error?e.message:'Ошибка сохранения документа');}
     finally{setSaving(false);}
+  };
+  const createSuggestedPatient=async()=>{
+    if(creatingPatient||!data?.suggested_patient_name)return;
+    const confirmed=window.confirm('Создать карточку пациента «'+data.suggested_patient_name+'» и сохранить этот документ в его истории?');
+    if(!confirmed)return;
+    setCreatingPatient(true);setError('');
+    try{
+      const form=new FormData();form.set('confirm','yes');
+      const response=await fetch('/families/'+familyId+'/inbox/'+pendingId+'/create-patient',{method:'POST',body:form,credentials:'same-origin',redirect:'follow'});
+      if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.detail||'Не удалось создать пациента (HTTP '+response.status+').');}
+      const target=new URL(response.url,window.location.origin);onNavigate(target.pathname+target.search);
+    }catch(e){setError(e instanceof Error?e.message:'Ошибка создания пациента');}
+    finally{setCreatingPatient(false);}
   };
   const remove=async()=>{
     if(deleting||!window.confirm('Удалить этот документ из входящих без возможности восстановления?'))return;
@@ -582,8 +607,9 @@ function InboxReviewReactView({familyId,pendingId,onNavigate}: {familyId:number;
       <form className="card inbox-review-form" onSubmit={assign}>
         <h2>Данные для архива</h2>
         <label htmlFor="inbox-review-patient">Пациент</label><select id="inbox-review-patient" value={patient} onChange={e=>setPatient(e.target.value)} required><option value="" disabled>Выбери пациента</option>{data.patient_options.map(p=><option key={p.name} value={p.name}>{p.name}{p.birth_date?' · рожд. '+p.birth_date:''}</option>)}</select>
-        {data.patient_options.length===0&&<p className="muted">Сначала создай карточку пациента.</p>}
-        <button type="button" className="button-link inbox-review-add-patient" onClick={()=>onNavigate('/families/'+familyId+'/patients/new')}>＋ Добавить пациента</button>
+        {data.patient_options.length===0&&<p className="muted">Сначала создай карточку пациента или подтверди распознанное имя ниже.</p>}
+        {data.suggested_patient_name&&<section className="notice-warning inbox-review-suggested-patient"><strong>Возможно, это новый пациент</strong><p>В документе распознано ФИО: <strong>{data.suggested_patient_name}</strong>.</p><p className="muted">Проверь имя по оригиналу. Карточка появится только после твоего подтверждения.</p><button type="button" onClick={()=>void createSuggestedPatient()} disabled={creatingPatient}>{creatingPatient?'Создаём карточку и сохраняем…':'Да, создать пациента и сохранить документ'}</button></section>}
+        <button type="button" className="button-link inbox-review-add-patient" onClick={()=>onNavigate('/families/'+familyId+'/patients/new')}>＋ Добавить пациента вручную</button>
         <label htmlFor="inbox-review-kind">Тип документа</label><select id="inbox-review-kind" value={kind} onChange={e=>setKind(e.target.value)} required>{data.kinds.map(k=><option key={k.value} value={k.value}>{k.label}</option>)}</select>
         <label htmlFor="inbox-review-title">Название в архиве</label><input id="inbox-review-title" value={title} onChange={e=>setTitle(e.target.value)} required maxLength={180}/>
         <label htmlFor="inbox-review-date">Дата документа (ДД-ММ-ГГГГ)</label><input id="inbox-review-date" value={date} onChange={e=>setDate(e.target.value)} maxLength={10} placeholder="17-03-2025"/>
@@ -708,6 +734,18 @@ function App() {
   const inboxRoute = path.match(/^\/families\/(\d+)\/inbox(?:\?[^#]*)?$/);
   const documentEditRoute = path.match(/^\/families\/(\d+)\/documents\/(\d+)\/edit(?:\?[^#]*)?$/);
   const patientRouteData = patientRoute ? {familyId:Number(patientRoute[1]), patient:decodeURIComponent(patientRoute[2])} : null;
+  const pagePath = path.split('?')[0];
+  const pageTitle = patientRouteData ? patientRouteData.patient
+    : settingsRoute ? 'Настройки архива'
+    : searchRoute ? 'Поиск документов'
+    : memoryRoute ? 'Память пациента'
+    : assistantRoute ? 'Медицинский помощник'
+    : inboxDetailRoute ? 'Проверка документа'
+    : inboxRoute ? 'Входящие документы'
+    : patientEditRoute ? 'Редактирование пациента'
+    : patientNewRoute ? 'Новый пациент'
+    : documentEditRoute ? 'Редактирование документа'
+    : 'Семейный медицинский архив';
   const [screen, setScreen] = useState<Screen | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -1277,8 +1315,8 @@ function App() {
     <main className="main-area">
       <header className="topbar">
         <button className="icon-button menu-button" onClick={() => setMenuOpen(true)} aria-label="Открыть меню"><Menu size={23}/></button>
-        {!isHome && <button className="home-button" onClick={() => navigate(HOME)} aria-label="На главную" title="Домой"><Home size={18}/></button>}
-        <div className="topbar-title">{patientRouteData ? patientRouteData.patient : 'Семейный медицинский архив'}</div>
+        <div className="topbar-title">{pageTitle}</div>
+        {!isHome ? <button className="home-button" onClick={() => navigate(HOME)} aria-label="На главную" title="Домой"><Home size={18}/></button> : <span className="home-button-placeholder" aria-hidden="true" />}
       </header>
       {settingsOpen ? <section className="settings-view">
         <div className="eyebrow">ПАРАМЕТРЫ</div><h1>Настройки архива</h1><p className="lead">Управление семейным архивом и хранением документов.</p>
@@ -1309,7 +1347,7 @@ function App() {
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')} style={assistantRoute ? {display:'none'} : undefined}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} onAsk={(query,selectedFamilyId)=>{autoSubmitPendingRef.current=true;setPatientAssistantScope(null);setAssistantFamilyId(selectedFamilyId);setDocumentSelectionActive(false);setSelectedDocumentIds([]);setSmartConversation([]);setSmartQuery(query);setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : searchRoute ? <SearchReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : memoryRouteData && memoryRouteData.familyId>0 && memoryRouteData.patient ? <PatientMemoryReactView familyId={memoryRouteData.familyId} patient={memoryRouteData.patient} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
+        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} onAsk={(query,selectedFamilyId)=>{autoSubmitPendingRef.current=true;setPatientAssistantScope(null);setAssistantFamilyId(selectedFamilyId);setDocumentSelectionActive(false);setSelectedDocumentIds([]);setSmartConversation([]);setSmartQuery(query);setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : searchRoute ? <SearchReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : memoryRouteData && memoryRouteData.familyId>0 && memoryRouteData.patient ? <PatientMemoryReactView familyId={memoryRouteData.familyId} patient={memoryRouteData.patient} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} pendingCleanupWarning={new URLSearchParams(path.split('?')[1] || '').has('pending_cleanup_warning')} onNavigate={(url)=>{void navigate(url);}} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
         {loading && screen && <div className="loading-line"/>}
       </section>}
     </main>

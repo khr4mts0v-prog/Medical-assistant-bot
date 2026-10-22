@@ -46,7 +46,7 @@ def provider_config():
     return provider, token, url, model, key_name
 
 
-def chat_completion(messages, max_tokens=1200, temperature=0.1, timeout=90, return_metadata=False):
+def chat_completion(messages, max_tokens=1200, temperature=0.1, timeout=90, return_metadata=False, trace_id=None):
     """Call an OpenAI-compatible provider; optionally return completion/usage metadata."""
     provider, token, url, model, key_name = provider_config()
     if not token:
@@ -57,7 +57,45 @@ def chat_completion(messages, max_tokens=1200, temperature=0.1, timeout=90, retu
         json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
         timeout=timeout,
     )
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        # Keep diagnostics useful without logging provider response text, which could
+        # echo prompt fragments or other sensitive medical information.
+        status = int(response.status_code)
+        error_code = None
+        body = ""
+        try:
+            body = response.text or ""
+            parsed_error = json.loads(body)
+            if isinstance(parsed_error, dict):
+                details = parsed_error.get("error")
+                if isinstance(details, dict):
+                    candidate = details.get("code") or details.get("type")
+                elif isinstance(details, str):
+                    candidate = None
+                else:
+                    candidate = parsed_error.get("code") or parsed_error.get("type")
+                if isinstance(candidate, str):
+                    error_code = re.sub(r"[^a-zA-Z0-9_.-]", "", candidate)[:80] or None
+        except (ValueError, TypeError):
+            pass
+        ai_trace_log.emit(
+            trace_id or "provider-http-error",
+            "provider.http_error",
+            provider=provider,
+            model=model,
+            http_status=status,
+            error_code=error_code,
+            response_chars=len(body),
+            content_type=(response.headers.get("Content-Type", "")[:100]
+                          if getattr(response, "headers", None) else ""),
+        )
+        # Preserve the HTTPError type for existing callers while making its message
+        # actionable without exposing the provider response body to end users.
+        raise requests.HTTPError(
+            f"AI provider HTTP {status} ({provider}/{model})", response=response
+        ) from exc
     payload = response.json()
     choice = payload["choices"][0]
     content = choice["message"]["content"]
@@ -169,7 +207,7 @@ def answer_archive_question(query, patient, context="", history=None, trace_id=N
         ai_trace_log.emit_full(trace_id, "general_medical.model_request", provider="configured_provider", model_input=messages)
     try:
         completion = chat_completion(
-            messages, max_tokens=1200, temperature=0.1, timeout=90, return_metadata=True
+            messages, max_tokens=1200, temperature=0.1, timeout=90, return_metadata=True, trace_id=trace_id
         )
         if isinstance(completion, dict) and isinstance(completion.get("content"), str):
             raw = completion["content"]
@@ -200,4 +238,4 @@ def answer_archive_question(query, patient, context="", history=None, trace_id=N
     except Exception as exc:
         if trace_id:
             ai_trace_log.emit(trace_id, "general_medical.provider_error", error_type=type(exc).__name__)
-        return f"Не удалось получить ответ ИИ ({type(exc).__name__}). Проверьте настройки провайдера и модели."
+        return "Сервис ИИ временно не смог обработать запрос. Попробуйте ещё раз позже."

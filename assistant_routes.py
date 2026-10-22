@@ -369,7 +369,13 @@ def _mentioned_people(records, question):
     q = " ".join(str(question or "").casefold().replace("ё", "е").split())
     found = []
     for record in records:
-        aliases = record.get("aliases") or [record.get("name", "")]
+        # Aliases supplement the canonical registered name; they must never replace it.
+        # Otherwise a card with aliases=["Саша"] stops matching queries that use
+        # the registered name "Александр".
+        aliases = list(record.get("aliases") or [])
+        canonical_name = str(record.get("name") or "").strip()
+        if canonical_name and canonical_name not in aliases:
+            aliases.append(canonical_name)
         variants = set()
         for alias in aliases:
             alias = " ".join(str(alias or "").casefold().replace("ё", "е").split())
@@ -430,6 +436,54 @@ def _mentioned_people(records, question):
     return list(dict.fromkeys(x for x in found if x))
 
 
+
+def _has_ambiguous_nickname_reference(records, question, matched_people):
+    """Return true only when a nickname itself matches multiple patients without disambiguation."""
+    q = " ".join(str(question or "").casefold().replace("ё", "е").split())
+    generic_nicknames = (
+        "саша", "саши", "саше", "сашу", "сашей", "сашка", "сашки", "сашке",
+        "сашку", "сашкой", "сашкою", "сашенька", "сашеньки", "сашеньке",
+        "сашеньку", "сашенькой", "саня", "сани", "сане", "саню", "саней",
+        "маша", "маши", "маше", "машу", "машей", "машка", "машки", "машке",
+        "машку", "машкой", "машкою", "машенька", "машеньки", "машеньке",
+        "машеньку", "машенькой", "машенькою",
+    )
+    mentioned_nicknames = [
+        nick for nick in generic_nicknames
+        if re.search(r"(?<![a-zа-яё])" + re.escape(nick) + r"(?![a-zа-яё])", q)
+    ]
+    if not mentioned_nicknames:
+        return False
+
+    # Do not confuse a legitimate multi-person request ("Саша и Олег") with a
+    # nickname collision. First isolate which records the nickname alone matches.
+    by_name = {str(record.get("name") or "").strip(): record for record in records}
+    for nickname in mentioned_nicknames:
+        nickname_matches = list(dict.fromkeys(_mentioned_people(records, nickname)))
+        if len(nickname_matches) < 2:
+            continue
+        for patient in nickname_matches:
+            record = by_name.get(patient)
+            if not record:
+                return True
+            identities = list(record.get("aliases") or []) + [patient]
+            distinguishing_forms = set()
+            for identity in identities:
+                for token in re.findall(r"[a-zа-яё]+", str(identity or "").casefold().replace("ё", "е")):
+                    if len(token) < 3 or token in generic_nicknames:
+                        continue
+                    distinguishing_forms.add(token)
+                    if token[-1] in "бвгджзклмнпрстфхцчшщ":
+                        distinguishing_forms.update(token + suffix for suffix in ("а", "у", "е", "ом", "ы", "и"))
+                    if token.endswith("й"):
+                        distinguishing_forms.add(token[:-1] + "я")
+                    if token.endswith(("а", "я")):
+                        distinguishing_forms.add(token[:-1] + "и")
+            if not any(re.search(r"(?<![a-zа-яё])" + re.escape(form) + r"(?![a-zа-яё])", q) for form in distinguishing_forms):
+                return True
+    return False
+
+
 def _row_matches_patient(row, patient):
     """Require an explicit stored patient match before any document reaches the model or UI."""
     row_patient = " ".join(str((row or {}).get("patient") or "").casefold().replace("ё", "е").split())
@@ -443,6 +497,14 @@ def _resolve_patient_scope(people, requested_patient):
     if patient and patient not in people:
         raise ValueError("Выбранный пациент не найден в этом архиве")
     return patient
+
+
+def _validate_document_selection_mode(selection_mode, selected_ids, patient_scope):
+    """Reject stale or contradictory selection payloads instead of silently broadening retrieval."""
+    if selection_mode and not patient_scope:
+        raise ValueError("Режим выбора документов доступен только из карточки пациента")
+    if not selection_mode and selected_ids:
+        raise ValueError("Получен список документов, но режим выбора выключен. Включите выбор или повторите запрос без списка")
 
 
 def _selected_patient_documents(fid, patient, selected_ids):
@@ -516,6 +578,7 @@ def _looks_like_contextual_medical_followup(question):
         # Explicit references to a previously discussed consultation/document are follow-ups
         # even when the user starts with a conversational opener ("дружище, по этой...").
         r"\b(?:по|про|насч[её]т)\s+(?:эт(?:ой|ого|ому|им|а|о)|данн(?:ой|ого|ому)|предыдущ(?:ей|его|ему))\s+(?:консультац\w*|заключен\w*|выписк\w*|документ\w*|обследовани\w*|анализ\w*)\b",
+        r"\b(?:добавь|запиши|сохрани|внеси)\s+(?:ему|ей|им|этому|этой)\b.{0,100}\b(?:в\s+память|памят|аллерги\w*|факт\w*)\b",
         r"\b(?:что|какие|какая|какой|как|чем)\b.{0,100}\b(?:назначен\w*|рекомендац\w*|вывод\w*|итог\w*|делать|принимать)\b.{0,100}\b(?:консультац\w*|заключен\w*|врач\w*|документ\w*)\b",
         r"\b(?:по|для|у)\s+(?:такого|такому|такой|этого|этому|этой)\s+(?:реб[её]нк\w*|пациент\w*|малыш\w*)\b",
         r"\b(?:какие|что|как)\b.{0,90}\b(?:ещ[её]|дополнительно)\b.{0,90}\b(?:рекомендац\w*|совет\w*|вариант\w*|поделать|сделать|попробовать|предпринять)\b",
@@ -641,6 +704,29 @@ def _extract_memory_measurements(question):
             unique.append(item)
             seen.add(marker)
     return unique
+
+
+def _extract_explicit_memory_facts(question):
+    """Extract only narrow, explicit user requests for patient-memory updates."""
+    q = " ".join(str(question or "").casefold().replace("ё", "е").split())
+    if not _looks_like_explicit_memory_command(q):
+        return []
+    facts = []
+    allergy = re.search(
+        r"\bаллерги\w*\s*(?:на\s*)?(.+?)(?=(?:[,.;]\s*)(?:реакци\w*|проявлени\w*|симптом\w*)|$)",
+        q, re.I,
+    )
+    if allergy:
+        allergens = allergy.group(1).strip(" \t\r\n.,;:")
+        if allergens:
+            reaction = re.search(r"\b(?:реакци\w*|проявлени\w*|симптом\w*)\s*[-:—]?\s*(.+)$", q, re.I)
+            reaction_text = reaction.group(1).strip(" \t\r\n.,;:") if reaction else ""
+            fact_text = "Аллергия на " + allergens
+            if reaction_text:
+                fact_text += ". Реакция по сообщению пользователя: " + reaction_text
+            fact_text += "."
+            facts.append({"memory_key": "allergy", "text": fact_text[:500], "category": "symptom"})
+    return facts
 
 
 def _strip_embedded_structured_fields(value):
@@ -1971,16 +2057,16 @@ def install_assistant_routes(app, current_user, family_guard):
         ):
             raise HTTPException(400, "Некорректный список выбранных документов")
         selected_ids = list(dict.fromkeys(raw_selected_ids))
+        try:
+            _validate_document_selection_mode(selection_mode, selected_ids, forced_patient)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
         selected_document_rows = []
         if selection_mode:
-            if not forced_patient:
-                raise HTTPException(400, "Режим выбора документов доступен только из карточки пациента")
             try:
                 selected_document_rows = _selected_patient_documents(fid, forced_patient, selected_ids)
             except ValueError as exc:
                 raise HTTPException(400, str(exc))
-        elif selected_ids:
-            selected_ids = []
         # Conversation turns are client-supplied, so scope tags are mandatory. A stale turn
         # from another family or patient must not become prompt context for this request.
         conversation_raw = payload.get("conversation")
@@ -2018,6 +2104,19 @@ def install_assistant_routes(app, current_user, family_guard):
         if forced_patient:
             current_mentioned = [forced_patient]
             previous_turn_people = [forced_patient] if previous_turn else []
+        if not forced_patient and _has_ambiguous_nickname_reference(patient_records, query, query_mentioned_people):
+            answer = ("Уточни, пожалуйста, кого ты имеешь в виду: короткое имя совпадает у нескольких пациентов. "
+                      "Назови имя/фамилию или выбери пациента в архиве — я не буду смешивать их медицинские данные.")
+            ai_trace_log.emit(trace_id, "patient.ambiguous_nickname", patient_count=len(patient_records),
+                matched_patient_count=len(query_mentioned_people), model_called=False)
+            try:
+                ai_interaction_log.record(family_id=fid, actor_id=uid, query=query, answer=answer,
+                    mode="ambiguous_patient", provider="local", model="none", duration_ms=0)
+            except Exception:
+                logging.warning("AI interaction logging skipped for ambiguous patient nickname")
+            return JSONResponse({"mode":"analysis", "answer":answer, "documents":[],
+                "missing_documents":[], "limitations":["Имя неоднозначно; медицинские документы не выбирались."],
+                "data_completeness":"insufficient", "memory_proposals":[]})
         standalone_general = _looks_like_standalone_general_question(query)
         fact_fragment = _looks_like_patient_fact_fragment(query)
         patient_topic_ellipsis = _looks_like_patient_topic_ellipsis(query, current_mentioned)
@@ -2069,7 +2168,8 @@ def install_assistant_routes(app, current_user, family_guard):
         scoped_people = [forced_patient] if forced_patient else (mentioned or people)
         explicit_memory_command = _looks_like_explicit_memory_command(query)
         explicit_measurements = _extract_memory_measurements(query)
-        if explicit_measurements and not forced_patient and len(mentioned) == 0:
+        explicit_memory_facts = _extract_explicit_memory_facts(query)
+        if (explicit_measurements or explicit_memory_facts) and not forced_patient and len(mentioned) == 0:
             # Never guess which family member owns a user-entered measurement.
             if followup and len(previous_turn_people) == 1:
                 mentioned = list(previous_turn_people)
@@ -2087,7 +2187,7 @@ def install_assistant_routes(app, current_user, family_guard):
                     "data_completeness":"insufficient", "memory_proposals":[]})
         # A clear measurement statement is handled locally as a pending proposal,
         # not sent to an external model and never written without user confirmation.
-        if explicit_measurements and (explicit_memory_command or not _looks_like_hypothetical_measurement(query)):
+        if (explicit_measurements or explicit_memory_facts) and (explicit_memory_command or not _looks_like_hypothetical_measurement(query)):
             if len(mentioned) != 1:
                 ai_trace_log.emit(trace_id, "patient.memory_target_ambiguous",
                     scoped_patient_count=len(scoped_people), model_called=False)
@@ -2111,10 +2211,23 @@ def install_assistant_routes(app, current_user, family_guard):
                     ))
                 except ValueError as exc:
                     logging.warning("Could not create direct memory proposal (%s)", type(exc).__name__)
+            for fact in explicit_memory_facts:
+                try:
+                    direct_proposals.append(patient_memory.propose_fact(
+                        fid, mentioned[0], fact["text"], fact["category"], date.today().isoformat(),
+                        memory_key=fact["memory_key"],
+                        reason="Сведения сообщены пользователем и не подтверждены медицинским документом. Проверьте формулировку; запись попадёт в активную память только после подтверждения.",
+                        actor_id=uid,
+                    ))
+                except ValueError as exc:
+                    logging.warning("Could not create explicit memory proposal (%s)", type(exc).__name__)
             if direct_proposals:
-                answer = ("Подготовил предложение сохранить данные со слов пользователя. Проверь значения и подтверди сохранение ниже." if explicit_memory_command else "Распознал сообщённые параметры и подготовил предложения для памяти. Проверь значения и подтверди сохранение ниже.")
+                if explicit_memory_facts:
+                    answer = "Подготовил предложение добавить в память сведения об аллергии со слов пользователя. Проверь формулировку и подтверди сохранение ниже."
+                else:
+                    answer = ("Подготовил предложение сохранить данные со слов пользователя. Проверь значения и подтверди сохранение ниже." if explicit_memory_command else "Распознал сообщённые параметры и подготовил предложения для памяти. Проверь значения и подтверди сохранение ниже.")
             else:
-                answer = "Такие значения уже есть в памяти и не требуют обновления. Ничего не изменено."
+                answer = "Подходящее предложение уже ожидает подтверждения или данные не требуют обновления. Активная память не изменена."
             ai_trace_log.emit(trace_id, "response.complete", status="ok", mode="memory_update",
                 answer_chars=len(answer), proposal_count=len(direct_proposals), model_called=False)
             return JSONResponse({"mode":"memory_update", "answer":answer,

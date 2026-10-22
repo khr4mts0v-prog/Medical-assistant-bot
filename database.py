@@ -89,7 +89,10 @@ def update_patient_aliases(fid,name,aliases):
         if cur.rowcount != 1:
             raise ValueError("Пациент не найден в этом семейном архиве")
 
-def update_patient_profile(fid, old_name, new_name, birth_date=None, aliases=None):
+def update_patient_profile(
+    fid, old_name, new_name, birth_date=None, aliases=None,
+    old_storage_prefix=None, new_storage_prefix=None,
+):
     old_name=" ".join((old_name or "").split()).strip()
     new_name=" ".join((new_name or "").split()).strip()[:100]
     if not old_name or not new_name:
@@ -105,6 +108,20 @@ def update_patient_profile(fid, old_name, new_name, birth_date=None, aliases=Non
                   (new_name,birth_date or None,encrypted,int(row["id"]),int(fid)))
         if old_name.casefold()!=new_name.casefold():
             c.execute("UPDATE docs SET patient=? WHERE family_id=? AND patient=? COLLATE NOCASE",(new_name,int(fid),old_name))
+        # When the local archive directory is renamed, keep indexed file paths in sync.
+        # Prefixes are supplied only for a successful local directory move.
+        if old_storage_prefix and new_storage_prefix and old_storage_prefix != new_storage_prefix:
+            c.execute(
+                "UPDATE docs SET "
+                "remote=CASE WHEN substr(remote, 1, ?) = ? THEN ? || substr(remote, ?) ELSE remote END, "
+                "ocr_remote=CASE WHEN substr(ocr_remote, 1, ?) = ? THEN ? || substr(ocr_remote, ?) ELSE ocr_remote END "
+                "WHERE family_id=?",
+                (
+                    len(old_storage_prefix), old_storage_prefix, new_storage_prefix, len(old_storage_prefix) + 1,
+                    len(old_storage_prefix), old_storage_prefix, new_storage_prefix, len(old_storage_prefix) + 1,
+                    int(fid),
+                ),
+            )
     _refresh_patient_memory(fid, new_name)
 
 def patient_aliases_configured(fid,name):

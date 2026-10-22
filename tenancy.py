@@ -9,8 +9,11 @@ FERNET_KEY = os.getenv("FERNET_KEY", "").strip()
 
 def connect():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(DB_PATH)
+    # Give concurrent web workers time to finish short write transactions
+    # instead of failing immediately with "database is locked".
+    c = sqlite3.connect(DB_PATH, timeout=30.0)
     c.row_factory = sqlite3.Row
+    c.execute("PRAGMA busy_timeout=30000")
     c.execute("PRAGMA foreign_keys=ON")
     return c
 

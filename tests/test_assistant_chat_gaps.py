@@ -11,6 +11,14 @@ class AssistantChatGapTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "не найден"):
             assistant._resolve_patient_scope(["Олег", "Саша"], "Мария")
 
+    def test_document_selection_mode_rejects_stale_ids_instead_of_silently_broadening_scope(self):
+        assistant._validate_document_selection_mode(False, [], "")
+        assistant._validate_document_selection_mode(True, [10], "Олег")
+        with self.assertRaisesRegex(ValueError, "режим выбора выключен"):
+            assistant._validate_document_selection_mode(False, [10], "Олег")
+        with self.assertRaisesRegex(ValueError, "только из карточки пациента"):
+            assistant._validate_document_selection_mode(True, [10], "")
+
     def test_selected_document_resolver_returns_only_requested_sources_in_selection_order(self):
         rows = [
             {"id": 10, "patient": "Олег", "name": "ОАК.pdf", "text": "Гемоглобин"},
@@ -225,6 +233,46 @@ class AssistantChatGapTests(unittest.TestCase):
     def test_registered_alexander_matches_common_sasha_nickname(self):
         records = [{"name": "Александр", "aliases": ["Александр"]}]
         self.assertEqual(assistant._mentioned_people(records, "Дай сводку по УЗИ Саши"), ["Александр"])
+
+    def test_ambiguous_shared_nickname_is_not_resolved_to_multiple_patients(self):
+        records = [
+            {"name": "Александр Иванов", "aliases": ["Саша"]},
+            {"name": "Александра Петрова", "aliases": ["Саша"]},
+        ]
+        matched = assistant._mentioned_people(records, "Что известно про Сашу?")
+        self.assertEqual(matched, ["Александр Иванов", "Александра Петрова"])
+        self.assertTrue(assistant._has_ambiguous_nickname_reference(records, "Что известно про Сашу?", matched))
+
+    def test_other_explicit_name_does_not_resolve_shared_nickname(self):
+        records = [
+            {"name": "Александр Иванов", "aliases": ["Саша"]},
+            {"name": "Александра Петрова", "aliases": ["Саша"]},
+            {"name": "Олег", "aliases": ["Олег"]},
+        ]
+        matched = assistant._mentioned_people(records, "Что известно про Сашу и Олега?")
+        self.assertEqual(matched, ["Александр Иванов", "Александра Петрова", "Олег"])
+        self.assertTrue(assistant._has_ambiguous_nickname_reference(records, "Что известно про Сашу и Олега?", matched))
+
+    def test_full_name_disambiguates_shared_nickname(self):
+        records = [
+            {"name": "Александр Иванов", "aliases": ["Саша"]},
+            {"name": "Александра Петрова", "aliases": ["Саша"]},
+        ]
+        question = "Расскажи про Александра Иванова"
+        matched = assistant._mentioned_people(records, question)
+        self.assertEqual(matched, ["Александр Иванов"])
+        self.assertFalse(assistant._has_ambiguous_nickname_reference(records, question, matched))
+
+    def test_canonical_name_still_matches_when_aliases_only_contain_nickname(self):
+        records = [{"name": "Храмцов Александр Михайлович", "aliases": ["Саша"]}]
+        self.assertEqual(
+            assistant._mentioned_people(records, "Расскажи, что известно про Александра"),
+            ["Храмцов Александр Михайлович"],
+        )
+        self.assertEqual(
+            assistant._mentioned_people(records, "Расскажи про Храмцова Александра Михайловича"),
+            ["Храмцов Александр Михайлович"],
+        )
 
     def test_registered_oleg_matches_genitive_form(self):
         records = [{"name": "Олег", "aliases": ["Олег"]}]

@@ -52,6 +52,28 @@ class TenantIsolationTests(unittest.TestCase):
             stored=conn.execute("SELECT text FROM docs WHERE family_id=?",(self.a,)).fetchone()["text"]
         self.assertNotIn(b"secret alpha", bytes(stored))
 
+
+    def test_document_digest_is_idempotent_at_database_boundary(self):
+        args = (
+            self.a, "Patient A", "a.pdf", "analysis", "01-01-2026",
+            "FamilyA/a.pdf", "FamilyA/a.txt", "same document", ["same"], "same-digest",
+        )
+        self.assertTrue(database.add_doc(*args))
+        self.assertFalse(database.add_doc(*args))
+        with tenancy.connect() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) AS n FROM docs WHERE family_id=? AND patient=? AND digest=?",
+                (self.a, "Patient A", "same-digest"),
+            ).fetchone()["n"]
+        self.assertEqual(count, 1)
+
+
+    def test_sqlite_connection_waits_for_short_write_contention(self):
+        with tenancy.connect() as conn:
+            timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        self.assertEqual(timeout, 30000)
+
+
     def test_membership_is_family_specific(self):
         self.assertEqual(tenancy.role_for_user(self.a, 101), "owner")
         self.assertIsNone(tenancy.role_for_user(self.b, 101))

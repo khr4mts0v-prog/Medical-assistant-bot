@@ -12,7 +12,7 @@ from local_storage import save_file as save_local_file
 from ocr import ocr_file
 from AIAnalise import analyze_document, extract_keywords, classify_with_ai
 from utils import format_filename, normalize_extension, parse_date_from_text, safe_name
-from document_metadata import extract_registered_patient, extract_patient_birth_date
+from document_metadata import extract_registered_patient, extract_patient_birth_date, extract_patient_candidate, extract_document_date
 
 app=FastAPI(title="Medical Archive", docs_url=None, redoc_url=None)
 from react_ui import install_react_ui
@@ -1100,7 +1100,7 @@ def patient_detail_api(fid:int,patient:str,q:str="",view:str="timeline",uid:int=
 
 
 @app.get("/families/{fid}/patients/{patient}",response_class=HTMLResponse)
-def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,cleanup_warning:int=0,uid:int=Depends(current_user)):
+def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,cleanup_warning:int=0,pending_cleanup_warning:int=0,uid:int=Depends(current_user)):
     family(fid,uid)
     if patient not in db.patients(fid): raise HTTPException(404,"Пациент не найден")
     upload_ui_limit_mb=min(MAX_UPLOAD_MB, DEMO_MAX_UPLOAD_MB) if is_demo_user(uid) else MAX_UPLOAD_MB
@@ -1112,6 +1112,7 @@ def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,
     b=[f'<p><a href="/?family_id={fid}">← К архиву</a></p>',f'<div class="patient-heading"><div><h2>{html.escape(patient)}</h2><p class="muted">{format_document_count(len(rows))}</p></div><div class="patient-actions"><a class="button-link patient-action-primary" href="#patient-assistant" data-patient-assistant="1" data-family-id="{fid}" data-patient="{html.escape(patient,quote=True)}">✦ Спросить ИИ</a><a class="button-link" href="/patient-memory?family_id={fid}&patient={safe_patient}">Память пациента</a><a class="button-link" href="/families/{fid}/patients/{safe_patient}/edit">Редактировать</a><a class="button-link" href="#patient-upload">＋ Добавить документы</a></div></div>']
     if deleted: b.append('<div class="notice-success" role="status">Документ удалён из архива.</div>')
     if cleanup_warning: b.append('<div class="notice-warning" role="status">Запись удалена, но временный файл не удалось окончательно очистить. Проверьте журнал приложения.</div>')
+    if pending_cleanup_warning: b.append('<div class="notice-warning" role="status">Документ сохранён в архиве, но запись во входящих не удалось очистить. Проверьте входящие; при повторной обработке дубликат не будет добавлен.</div>')
     b.append(f'<form class="card patient-search" method="get" action="{base}"><label for="patient-q">Поиск по документам пациента</label><div class="row"><input id="patient-q" type="search" name="q" value="{html.escape(q,quote=True)}" placeholder="Например: анализы, УЗИ, выписка"><input type="hidden" name="view" value="{view}"><button type="submit">Найти</button>')
     if q: b.append(f'<a class="button-link" href="{base}?view={view}">Сбросить</a>')
     b.append('</div></form>')
@@ -1464,11 +1465,10 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), ai_c
     token=tenancy.get_yadisk_token(family_id) if storage_backend=="yandex" else None
     if storage_backend=="yandex" and not token:
         raise HTTPException(400,"Сначала подключите Яндекс Диск для выбранного архива")
+    # Uploads must remain possible before the first patient card exists. Without a
+    # registered roster, patient resolution will intentionally return no match and
+    # the document will be preserved in the review inbox instead of failing early.
     roster=db.patient_records(family_id)
-    if not roster:
-        return page("Нужны пациенты",
-            '<p>В выбранном архиве пока нет пациентов. Добавьте короткие имена и варианты ФИО, чтобы система могла безопасно распределять документы.</p>'
-            '<p><a href="/?family_id='+str(family_id)+'">Вернуться в архив</a></p>',400)
     results=[]
     for upload_file in files[:50]:
         name=Path(upload_file.filename or "document.bin").name
@@ -1515,6 +1515,9 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), ai_c
                         patient=None
                 digest=hashlib.sha256(local.read_bytes()).hexdigest()
                 if not patient:
+                    # A labelled full name is only a candidate; never create a patient
+                    # card from OCR without an explicit user confirmation.
+                    analysis["suggested_patient_name"] = extract_patient_candidate(text)
                     pending_id=db.add_pending_doc(family_id,name,digest,local.read_bytes(),text,analysis)
                     if pending_id is None:
                         results.append('<li><strong>'+html.escape(name)+'</strong>: такой документ уже находится во входящих.</li>')
@@ -1790,6 +1793,7 @@ def pending_document_review_api(fid:int,pending_id:int,uid:int=Depends(current_u
         "created":str(d.get("created") or ""),"ocr_text":_format_ocr_preview(d.get("text"))[:12000],
         "patient_options":patients,"kinds":[{"value":k,"label":labels.get(k,k[:1].upper()+k[1:])} for k in kinds],
         "kind":current_kind if current_kind in kinds else "не определено",
+        "suggested_patient_name":str(analysis.get("suggested_patient_name") or ""),
         "title":str(analysis.get("display_title") or analysis.get("primary_type") or d.get("name") or "Документ"),
         "date":"","preview_url":f"/families/{fid}/inbox/{pending_id}/preview",
         "preview_kind":preview_kind,"page_count":page_count}
@@ -1829,6 +1833,42 @@ def review_pending_document(fid:int,pending_id:int,uid:int=Depends(current_user)
     body+=f'<form class="pending-classification-form" method="post" action="/families/{fid}/inbox/{pending_id}/assign"><label>Пациент<br><select name="patient" required>{patient_options}</select></label><label>Тип документа<br><select name="kind" required>{kind_options}</select></label><label>Название в архиве<br><input name="title" required maxlength="180" value="{html.escape(str(d["analysis"].get("display_title") or d["analysis"].get("primary_type") or d["name"]),quote=True)}"></label><label>Дата документа (ДД-ММ-ГГГГ)<br><input name="date" placeholder="17-03-2025" maxlength="10"></label><p><button type="submit">Сохранить в историю пациента</button></p></form>'
     body+=f'<form class="pending-delete-form" method="post" action="/families/{fid}/inbox/{pending_id}/delete" onsubmit="return confirm(\'Удалить этот документ из входящих без возможности восстановления?\')"><input type="hidden" name="confirm" value="yes"><button type="submit">Удалить документ</button></form>'
     return page("Ручная классификация",body)
+
+
+@app.post("/families/{fid}/inbox/{pending_id}/create-patient", response_class=HTMLResponse)
+def create_patient_from_pending_document(fid:int,pending_id:int,confirm:str=Form(...),uid:int=Depends(current_user)):
+    """Create a patient and assign this pending document only after explicit confirmation."""
+    family(fid,uid)
+    if confirm != "yes":
+        raise HTTPException(400,"Создание пациента не подтверждено")
+    if is_demo_user(uid):
+        tenancy.refresh_demo_expiry(fid)
+    d=db.get_pending_doc(fid,pending_id)
+    if not d:
+        raise HTTPException(404,"Документ не найден во входящих")
+    candidate=" ".join(str((d.get("analysis") or {}).get("suggested_patient_name") or "").split()).strip()
+    if not candidate:
+        raise HTTPException(400,"В документе не распознано достаточно надёжное ФИО. Добавьте пациента вручную.")
+    patient_names=db.patients(fid)
+    existing_names={str(name).casefold():str(name) for name in patient_names}
+    if is_demo_user(uid) and candidate.casefold() not in existing_names and len(patient_names) >= DEMO_MAX_PATIENTS:
+        raise HTTPException(413, f"В демо можно создать не более {DEMO_MAX_PATIENTS} карточек пациентов")
+    # Reuse the canonical spelling of an existing card on retry. Otherwise a
+    # case-only OCR variation could pass the duplicate check but fail exact
+    # patient validation inside assign_pending_document.
+    if candidate.casefold() in existing_names:
+        candidate=existing_names[candidate.casefold()]
+    else:
+        db.add_patient(fid,candidate)
+    analysis=d.get("analysis") or {}
+    kind=str(analysis.get("primary_type") or "не определено")
+    title=str(analysis.get("display_title") or kind or d.get("name") or "Медицинский документ")
+    date=extract_document_date(d.get("text") or "") or ""
+    try:
+        return assign_pending_document(fid,pending_id,candidate,kind,title,date,uid)
+    except Exception:
+        logging.exception("Confirmed patient creation could not finish document assignment")
+        raise
 
 
 @app.post("/families/{fid}/inbox/{pending_id}/delete", response_class=HTMLResponse)
@@ -1891,23 +1931,49 @@ def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:st
                 docs,ocr=folder+"/docs",folder+"/OCR"; disk.ensure_folder(docs); disk.ensure_folder(ocr)
                 remote,oremote=docs+"/"+stored,ocr+"/"+ocr_stored
                 disk.upload_file(str(local),remote)
+                saved_paths.append(remote)
                 ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(d["text"],encoding="utf-8"); disk.upload_file(str(ocr_tmp),oremote)
+                saved_paths.append(oremote)
             if not db.add_doc(fid,patient,stored,kind,date,remote,oremote,d["text"],extract_keywords(d["text"],analysis),d["digest"],analysis=analysis):
                 raise HTTPException(409,"Не удалось добавить документ в историю; запись во входящих сохранена")
-        except Exception:
-            # If the index write fails, don't leave an orphaned original/OCR file.
-            # Only remove paths created by this request in local storage.
+        except Exception as exc:
+            # Roll back files written by this request if indexing fails. Keep the
+            # pending inbox record intact so the user can retry safely.
             if storage_backend=="local":
                 for candidate in saved_paths:
                     try:
                         candidate.unlink()
                     except FileNotFoundError:
                         pass
+                    except OSError:
+                        logging.exception("Could not clean up local file after document assignment failure")
+            # Exclusive local file creation protects an existing archive file from
+            # overwrite. Surface a retryable conflict instead of leaking a 500.
+            if isinstance(exc, FileExistsError):
+                raise HTTPException(
+                    409,
+                    "Файл с таким именем уже существует; запись во входящих сохранена. Повторите попытку.",
+                ) from exc
             raise
-        db.delete_pending_doc(fid,pending_id)
+        pending_cleanup_warning = False
+        if storage_backend == "local":
+            try:
+                pending_deleted = db.delete_pending_doc(fid,pending_id)
+                if not pending_deleted:
+                    pending_cleanup_warning = True
+                    logging.error("Document %s saved but pending inbox row %s was not deleted", d.get("digest"), pending_id)
+            except Exception:
+                pending_cleanup_warning = True
+                logging.exception("Document saved locally but pending inbox cleanup failed for pending_id=%s", pending_id)
+        else:
+            # Preserve existing external-storage behavior; this change is local-only.
+            db.delete_pending_doc(fid,pending_id)
         if storage_backend=="yandex":
             hp=Path(td)/"history.txt"; hp.write_text(db.history(fid,patient),encoding="utf-8"); disk.upload_file(str(hp),folder+"/history.txt")
-    return RedirectResponse(f"/families/{fid}/patients/{patient}",status_code=303)
+    destination=f"/families/{fid}/patients/{patient}"
+    if pending_cleanup_warning:
+        destination += "?pending_cleanup_warning=1"
+    return RedirectResponse(destination,status_code=303)
 
 @app.post("/families/{fid}/patients/{patient}/upload",response_class=HTMLResponse)
 def upload(fid:int,patient:str,file:UploadFile=File(...),ai_consent:bool=Form(False),uid:int=Depends(current_user)):

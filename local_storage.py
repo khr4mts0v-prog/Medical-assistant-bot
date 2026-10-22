@@ -21,10 +21,9 @@ def document_dir(family_id: int, patient: str) -> Path:
     if root != target and root not in target.parents:
         raise ValueError("Storage path escapes local storage root")
     target.mkdir(parents=True, exist_ok=True, mode=0o700)
-    try:
-        target.chmod(0o700)
-    except OSError:
-        pass
+    # Existing directories may have permissive modes; fail closed if we
+    # cannot enforce private access before writing medical documents.
+    target.chmod(0o700)
     return target
 
 def save_file(family_id: int, patient: str, filename: str, source: Path) -> Path:
@@ -36,14 +35,36 @@ def save_file(family_id: int, patient: str, filename: str, source: Path) -> Path
     if target_dir.resolve() not in target.parents:
         raise ValueError("Storage path escapes patient directory")
     # Exclusive creation avoids silently overwriting an existing original.
-    with source.open("rb") as src, target.open("xb") as dst:
-        while True:
-            chunk = src.read(1024 * 1024)
-            if not chunk:
-                break
-            dst.write(chunk)
+    # Once xb succeeds, this invocation owns the new path. Clean it up on any
+    # subsequent failure, including source/destination close errors. Never
+    # unlink a path when exclusive creation itself failed.
+    created = False
+    try:
+        with source.open("rb") as src:
+            dst = target.open("xb")
+            created = True
+            with dst:
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+    except BaseException:
+        if created:
+            # Preserve the original I/O exception even if cleanup also fails.
+            try:
+                target.unlink()
+            except OSError:
+                pass
+        raise
     try:
         target.chmod(0o600)
     except OSError:
-        pass
+        # Do not leave a potentially over-permissive medical file behind when
+        # private permissions cannot be enforced.
+        try:
+            target.unlink()
+        except OSError:
+            pass
+        raise
     return target
