@@ -369,7 +369,13 @@ def _mentioned_people(records, question):
     q = " ".join(str(question or "").casefold().replace("ё", "е").split())
     found = []
     for record in records:
-        aliases = record.get("aliases") or [record.get("name", "")]
+        # Aliases supplement the canonical registered name; they must never replace it.
+        # Otherwise a card with aliases=["Саша"] stops matching queries that use
+        # the registered name "Александр".
+        aliases = list(record.get("aliases") or [])
+        canonical_name = str(record.get("name") or "").strip()
+        if canonical_name and canonical_name not in aliases:
+            aliases.append(canonical_name)
         variants = set()
         for alias in aliases:
             alias = " ".join(str(alias or "").casefold().replace("ё", "е").split())

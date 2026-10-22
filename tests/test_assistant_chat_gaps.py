@@ -234,6 +234,17 @@ class AssistantChatGapTests(unittest.TestCase):
         records = [{"name": "Александр", "aliases": ["Александр"]}]
         self.assertEqual(assistant._mentioned_people(records, "Дай сводку по УЗИ Саши"), ["Александр"])
 
+    def test_canonical_name_still_matches_when_aliases_only_contain_nickname(self):
+        records = [{"name": "Храмцов Александр Михайлович", "aliases": ["Саша"]}]
+        self.assertEqual(
+            assistant._mentioned_people(records, "Расскажи, что известно про Александра"),
+            ["Храмцов Александр Михайлович"],
+        )
+        self.assertEqual(
+            assistant._mentioned_people(records, "Расскажи про Храмцова Александра Михайловича"),
+            ["Храмцов Александр Михайлович"],
+        )
+
     def test_registered_oleg_matches_genitive_form(self):
         records = [{"name": "Олег", "aliases": ["Олег"]}]
         self.assertEqual(assistant._mentioned_people(records, "А что у Олега?"), ["Олег"])
