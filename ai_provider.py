@@ -151,14 +151,14 @@ def _strip_embedded_structured_fields(value):
     """Drop structured transport fields accidentally appended to plain user-facing prose."""
     text = sanitize_model_text(value)
     marker = re.search(
-        r"(?:^|\\\\n|\\n)\\s*(?:missing_documents|limitations|data_completeness|memory_updates)\\s*:",
+        r"(?:^|\\n|\n)\s*(?:missing_documents|limitations|data_completeness|memory_updates)\s*:",
         text,
         flags=re.I,
     )
     if not marker:
         return text
     answer = text[:marker.start()].rstrip()
-    return re.sub(r"(?:\\\\n)+$", "", answer).rstrip()
+    return re.sub(r"(?:\\n)+$", "", answer).rstrip()
 
 
 def _history_answer_text(value, max_chars=1100):
