@@ -1948,9 +1948,11 @@ def _restore_local_indexed_document(fid, patient, digest, source_path, ocr_text)
             if restored_sidecar.resolve() != sidecar:
                 raise ValueError("Restored OCR path differs from indexed path")
         elif not sidecar.is_file():
-            return False
+            raise ValueError("Indexed OCR sidecar path is not a regular file")
 
-        return _local_archive_original_available(fid, patient, digest)
+        if not _local_archive_original_available(fid, patient, digest):
+            raise ValueError("Restored original failed digest verification")
+        return True
     except (OSError, RuntimeError, ValueError):
         logging.exception("Could not restore indexed local document for family=%s patient=%s", fid, patient)
         for candidate in created:
