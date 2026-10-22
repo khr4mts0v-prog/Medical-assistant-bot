@@ -963,7 +963,10 @@ function App() {
         const familyId = Number(patientAssistant.dataset.familyId || '');
         const patient = String(patientAssistant.dataset.patient || '').trim();
         if (!Number.isInteger(familyId) || familyId <= 0 || !patient) return;
+        setAssistantFamilyId(familyId);
         setPatientAssistantScope({familyId, patient});
+        setDocumentSelectionActive(false);
+        setSelectedDocumentIds([]);
         setSmartConversation([]); setSmartQuery(''); setSmartResult(null); setSmartError(''); setSmartConsent(false);
         setSmartSearchOpen(true);
         return;
