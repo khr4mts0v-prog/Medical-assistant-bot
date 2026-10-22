@@ -35,6 +35,12 @@ class PatientDialogueRegressionTests(unittest.TestCase):
         question = "Можно ли добавить аллергию на кошек в память?"
         self.assertEqual(assistant_routes._extract_explicit_memory_facts(question), [])
 
+    def test_bare_patient_switch_inherits_previous_topic(self):
+        self.assertTrue(assistant_routes._looks_like_patient_topic_ellipsis("А теперь по Саше", ["Саша"]))
+        self.assertTrue(assistant_routes._looks_like_patient_topic_ellipsis("Теперь по Олегу", ["Олег"]))
+        # A request that already specifies a medical topic should search it directly.
+        self.assertFalse(assistant_routes._looks_like_patient_topic_ellipsis("А теперь по Саше по крови", ["Саша"]))
+
     def test_standalone_general_definition_is_not_a_followup(self):
         self.assertFalse(assistant_routes._looks_like_contextual_medical_followup("Что такое ферритин?"))
 
