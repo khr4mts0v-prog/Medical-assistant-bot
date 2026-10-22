@@ -30,7 +30,8 @@ class IntelligentSearchPatientAmbiguityApiTests(unittest.TestCase):
         ]
         with (
             patch.object(assistant_routes.tenancy, "families_for_user", return_value=[{"id": 1}]),
-            patch.object(assistant_routes, "family_guard"),
+            patch.object(assistant_routes.tenancy, "role_for_user", return_value="admin"),
+            patch.object(assistant_routes.tenancy, "get_family", return_value={"id": 1}),
             patch.object(assistant_routes.db, "patients", return_value=["Александр Иванов", "Александр Петров"]),
             patch.object(assistant_routes.db, "patient_records", return_value=patient_records),
             patch.object(assistant_routes.db, "search") as search,
