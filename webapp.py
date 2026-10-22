@@ -1935,7 +1935,7 @@ def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:st
                 saved_paths.append(oremote)
             if not db.add_doc(fid,patient,stored,kind,date,remote,oremote,d["text"],extract_keywords(d["text"],analysis),d["digest"],analysis=analysis):
                 raise HTTPException(409,"Не удалось добавить документ в историю; запись во входящих сохранена")
-        except Exception:
+        except Exception as exc:
             # Roll back files written by this request if indexing fails. Keep the
             # pending inbox record intact so the user can retry safely.
             if storage_backend=="local":
@@ -1946,6 +1946,13 @@ def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:st
                         pass
                     except OSError:
                         logging.exception("Could not clean up local file after document assignment failure")
+            # Exclusive local file creation protects an existing archive file from
+            # overwrite. Surface a retryable conflict instead of leaking a 500.
+            if isinstance(exc, FileExistsError):
+                raise HTTPException(
+                    409,
+                    "Файл с таким именем уже существует; запись во входящих сохранена. Повторите попытку.",
+                ) from exc
             raise
         db.delete_pending_doc(fid,pending_id)
         if storage_backend=="yandex":
