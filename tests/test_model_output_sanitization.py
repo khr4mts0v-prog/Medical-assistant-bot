@@ -46,7 +46,7 @@ class ModelOutputSanitizationTests(unittest.TestCase):
     @patch("assistant_routes.chat_completion", return_value={
         "content": json.dumps({"answer": "Часть ответа", "missing_documents": [],
                                "limitations": [], "data_completeness": "partial"}),
-        "metadata": {"finish_reason": "length", "completion_tokens": 1200},
+        "metadata": {"finish_reason": "MAX_TOKENS", "completion_tokens": 1200},
     })
     def test_structured_route_warns_when_provider_reports_token_limit(self, completion):
         result = assistant._structured_archive_answer("Вопрос", ["Олег"], [])
@@ -56,6 +56,16 @@ class ModelOutputSanitizationTests(unittest.TestCase):
         self.assertTrue(any("достиг лимита генерации" in item for item in result["limitations"]))
         self.assertTrue(completion.call_args.kwargs["return_metadata"])
         self.assertEqual(completion.call_args.kwargs["max_tokens"], 2400)
+
+    @patch("ai_provider.chat_completion", return_value={
+        "content": "Полезная часть общего ответа.",
+        "metadata": {"finish_reason": "MAX_OUTPUT_TOKENS", "completion_tokens": 1200},
+    })
+    def test_general_medical_answer_warns_for_uppercase_provider_truncation(self, completion):
+        answer = __import__("ai_provider").answer_archive_question("Что такое ферритин?", "Олег")
+        self.assertIn("Полезная часть общего ответа.", answer)
+        self.assertIn("Ответ мог быть обрезан лимитом генерации", answer)
+        completion.assert_called_once()
 
     @patch("assistant_routes.chat_completion", return_value={
         "content": '{"answer":"Неполный ответ", "missing_documents":[',
