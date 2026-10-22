@@ -46,10 +46,22 @@ class PatientDialogueRegressionTests(unittest.TestCase):
             {"name": "Дмитрий Иванов", "aliases": ["Дмитрий Иванов", "Димка"]},
             {"name": "Денис Петров", "aliases": ["Денис Петров", "Димка"]},
         ]
-        self.assertTrue(assistant_routes._has_ambiguous_custom_alias_reference(records, "Сравни документы Димка"))
-        self.assertTrue(assistant_routes._has_ambiguous_custom_alias_reference(records, "Сравни документы Димка и Олега"))
-        self.assertFalse(assistant_routes._has_ambiguous_custom_alias_reference(records, "Сравни документы Димка Иванов"))
-        self.assertFalse(assistant_routes._has_ambiguous_custom_alias_reference(records, "Сравни документы Дмитрия Иванова и Дениса Петрова"))
+        self.assertEqual(
+            assistant_routes._resolve_custom_alias_reference(records, "Сравни документы Димка", ["Дмитрий Иванов", "Денис Петров"]),
+            (True, []),
+        )
+        self.assertEqual(
+            assistant_routes._resolve_custom_alias_reference(records, "Сравни документы Димка и Олега", ["Дмитрий Иванов", "Денис Петров"]),
+            (True, []),
+        )
+        self.assertEqual(
+            assistant_routes._resolve_custom_alias_reference(records, "Сравни документы Димка Иванов", ["Дмитрий Иванов", "Денис Петров"]),
+            (False, ["Дмитрий Иванов"]),
+        )
+        self.assertEqual(
+            assistant_routes._resolve_custom_alias_reference(records, "Сравни документы Дмитрия Иванова и Дениса Петрова", ["Дмитрий Иванов", "Денис Петров"]),
+            (False, ["Дмитрий Иванов", "Денис Петров"]),
+        )
 
     def test_standalone_general_definition_is_not_a_followup(self):
         self.assertFalse(assistant_routes._looks_like_contextual_medical_followup("Что такое ферритин?"))
