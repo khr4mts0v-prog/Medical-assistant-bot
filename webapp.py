@@ -1894,8 +1894,10 @@ def _local_archive_original_available(fid, patient, digest):
         return False
     root = DATA_ROOT.resolve()
     try:
+        from local_storage import _component
+        expected = (root / f"family_{int(fid)}" / _component(str(patient))).resolve()
         original = Path(remote).resolve(strict=True)
-        if root not in original.parents or not original.is_file():
+        if original.parent != expected or not original.is_file():
             return False
         hasher = hashlib.sha256()
         with original.open("rb") as source:
