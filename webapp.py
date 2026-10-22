@@ -1528,6 +1528,32 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), ai_c
                 keywords=extract_keywords(text,analysis)
                 date=parse_date_from_text(text)
                 if db.document_exists(family_id,patient,digest):
+                    if storage_backend == "local" and not _local_archive_original_available(family_id, patient, digest):
+                        restored = _restore_local_indexed_document(
+                            family_id, patient, digest, local, text
+                        )
+                        if restored:
+                            results.append(
+                                '<li><strong>'+html.escape(name)+'</strong>: оригинал и OCR восстановлены '
+                                'в архиве пациента '+html.escape(patient)+'.</li>'
+                            )
+                            continue
+                        # Keep a recoverable copy instead of silently treating a stale DB row as a duplicate.
+                        analysis["suggested_patient_name"] = patient
+                        pending_id = db.add_pending_doc(
+                            family_id, name, digest, local.read_bytes(), text, analysis
+                        )
+                        if pending_id is None:
+                            results.append(
+                                '<li><strong>'+html.escape(name)+'</strong>: оригинал не удалось безопасно '
+                                'восстановить; копия уже есть во входящих, требуется ручная проверка.</li>'
+                            )
+                        else:
+                            results.append(
+                                '<li><strong>'+html.escape(name)+'</strong>: оригинал не удалось безопасно '
+                                'восстановить; копия сохранена во входящих для ручной проверки.</li>'
+                            )
+                        continue
                     results.append('<li><strong>'+html.escape(name)+'</strong>: дубликат — уже есть у пациента '+html.escape(patient)+'.</li>')
                     continue
                 ex=normalize_extension(name)
@@ -1885,7 +1911,7 @@ def delete_pending_document(fid:int,pending_id:int,confirm:str=Form(...),uid:int
     return RedirectResponse(f"/families/{fid}/inbox?deleted=1",status_code=303)
 
 def _local_archive_original_available(fid, patient, digest):
-    """Verify an indexed local original before treating a pending copy as a safe duplicate."""
+    """Verify the indexed local original before treating an indexed row as a safe duplicate."""
     from local_storage import DATA_ROOT
 
     paths = db.get_document_storage_paths(fid, patient, digest)
@@ -1894,8 +1920,13 @@ def _local_archive_original_available(fid, patient, digest):
         return False
     root = DATA_ROOT.resolve()
     try:
-        original = Path(remote).resolve(strict=True)
-        if root not in original.parents or not original.is_file():
+        from local_storage import _component
+        expected = (root / f"family_{int(fid)}" / _component(str(patient))).resolve()
+        original_path = Path(remote)
+        if root not in expected.parents or original_path.is_symlink():
+            return False
+        original = original_path.resolve(strict=True)
+        if original.parent != expected or not original.is_file():
             return False
         hasher = hashlib.sha256()
         with original.open("rb") as source:
@@ -1903,6 +1934,67 @@ def _local_archive_original_available(fid, patient, digest):
                 hasher.update(chunk)
         return hmac.compare_digest(hasher.hexdigest(), str(digest))
     except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _restore_local_indexed_document(fid, patient, digest, source_path, ocr_text):
+    """Restore missing local original/sidecar only at the exact indexed patient paths."""
+    from local_storage import DATA_ROOT, _component
+
+    paths = db.get_document_storage_paths(fid, patient, digest)
+    if not paths or not paths.get("remote") or not paths.get("ocr_remote"):
+        return False
+    root = DATA_ROOT.resolve()
+    expected = (root / f"family_{int(fid)}" / _component(str(patient))).resolve()
+    created = []
+    try:
+        original_path = Path(str(paths["remote"]))
+        sidecar_path = Path(str(paths["ocr_remote"]))
+        if root not in expected.parents or original_path.is_symlink() or sidecar_path.is_symlink():
+            return False
+        original = original_path.resolve()
+        sidecar = sidecar_path.resolve()
+        if original.parent != expected or sidecar.parent != expected:
+            return False
+        if original == sidecar or original.name == sidecar.name:
+            return False
+
+        if original.exists():
+            if not original.is_file():
+                return False
+            hasher = hashlib.sha256()
+            with original.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    hasher.update(chunk)
+            if not hmac.compare_digest(hasher.hexdigest(), str(digest)):
+                return False
+        else:
+            restored = save_local_file(fid, patient, original.name, source_path)
+            created.append(restored)
+            if restored.resolve() != original:
+                raise ValueError("Restored original path differs from indexed path")
+
+        if not sidecar.exists():
+            with tempfile.TemporaryDirectory() as td:
+                sidecar_source = Path(td) / sidecar.name
+                sidecar_source.write_text(str(ocr_text or ""), encoding="utf-8")
+                restored_sidecar = save_local_file(fid, patient, sidecar.name, sidecar_source)
+            created.append(restored_sidecar)
+            if restored_sidecar.resolve() != sidecar:
+                raise ValueError("Restored OCR path differs from indexed path")
+        elif not sidecar.is_file():
+            raise ValueError("Indexed OCR sidecar path is not a regular file")
+
+        if not _local_archive_original_available(fid, patient, digest):
+            raise ValueError("Restored original failed digest verification")
+        return True
+    except (OSError, RuntimeError, ValueError):
+        logging.exception("Could not restore indexed local document for family=%s patient=%s", fid, patient)
+        for candidate in created:
+            try:
+                candidate.unlink(missing_ok=True)
+            except OSError:
+                logging.exception("Could not roll back partially restored document file")
         return False
 
 
@@ -1925,13 +2017,20 @@ def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:st
         except ValueError: raise HTTPException(400,"Дата должна быть в формате ДД-ММ-ГГГГ")
     if db.document_exists(fid,patient,d["digest"]):
         if storage_backend == "local" and not _local_archive_original_available(fid, patient, d["digest"]):
-            # An index row alone is not proof that the original is still recoverable.
-            # Keep the encrypted inbox copy until the archive file is verified.
-            raise HTTPException(
-                409,
-                "Документ уже есть в индексе, но исходный файл не найден или не совпадает. "
-                "Документ во входящих сохранён для восстановления; проверьте архив.",
-            )
+            # Restore from the encrypted pending copy when the indexed original is missing.
+            # If an existing file is corrupt or the indexed paths are unsafe, preserve inbox.
+            with tempfile.TemporaryDirectory() as td:
+                recovery_source = Path(td) / Path(d["name"]).name
+                recovery_source.write_bytes(d["file_bytes"])
+                restored = _restore_local_indexed_document(
+                    fid, patient, d["digest"], recovery_source, d.get("text", "")
+                )
+            if not restored:
+                raise HTTPException(
+                    409,
+                    "Документ уже есть в индексе, но исходный файл не удалось безопасно восстановить. "
+                    "Копия во входящих сохранена; требуется проверка архива.",
+                )
         try:
             pending_deleted = db.delete_pending_doc(fid,pending_id)
         except Exception:
@@ -2052,6 +2151,30 @@ def upload(fid:int,patient:str,file:UploadFile=File(...),ai_consent:bool=Form(Fa
             digest=hashlib.sha256(local.read_bytes()).hexdigest()
             ex=normalize_extension(name)
             if db.document_exists(fid,patient,digest):
+                if storage_backend == "local" and not _local_archive_original_available(fid, patient, digest):
+                    restored = _restore_local_indexed_document(fid, patient, digest, local, text)
+                    if not restored:
+                        pending_id = db.add_pending_doc(
+                            fid, name, digest, local.read_bytes(), text, analysis
+                        )
+                        inbox_note = (
+                            "Исходный файл не удалось безопасно восстановить. "
+                            "Загруженная копия сохранена во входящих для ручной проверки."
+                            if pending_id is not None
+                            else "Исходный файл не удалось безопасно восстановить. "
+                                 "Проверьте уже существующий документ во входящих."
+                        )
+                        return page(
+                            "Требуется восстановление",
+                            f'<p>{html.escape(inbox_note)}</p>'
+                            f'<p><a href="/families/{fid}/inbox">Открыть входящие документы</a></p>'
+                            f'<p><a href="/families/{fid}/patients/{html.escape(patient,quote=True)}">Назад к пациенту</a></p>',
+                        )
+                    return page(
+                        "Документ восстановлен",
+                        f'<p>Оригинал документа и отсутствующий OCR-файл восстановлены из повторной загрузки.</p>'
+                        f'<p><a href="/families/{fid}/patients/{html.escape(patient,quote=True)}">Назад к пациенту</a></p>',
+                    )
                 return page("Дубликат",f'<p>Этот файл уже сохранён в архиве.</p><p><a href="/families/{fid}/patients/{html.escape(patient,quote=True)}">Назад к пациенту</a></p>')
             stored=f"{Path(format_filename(patient,kind,date,ex)).stem}_{digest[:8]}.{ex}"
             ocr_stored=Path(stored).stem+".txt"

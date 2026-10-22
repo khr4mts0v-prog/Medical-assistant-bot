@@ -242,6 +242,7 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
             patch.object(webapp.db, "patients", return_value=["Саша"]),
             patch.object(webapp.db, "document_exists", return_value=True),
             patch.object(webapp, "_local_archive_original_available", return_value=False),
+            patch.object(webapp, "_restore_local_indexed_document", return_value=False),
             patch.object(webapp.db, "delete_pending_doc") as delete_pending,
             patch.object(webapp, "save_local_file") as save_file,
         ):
@@ -250,10 +251,158 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
                     1, 12, "Саша", "не определено", "Скан", "", uid=123
                 )
         self.assertEqual(caught.exception.status_code, 409)
-        self.assertIn("во входящих сохранён", caught.exception.detail)
+        self.assertIn("во входящих сохранена", caught.exception.detail)
         delete_pending.assert_not_called()
         save_file.assert_not_called()
 
+
+    def test_batch_upload_restores_missing_indexed_original(self):
+        with (
+            patch.object(webapp, "family", return_value={"id": 1}),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(webapp, "STORAGE_BACKEND", "local"),
+            patch.object(webapp.db, "patient_records", return_value=[{"name": "Саша", "birth_date": ""}]),
+            patch.object(webapp, "ocr_file", return_value="synthetic OCR"),
+            patch.object(webapp, "analyze_document", return_value={
+                "primary_type": "не определено", "review_required": True,
+                "document_types": [], "confidence": "low",
+            }),
+            patch.object(webapp, "extract_registered_patient", return_value="Саша"),
+            patch.object(webapp, "extract_patient_birth_date", return_value=""),
+            patch.object(webapp, "parse_date_from_text", return_value=""),
+            patch.object(webapp.db, "document_exists", return_value=True),
+            patch.object(webapp, "_local_archive_original_available", return_value=False),
+            patch.object(webapp, "_restore_local_indexed_document", return_value=True) as restore,
+            patch.object(webapp.db, "add_pending_doc") as add_pending,
+        ):
+            response = self.client.post(
+                "/upload",
+                data={"family_id": "1", "ai_consent": "false"},
+                files=[("files", ("scan.pdf", b"original pdf bytes", "application/pdf"))],
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("оригинал и OCR восстановлены", response.text)
+        restore.assert_called_once()
+        add_pending.assert_not_called()
+
+    def test_batch_upload_preserves_copy_when_indexed_original_cannot_be_restored(self):
+        with (
+            patch.object(webapp, "family", return_value={"id": 1}),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(webapp, "STORAGE_BACKEND", "local"),
+            patch.object(webapp.db, "patient_records", return_value=[{"name": "Саша", "birth_date": ""}]),
+            patch.object(webapp, "ocr_file", return_value="synthetic OCR"),
+            patch.object(webapp, "analyze_document", return_value={
+                "primary_type": "не определено", "review_required": True,
+                "document_types": [], "confidence": "low",
+            }),
+            patch.object(webapp, "extract_registered_patient", return_value="Саша"),
+            patch.object(webapp, "extract_patient_birth_date", return_value=""),
+            patch.object(webapp, "parse_date_from_text", return_value=""),
+            patch.object(webapp.db, "document_exists", return_value=True),
+            patch.object(webapp, "_local_archive_original_available", return_value=False),
+            patch.object(webapp, "_restore_local_indexed_document", return_value=False),
+            patch.object(webapp.db, "add_pending_doc", return_value=77) as add_pending,
+        ):
+            response = self.client.post(
+                "/upload",
+                data={"family_id": "1", "ai_consent": "false"},
+                files=[("files", ("scan.pdf", b"original pdf bytes", "application/pdf"))],
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("копия сохранена во входящих", response.text)
+        add_pending.assert_called_once()
+        self.assertEqual(add_pending.call_args.args[:3][0:2], (1, "scan.pdf"))
+        self.assertEqual(add_pending.call_args.args[4], "synthetic OCR")
+
+    def test_direct_duplicate_upload_restores_missing_local_original(self):
+        with (
+            patch.object(webapp, "family"),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(webapp, "STORAGE_BACKEND", "local"),
+            patch.object(webapp.db, "patients", return_value=["Саша"]),
+            patch.object(webapp, "ocr_file", return_value="synthetic OCR"),
+            patch.object(webapp, "analyze_document", return_value={
+                "primary_type": "не определено", "review_required": True,
+                "document_types": [], "confidence": "low",
+            }),
+            patch.object(webapp, "extract_keywords", return_value=[]),
+            patch.object(webapp, "parse_date_from_text", return_value=""),
+            patch.object(webapp, "normalize_extension", return_value="pdf"),
+            patch.object(webapp.db, "document_exists", return_value=True),
+            patch.object(webapp, "_local_archive_original_available", return_value=False),
+            patch.object(webapp, "_restore_local_indexed_document", return_value=True) as restore,
+            patch.object(webapp.db, "add_doc") as add_doc,
+        ):
+            response = self.client.post(
+                "/families/1/patients/Саша/upload",
+                files={"file": ("scan.pdf", b"original pdf bytes", "application/pdf")},
+                data={"ai_consent": "false"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Документ восстановлен", response.text)
+        restore.assert_called_once()
+        add_doc.assert_not_called()
+
+    def test_pending_duplicate_restores_missing_indexed_original_and_ocr_sidecar(self):
+        import hashlib
+        import tempfile
+        from pathlib import Path
+        import local_storage
+
+        payload = b"recovered medical document"
+        digest = hashlib.sha256(payload).hexdigest()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            patient_dir = root / "family_1" / local_storage._component("Саша")
+            original = patient_dir / "scan.pdf"
+            sidecar = patient_dir / "scan.txt"
+            source = root / "pending-copy.pdf"
+            source.write_bytes(payload)
+            with (
+                patch.object(local_storage, "DATA_ROOT", root),
+                patch.object(webapp.db, "get_document_storage_paths", return_value={
+                    "remote": str(original), "ocr_remote": str(sidecar)
+                }),
+            ):
+                restored = webapp._restore_local_indexed_document(
+                    1, "Саша", digest, source, "восстановленный OCR"
+                )
+            self.assertTrue(restored)
+            self.assertEqual(original.read_bytes(), payload)
+            self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(), digest)
+            self.assertEqual(sidecar.read_text(encoding="utf-8"), "восстановленный OCR")
+            self.assertEqual(original.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(sidecar.stat().st_mode & 0o777, 0o600)
+
+    def test_restore_refuses_to_overwrite_corrupt_existing_original(self):
+        import hashlib
+        import tempfile
+        from pathlib import Path
+        import local_storage
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            patient_dir = root / "family_1" / local_storage._component("Саша")
+            patient_dir.mkdir(parents=True)
+            original = patient_dir / "scan.pdf"
+            original.write_bytes(b"corrupt existing bytes")
+            sidecar = patient_dir / "scan.txt"
+            source = root / "pending-copy.pdf"
+            source.write_bytes(b"valid original bytes")
+            with (
+                patch.object(local_storage, "DATA_ROOT", root),
+                patch.object(webapp.db, "get_document_storage_paths", return_value={
+                    "remote": str(original), "ocr_remote": str(sidecar)
+                }),
+            ):
+                restored = webapp._restore_local_indexed_document(
+                    1, "Саша", hashlib.sha256(b"valid original bytes").hexdigest(),
+                    source, "valid OCR"
+                )
+            self.assertFalse(restored)
+            self.assertEqual(original.read_bytes(), b"corrupt existing bytes")
+            self.assertFalse(sidecar.exists())
 
     def test_local_archive_original_verification_checks_root_and_digest(self):
         import hashlib
@@ -263,7 +412,9 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
-            original = root / "original.pdf"
+            patient_dir = root / "family_1" / local_storage._component("Саша")
+            patient_dir.mkdir(parents=True)
+            original = patient_dir / "original.pdf"
             original.write_bytes(b"known original bytes")
             digest = hashlib.sha256(b"known original bytes").hexdigest()
             with (
@@ -276,6 +427,15 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
                 outside.write_bytes(b"known original bytes")
                 try:
                     with patch.object(webapp.db, "get_document_storage_paths", return_value={"remote": str(outside)}):
+                        self.assertFalse(webapp._local_archive_original_available(1, "Саша", digest))
+                    wrong_patient = root / "family_1" / local_storage._component("Маша") / "original.pdf"
+                    wrong_patient.parent.mkdir(parents=True)
+                    wrong_patient.write_bytes(b"known original bytes")
+                    with patch.object(webapp.db, "get_document_storage_paths", return_value={"remote": str(wrong_patient)}):
+                        self.assertFalse(webapp._local_archive_original_available(1, "Саша", digest))
+                    symlinked = patient_dir / "symlinked.pdf"
+                    symlinked.symlink_to(original)
+                    with patch.object(webapp.db, "get_document_storage_paths", return_value={"remote": str(symlinked)}):
                         self.assertFalse(webapp._local_archive_original_available(1, "Саша", digest))
                 finally:
                     outside.unlink(missing_ok=True)
