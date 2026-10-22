@@ -46,6 +46,18 @@ def provider_config():
     return provider, token, url, model, key_name
 
 
+def generation_was_truncated(metadata):
+    """Normalize provider-specific finish reasons that mean output hit a generation limit."""
+    if not isinstance(metadata, dict):
+        return False
+    reason = str(metadata.get("finish_reason") or "").strip().casefold()
+    normalized = re.sub(r"[-\s]+", "_", reason)
+    return normalized in {
+        "length", "max_tokens", "max_output_tokens", "token_limit",
+        "max_completion_tokens", "output_limit", "length_limit",
+    }
+
+
 def chat_completion(messages, max_tokens=1200, temperature=0.1, timeout=90, return_metadata=False, trace_id=None):
     """Call an OpenAI-compatible provider; optionally return completion/usage metadata."""
     provider, token, url, model, key_name = provider_config()
@@ -241,7 +253,7 @@ def answer_archive_question(query, patient, context="", history=None, trace_id=N
             answer = cleaned
         elif re.search(r'"(?:answer|missing_documents|data_completeness)"\s*:', answer):
             answer = "Не удалось корректно обработать ответ модели. Попробуйте переформулировать вопрос."
-        if metadata.get("finish_reason") in {"length", "max_tokens", "token_limit", "max_output_tokens"}:
+        if generation_was_truncated(metadata):
             answer += (
                 "\n\n⚠️ Ответ мог быть обрезан лимитом генерации. "
                 "Попросите продолжить ответ, чтобы получить оставшуюся часть."
