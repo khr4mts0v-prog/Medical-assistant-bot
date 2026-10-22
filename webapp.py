@@ -1528,6 +1528,32 @@ def upload_inbox(family_id:int=Form(...), files:list[UploadFile]=File(...), ai_c
                 keywords=extract_keywords(text,analysis)
                 date=parse_date_from_text(text)
                 if db.document_exists(family_id,patient,digest):
+                    if storage_backend == "local" and not _local_archive_original_available(family_id, patient, digest):
+                        restored = _restore_local_indexed_document(
+                            family_id, patient, digest, local, text
+                        )
+                        if restored:
+                            results.append(
+                                '<li><strong>'+html.escape(name)+'</strong>: оригинал и OCR восстановлены '
+                                'в архиве пациента '+html.escape(patient)+'.</li>'
+                            )
+                            continue
+                        # Keep a recoverable copy instead of silently treating a stale DB row as a duplicate.
+                        analysis["suggested_patient_name"] = patient
+                        pending_id = db.add_pending_doc(
+                            family_id, name, digest, local.read_bytes(), text, analysis
+                        )
+                        if pending_id is None:
+                            results.append(
+                                '<li><strong>'+html.escape(name)+'</strong>: оригинал не удалось безопасно '
+                                'восстановить; копия уже есть во входящих, требуется ручная проверка.</li>'
+                            )
+                        else:
+                            results.append(
+                                '<li><strong>'+html.escape(name)+'</strong>: оригинал не удалось безопасно '
+                                'восстановить; копия сохранена во входящих для ручной проверки.</li>'
+                            )
+                        continue
                     results.append('<li><strong>'+html.escape(name)+'</strong>: дубликат — уже есть у пациента '+html.escape(patient)+'.</li>')
                     continue
                 ex=normalize_extension(name)
