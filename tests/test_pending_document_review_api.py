@@ -202,5 +202,48 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
         )
 
 
+    def test_yandex_files_are_rolled_back_when_index_write_fails(self):
+        class FakeDisk:
+            def __init__(self):
+                self.uploaded = []
+                self.deleted = []
+            def ensure_folder(self, path):
+                pass
+            def upload_file(self, local, remote):
+                self.uploaded.append(remote)
+            def delete_file(self, remote):
+                self.deleted.append(remote)
+                return True
+
+        disk = FakeDisk()
+        pending = {
+            "id": 12, "name": "scan.pdf", "file_bytes": b"synthetic pdf bytes",
+            "text": "synthetic OCR text", "digest": "a" * 64, "analysis": {},
+        }
+        with (
+            patch.object(webapp, "family"),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(webapp, "STORAGE_BACKEND", "yandex"),
+            patch.object(webapp.tenancy, "get_yadisk_token", return_value="synthetic-token"),
+            patch.object(webapp.db, "get_pending_doc", return_value=pending),
+            patch.object(webapp.db, "patients", return_value=["Саша"]),
+            patch.object(webapp.db, "document_exists", return_value=False),
+            patch.object(webapp, "YaDiskClient", return_value=disk),
+            patch.object(webapp, "format_filename", return_value="scan.pdf"),
+            patch.object(webapp, "normalize_extension", return_value="pdf"),
+            patch.object(webapp, "extract_keywords", return_value=[]),
+            patch.object(webapp.db, "add_doc", return_value=False),
+            patch.object(webapp.db, "delete_pending_doc") as delete_pending,
+        ):
+            with self.assertRaises(webapp.HTTPException) as caught:
+                webapp.assign_pending_document(
+                    1, 12, "Саша", "не определено", "Скан", "", uid=123
+                )
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(len(disk.uploaded), 2)
+        self.assertEqual(disk.deleted, disk.uploaded)
+        delete_pending.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
