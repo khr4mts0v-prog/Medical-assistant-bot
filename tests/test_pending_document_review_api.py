@@ -270,7 +270,6 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
             patch.object(webapp, "extract_registered_patient", return_value="Саша"),
             patch.object(webapp, "extract_patient_birth_date", return_value=""),
             patch.object(webapp, "parse_date_from_text", return_value=""),
-            patch.object(webapp, "document_exists", create=True) as unused_document_exists,
             patch.object(webapp.db, "document_exists", return_value=True),
             patch.object(webapp, "_local_archive_original_available", return_value=False),
             patch.object(webapp, "_restore_local_indexed_document", return_value=True) as restore,
