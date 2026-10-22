@@ -251,7 +251,7 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
                     1, 12, "Саша", "не определено", "Скан", "", uid=123
                 )
         self.assertEqual(caught.exception.status_code, 409)
-        self.assertIn("во входящих сохранён", caught.exception.detail)
+        self.assertIn("во входящих сохранена", caught.exception.detail)
         delete_pending.assert_not_called()
         save_file.assert_not_called()
 
