@@ -46,7 +46,7 @@ class IntelligentSearchPatientAmbiguityApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["mode"], "analysis")
         self.assertIn("Уточни", payload["answer"])
-        self.assertIn("нескольким пациентам", payload["answer"])
+        self.assertIn("у нескольких пациентов", payload["answer"])
         self.assertEqual(payload["documents"], [])
         self.assertEqual(payload["data_completeness"], "insufficient")
         search.assert_not_called()
@@ -55,7 +55,8 @@ class IntelligentSearchPatientAmbiguityApiTests(unittest.TestCase):
     def test_patient_scope_cannot_be_used_to_select_unregistered_person(self):
         with (
             patch.object(assistant_routes.tenancy, "families_for_user", return_value=[{"id": 1}]),
-            patch.object(assistant_routes, "family_guard"),
+            patch.object(assistant_routes.tenancy, "role_for_user", return_value="admin"),
+            patch.object(assistant_routes.tenancy, "get_family", return_value={"id": 1}),
             patch.object(assistant_routes.db, "patients", return_value=["Олег", "Саша"]),
             patch.object(assistant_routes.db, "patient_records", return_value=[
                 {"name": "Олег", "aliases": ["Олег"]},
