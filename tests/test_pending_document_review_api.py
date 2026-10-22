@@ -256,6 +256,66 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
         save_file.assert_not_called()
 
 
+    def test_batch_upload_restores_missing_indexed_original(self):
+        with (
+            patch.object(webapp, "family", return_value={"id": 1}),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(webapp, "STORAGE_BACKEND", "local"),
+            patch.object(webapp.db, "patient_records", return_value=[{"name": "Саша", "birth_date": ""}]),
+            patch.object(webapp, "ocr_file", return_value="synthetic OCR"),
+            patch.object(webapp, "analyze_document", return_value={
+                "primary_type": "не определено", "review_required": True,
+                "document_types": [], "confidence": "low",
+            }),
+            patch.object(webapp, "extract_registered_patient", return_value="Саша"),
+            patch.object(webapp, "extract_patient_birth_date", return_value=""),
+            patch.object(webapp, "parse_date_from_text", return_value=""),
+            patch.object(webapp, "document_exists", create=True) as unused_document_exists,
+            patch.object(webapp.db, "document_exists", return_value=True),
+            patch.object(webapp, "_local_archive_original_available", return_value=False),
+            patch.object(webapp, "_restore_local_indexed_document", return_value=True) as restore,
+            patch.object(webapp.db, "add_pending_doc") as add_pending,
+        ):
+            response = self.client.post(
+                "/upload",
+                data={"family_id": "1", "ai_consent": "false"},
+                files=[("files", ("scan.pdf", b"original pdf bytes", "application/pdf"))],
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("оригинал и OCR восстановлены", response.text)
+        restore.assert_called_once()
+        add_pending.assert_not_called()
+
+    def test_batch_upload_preserves_copy_when_indexed_original_cannot_be_restored(self):
+        with (
+            patch.object(webapp, "family", return_value={"id": 1}),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(webapp, "STORAGE_BACKEND", "local"),
+            patch.object(webapp.db, "patient_records", return_value=[{"name": "Саша", "birth_date": ""}]),
+            patch.object(webapp, "ocr_file", return_value="synthetic OCR"),
+            patch.object(webapp, "analyze_document", return_value={
+                "primary_type": "не определено", "review_required": True,
+                "document_types": [], "confidence": "low",
+            }),
+            patch.object(webapp, "extract_registered_patient", return_value="Саша"),
+            patch.object(webapp, "extract_patient_birth_date", return_value=""),
+            patch.object(webapp, "parse_date_from_text", return_value=""),
+            patch.object(webapp.db, "document_exists", return_value=True),
+            patch.object(webapp, "_local_archive_original_available", return_value=False),
+            patch.object(webapp, "_restore_local_indexed_document", return_value=False),
+            patch.object(webapp.db, "add_pending_doc", return_value=77) as add_pending,
+        ):
+            response = self.client.post(
+                "/upload",
+                data={"family_id": "1", "ai_consent": "false"},
+                files=[("files", ("scan.pdf", b"original pdf bytes", "application/pdf"))],
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("копия сохранена во входящих", response.text)
+        add_pending.assert_called_once()
+        self.assertEqual(add_pending.call_args.args[:3][0:2], (1, "scan.pdf"))
+        self.assertEqual(add_pending.call_args.args[4], "synthetic OCR")
+
     def test_direct_duplicate_upload_restores_missing_local_original(self):
         with (
             patch.object(webapp, "family"),
