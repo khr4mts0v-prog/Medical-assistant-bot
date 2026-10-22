@@ -157,6 +157,25 @@ class TestPatientSelectionApi:
         assert answer.call_args.args[1] == ["Олег", "Саша"]
         assert {row["patient"] for row in answer.call_args.args[2]} == {"Олег", "Саша"}
 
+    def test_duplicate_custom_alias_requires_patient_clarification(self):
+        with patch("database.patient_records", return_value=[
+            {"name": "Дмитрий Иванов", "aliases": ["Дмитрий Иванов", "Димка"]},
+            {"name": "Денис Петров", "aliases": ["Денис Петров", "Димка"]},
+        ]), patch("assistant_routes.chat_completion") as completion, \
+             patch("assistant_routes._planner") as planner, \
+             patch("assistant_routes._retrieve") as retrieve:
+            response = self.client.post("/api/intelligent-search", json={
+                "query": "Сравни документы Димка", "family_id": 1,
+                "document_selection_mode": False, "selected_document_ids": [], "consent": False,
+            })
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert "псевдоним назначен нескольким пациентам" in payload["answer"]
+        assert payload["documents"] == []
+        completion.assert_not_called()
+        planner.assert_not_called()
+        retrieve.assert_not_called()
+
     def test_selected_mode_rejects_document_from_another_patient(self):
         with patch("database.get_documents_by_ids", return_value=[self.sasha_mri]):
             response = self.client.post("/api/intelligent-search", json={
