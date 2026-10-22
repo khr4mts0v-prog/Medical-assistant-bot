@@ -41,6 +41,39 @@ class PatientDialogueRegressionTests(unittest.TestCase):
         # A request that already specifies a medical topic should search it directly.
         self.assertFalse(assistant_routes._looks_like_patient_topic_ellipsis("А теперь по Саше по крови", ["Саша"]))
 
+    def test_switching_patient_keeps_question_but_drops_previous_answer(self):
+        previous = {
+            "question": "Какие анализы крови были у Олега?",
+            "answer": "У Олега гемоглобин 120, ферритин 18.",
+        }
+        history = assistant_routes._history_for_current_patient(
+            previous, ["Саша"], ["Олег"]
+        )
+        self.assertEqual(len(history), 1)
+        self.assertIn("Какие анализы крови были у Олега?", history[0])
+        self.assertNotIn("гемоглобин 120", history[0])
+        self.assertNotIn("ферритин 18", history[0])
+
+    def test_same_patient_followup_can_keep_previous_answer_as_dialogue_context(self):
+        previous = {
+            "question": "Какие анализы крови были у Олега?",
+            "answer": "У Олега гемоглобин 120, ферритин 18.",
+        }
+        history = assistant_routes._history_for_current_patient(
+            previous, ["Олег"], ["Олег"]
+        )
+        self.assertEqual(len(history), 1)
+        self.assertIn("гемоглобин 120", history[0])
+        self.assertIn("только контекст диалога, не медицинский источник", history[0])
+
+    def test_missing_current_patient_inherits_previous_patient_context(self):
+        previous = {
+            "question": "Какие анализы крови были у Олега?",
+            "answer": "У Олега гемоглобин 120.",
+        }
+        history = assistant_routes._history_for_current_patient(previous, [], ["Олег"])
+        self.assertIn("гемоглобин 120", history[0])
+
     def test_standalone_general_definition_is_not_a_followup(self):
         self.assertFalse(assistant_routes._looks_like_contextual_medical_followup("Что такое ферритин?"))
 
