@@ -869,7 +869,8 @@ def _parse_structured_answer(raw):
                 "date": " ".join(sanitize_model_text(item.get("fact_date")).split())[:40],
             })
     return {"answer": answer_text, "missing_documents": gaps,
-            "limitations": limits, "data_completeness": completeness, "memory_updates": updates}
+            "limitations": limits, "data_completeness": completeness, "memory_updates": updates,
+            "_parse_recovered": recovered_answer}
 
 
 def _structured_archive_answer(question, patients, rows, history=None, memory_context="", trace_id=None):
