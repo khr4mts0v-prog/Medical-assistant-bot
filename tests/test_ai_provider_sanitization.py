@@ -5,6 +5,15 @@ import ai_provider
 
 
 class ProviderResponseSanitizationTests(unittest.TestCase):
+    def test_generation_truncation_normalizes_provider_finish_reasons(self):
+        for reason in ("length", "max_tokens", "MAX_TOKENS", "MAX_OUTPUT_TOKENS", "max-output-tokens", " token_limit "):
+            with self.subTest(reason=reason):
+                self.assertTrue(ai_provider.generation_was_truncated({"finish_reason": reason}))
+        for reason in (None, "", "stop", "content_filter", "tool_calls"):
+            with self.subTest(reason=reason):
+                self.assertFalse(ai_provider.generation_was_truncated({"finish_reason": reason}))
+        self.assertFalse(ai_provider.generation_was_truncated(None))
+
     def test_strips_structured_metadata_after_plain_answer(self):
         raw = "Гемоглобин немного снижен.\\nmissing_documents: []\\nlimitations: []"
         self.assertEqual(
