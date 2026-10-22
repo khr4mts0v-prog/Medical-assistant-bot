@@ -234,6 +234,35 @@ class AssistantChatGapTests(unittest.TestCase):
         records = [{"name": "Александр", "aliases": ["Александр"]}]
         self.assertEqual(assistant._mentioned_people(records, "Дай сводку по УЗИ Саши"), ["Александр"])
 
+    def test_ambiguous_shared_nickname_is_not_resolved_to_multiple_patients(self):
+        records = [
+            {"name": "Александр Иванов", "aliases": ["Саша"]},
+            {"name": "Александра Петрова", "aliases": ["Саша"]},
+        ]
+        matched = assistant._mentioned_people(records, "Что известно про Сашу?")
+        self.assertEqual(matched, ["Александр Иванов", "Александра Петрова"])
+        self.assertTrue(assistant._has_ambiguous_nickname_reference(records, "Что известно про Сашу?", matched))
+
+    def test_explicit_name_disambiguates_shared_nickname(self):
+        records = [
+            {"name": "Александр Иванов", "aliases": ["Саша"]},
+            {"name": "Александра Петрова", "aliases": ["Саша"]},
+            {"name": "Олег", "aliases": ["Олег"]},
+        ]
+        matched = assistant._mentioned_people(records, "Что известно про Сашу и Олега?")
+        self.assertEqual(matched, ["Александр Иванов", "Александра Петрова", "Олег"])
+        self.assertFalse(assistant._has_ambiguous_nickname_reference(records, "Что известно про Сашу и Олега?", matched))
+
+    def test_full_name_disambiguates_shared_nickname(self):
+        records = [
+            {"name": "Александр Иванов", "aliases": ["Саша"]},
+            {"name": "Александра Петрова", "aliases": ["Саша"]},
+        ]
+        question = "Расскажи про Александра Иванова"
+        matched = assistant._mentioned_people(records, question)
+        self.assertEqual(matched, ["Александр Иванов"])
+        self.assertFalse(assistant._has_ambiguous_nickname_reference(records, question, matched))
+
     def test_canonical_name_still_matches_when_aliases_only_contain_nickname(self):
         records = [{"name": "Храмцов Александр Михайлович", "aliases": ["Саша"]}]
         self.assertEqual(
