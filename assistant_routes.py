@@ -445,6 +445,14 @@ def _resolve_patient_scope(people, requested_patient):
     return patient
 
 
+def _validate_document_selection_mode(selection_mode, selected_ids, patient_scope):
+    """Reject stale or contradictory selection payloads instead of silently broadening retrieval."""
+    if selection_mode and not patient_scope:
+        raise ValueError("Режим выбора документов доступен только из карточки пациента")
+    if not selection_mode and selected_ids:
+        raise ValueError("Получен список документов, но режим выбора выключен. Включите выбор или повторите запрос без списка")
+
+
 def _selected_patient_documents(fid, patient, selected_ids):
     """Resolve a user-selected source set only within the exact family/patient boundary."""
     if any(isinstance(value, bool) or not isinstance(value, int) for value in selected_ids):
@@ -1995,16 +2003,16 @@ def install_assistant_routes(app, current_user, family_guard):
         ):
             raise HTTPException(400, "Некорректный список выбранных документов")
         selected_ids = list(dict.fromkeys(raw_selected_ids))
+        try:
+            _validate_document_selection_mode(selection_mode, selected_ids, forced_patient)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
         selected_document_rows = []
         if selection_mode:
-            if not forced_patient:
-                raise HTTPException(400, "Режим выбора документов доступен только из карточки пациента")
             try:
                 selected_document_rows = _selected_patient_documents(fid, forced_patient, selected_ids)
             except ValueError as exc:
                 raise HTTPException(400, str(exc))
-        elif selected_ids:
-            selected_ids = []
         # Conversation turns are client-supplied, so scope tags are mandatory. A stale turn
         # from another family or patient must not become prompt context for this request.
         conversation_raw = payload.get("conversation")

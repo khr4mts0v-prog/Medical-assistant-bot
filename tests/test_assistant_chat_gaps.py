@@ -11,6 +11,14 @@ class AssistantChatGapTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "не найден"):
             assistant._resolve_patient_scope(["Олег", "Саша"], "Мария")
 
+    def test_document_selection_mode_rejects_stale_ids_instead_of_silently_broadening_scope(self):
+        assistant._validate_document_selection_mode(False, [], "")
+        assistant._validate_document_selection_mode(True, [10], "Олег")
+        with self.assertRaisesRegex(ValueError, "режим выбора выключен"):
+            assistant._validate_document_selection_mode(False, [10], "Олег")
+        with self.assertRaisesRegex(ValueError, "только из карточки пациента"):
+            assistant._validate_document_selection_mode(True, [10], "")
+
     def test_selected_document_resolver_returns_only_requested_sources_in_selection_order(self):
         rows = [
             {"id": 10, "patient": "Олег", "name": "ОАК.pdf", "text": "Гемоглобин"},
