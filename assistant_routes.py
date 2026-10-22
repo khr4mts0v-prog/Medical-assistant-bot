@@ -774,6 +774,26 @@ def _parse_structured_answer(raw):
                 data = candidate
         except Exception:
             data = None
+    recovered_answer = False
+    if data is None and text.lstrip().startswith("{"):
+        # If the provider cut off the outer JSON after a complete answer string,
+        # preserve that user-facing text rather than replacing it with a generic error.
+        answer_key = re.search(r'"answer"\s*:\s*', text)
+        if answer_key:
+            try:
+                candidate, _end = decoder.raw_decode(text[answer_key.end():])
+            except (ValueError, json.JSONDecodeError):
+                candidate = None
+            if isinstance(candidate, str) and candidate.strip():
+                data = {
+                    "answer": candidate,
+                    "missing_documents": [],
+                    "limitations": [],
+                    "data_completeness": "partial",
+                    "memory_updates": [],
+                    "_parse_recovered": True,
+                }
+                recovered_answer = True
     if not isinstance(data, dict) or not sanitize_model_text(data.get("answer") or ""):
         # Plain prose can be a useful fallback, but never expose serialized JSON as if it
         # were a user-facing answer when structured output is malformed or truncated.
@@ -849,7 +869,8 @@ def _parse_structured_answer(raw):
                 "date": " ".join(sanitize_model_text(item.get("fact_date")).split())[:40],
             })
     return {"answer": answer_text, "missing_documents": gaps,
-            "limitations": limits, "data_completeness": completeness, "memory_updates": updates}
+            "limitations": limits, "data_completeness": completeness, "memory_updates": updates,
+            "_parse_recovered": recovered_answer}
 
 
 def _structured_archive_answer(question, patients, rows, history=None, memory_context="", trace_id=None):
@@ -952,16 +973,26 @@ def _structured_archive_answer(question, patients, rows, history=None, memory_co
     answer_data.setdefault("limitations", [])
     answer_data.setdefault("data_completeness", "unknown")
     answer_data.setdefault("memory_updates", [])
-    truncated = metadata.get("finish_reason") in {"length", "max_tokens", "token_limit", "max_output_tokens"}
+    parse_recovered = bool(answer_data.pop("_parse_recovered", False))
+    provider_truncated = metadata.get("finish_reason") in {"length", "max_tokens", "token_limit", "max_output_tokens"}
+    truncated = provider_truncated or parse_recovered
     answer_data["generation_status"] = "partial" if truncated else "complete"
     if truncated:
-        warning = (
-            "⚠️ Ответ мог быть обрезан лимитом генерации; провайдер не завершил вывод. "
-            "Не считайте этот ответ исчерпывающим; повторите запрос с более узким вопросом."
-        )
+        if provider_truncated:
+            warning = (
+                "⚠️ Ответ мог быть обрезан лимитом генерации; провайдер не завершил вывод. "
+                "Не считайте этот ответ исчерпывающим; повторите запрос с более узким вопросом."
+            )
+            limitation = "Ответ модели достиг лимита генерации и может быть неполным."
+        else:
+            warning = (
+                "⚠️ Ответ модели пришёл в неполном формате; показана распознанная часть. "
+                "Проверьте её и при необходимости повторите запрос."
+            )
+            limitation = "Ответ модели имел неполный JSON; результат может быть неполным."
         answer_data["answer"] = (answer_data.get("answer", "").rstrip() + "\n\n" + warning).strip()
         answer_data["limitations"] = list(dict.fromkeys(
-            list(answer_data.get("limitations") or []) + ["Ответ модели достиг лимита генерации и может быть неполным."]
+            list(answer_data.get("limitations") or []) + [limitation]
         ))[:6]
         if answer_data.get("data_completeness") == "sufficient":
             answer_data["data_completeness"] = "partial"
