@@ -433,6 +433,10 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
                     wrong_patient.write_bytes(b"known original bytes")
                     with patch.object(webapp.db, "get_document_storage_paths", return_value={"remote": str(wrong_patient)}):
                         self.assertFalse(webapp._local_archive_original_available(1, "Саша", digest))
+                    symlinked = patient_dir / "symlinked.pdf"
+                    symlinked.symlink_to(original)
+                    with patch.object(webapp.db, "get_document_storage_paths", return_value={"remote": str(symlinked)}):
+                        self.assertFalse(webapp._local_archive_original_available(1, "Саша", digest))
                 finally:
                     outside.unlink(missing_ok=True)
 
