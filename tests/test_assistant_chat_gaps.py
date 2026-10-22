@@ -243,7 +243,7 @@ class AssistantChatGapTests(unittest.TestCase):
         self.assertEqual(matched, ["Александр Иванов", "Александра Петрова"])
         self.assertTrue(assistant._has_ambiguous_nickname_reference(records, "Что известно про Сашу?", matched))
 
-    def test_explicit_name_disambiguates_shared_nickname(self):
+    def test_other_explicit_name_does_not_resolve_shared_nickname(self):
         records = [
             {"name": "Александр Иванов", "aliases": ["Саша"]},
             {"name": "Александра Петрова", "aliases": ["Саша"]},
