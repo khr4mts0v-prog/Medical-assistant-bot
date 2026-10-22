@@ -251,7 +251,7 @@ class AssistantChatGapTests(unittest.TestCase):
         ]
         matched = assistant._mentioned_people(records, "Что известно про Сашу и Олега?")
         self.assertEqual(matched, ["Александр Иванов", "Александра Петрова", "Олег"])
-        self.assertFalse(assistant._has_ambiguous_nickname_reference(records, "Что известно про Сашу и Олега?", matched))
+        self.assertTrue(assistant._has_ambiguous_nickname_reference(records, "Что известно про Сашу и Олега?", matched))
 
     def test_full_name_disambiguates_shared_nickname(self):
         records = [
