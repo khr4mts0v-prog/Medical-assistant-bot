@@ -64,11 +64,36 @@ class ModelOutputSanitizationTests(unittest.TestCase):
     def test_truncated_structured_json_is_never_reported_as_complete(self, completion):
         result = assistant._structured_archive_answer("Сделай сводку", ["Тестовый пациент"], [])
         self.assertEqual(result["generation_status"], "partial")
+        self.assertIn("Неполный ответ", result["answer"])
         self.assertIn("Ответ мог быть обрезан лимитом генерации", result["answer"])
-        self.assertIn("Не удалось корректно обработать", result["answer"])
+        self.assertNotIn("Не удалось корректно обработать", result["answer"])
         self.assertEqual(result["memory_updates"], [])
         self.assertEqual(result["missing_documents"], [])
         self.assertNotEqual(result["data_completeness"], "sufficient")
+        completion.assert_called_once()
+
+
+    @patch("assistant_routes.chat_completion", return_value={
+        "content": '{"answer":"Полезная часть ответа", "missing_documents":[',
+        "metadata": {"finish_reason": "length", "completion_tokens": 2400},
+    })
+    def test_truncated_outer_json_preserves_complete_answer_string(self, completion):
+        result = assistant._structured_archive_answer("Сделай сводку", ["Тестовый пациент"], [])
+        self.assertIn("Полезная часть ответа", result["answer"])
+        self.assertEqual(result["generation_status"], "partial")
+        self.assertEqual(result["missing_documents"], [])
+        self.assertEqual(result["memory_updates"], [])
+        completion.assert_called_once()
+
+    @patch("assistant_routes.chat_completion", return_value={
+        "content": '{"answer":"строка оборвана',
+        "metadata": {"finish_reason": "length", "completion_tokens": 2400},
+    })
+    def test_truncated_answer_string_is_not_guessed_or_exposed_as_json(self, completion):
+        result = assistant._structured_archive_answer("Сделай сводку", ["Тестовый пациент"], [])
+        self.assertIn("Не удалось корректно обработать", result["answer"])
+        self.assertNotIn('{"answer"', result["answer"])
+        self.assertEqual(result["generation_status"], "partial")
         completion.assert_called_once()
 
     def test_explicit_memory_command_accepts_bare_height_and_approximate_weight(self):
