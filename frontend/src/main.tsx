@@ -1266,6 +1266,7 @@ function App() {
                   } catch {}
                   setSmartConsent(false);
                 }
+                if (requestGeneration !== smartRequestGenerationRef.current) return;
                 setSmartConversation((previous:any[]) => [...previous,{
                   question:submittedQuestion,
                   result,
