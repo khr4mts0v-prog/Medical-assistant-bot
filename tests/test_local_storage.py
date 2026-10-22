@@ -71,5 +71,37 @@ class LocalStorageTests(unittest.TestCase):
                         local_storage.save_file(1, "Sasha", "original.bin", source)
                 self.assertEqual(list((root / "family_1" / "Sasha").iterdir()), [])
 
+    def test_cleanup_error_does_not_mask_original_copy_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "archive"
+            source = Path(tmp) / "source.bin"
+            source.write_bytes(b"x" * (1024 * 1024 + 1))
+            real_open = Path.open
+
+            class Reader:
+                def __init__(self, file):
+                    self.file = file
+                    self.calls = 0
+                def __enter__(self):
+                    self.file.__enter__()
+                    return self
+                def __exit__(self, *args):
+                    return self.file.__exit__(*args)
+                def read(self, size=-1):
+                    self.calls += 1
+                    if self.calls > 1:
+                        raise OSError("original copy failure")
+                    return self.file.read(size)
+
+            def open_path(path, mode="r", *args, **kwargs):
+                handle = real_open(path, mode, *args, **kwargs)
+                return Reader(handle) if path == source and mode == "rb" else handle
+
+            with patch.object(local_storage, "DATA_ROOT", root.resolve()):
+                with patch.object(Path, "open", autospec=True, side_effect=open_path):
+                    with patch.object(Path, "unlink", autospec=True, side_effect=OSError("cleanup failure")):
+                        with self.assertRaisesRegex(OSError, "original copy failure"):
+                            local_storage.save_file(1, "Sasha", "original.bin", source)
+
 if __name__ == "__main__":
     unittest.main()
