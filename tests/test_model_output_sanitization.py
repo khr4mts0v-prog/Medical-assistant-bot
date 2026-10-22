@@ -133,11 +133,11 @@ class ModelOutputSanitizationTests(unittest.TestCase):
         self.assertEqual(parsed["answer"], "Короткий ответ.")
         self.assertEqual(parsed["data_completeness"], "general")
 
-    def test_malformed_json_is_never_returned_as_visible_answer(self):
-        raw = '{"answer":"Это незакрытый JSON", "limitations": ['
-        answer = assistant._parse_structured_answer(raw)["answer"]
-        self.assertNotIn('{"answer"', answer)
-        self.assertIn("Не удалось корректно обработать", answer)
+    def test_malformed_outer_json_preserves_complete_answer_string(self):
+        raw = '{"answer":"Это полезный ответ", "limitations": ['
+        parsed = assistant._parse_structured_answer(raw)
+        self.assertEqual(parsed["answer"], "Это полезный ответ")
+        self.assertTrue(parsed["_parse_recovered"])
 
 
 if __name__ == "__main__":
