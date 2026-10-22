@@ -436,6 +436,47 @@ def _mentioned_people(records, question):
     return list(dict.fromkeys(x for x in found if x))
 
 
+
+def _has_ambiguous_nickname_reference(records, question, matched_people):
+    """Return true when a generic nickname points at multiple patients without a distinguishing name."""
+    if len(set(matched_people or [])) < 2:
+        return False
+    q = " ".join(str(question or "").casefold().replace("ё", "е").split())
+    generic_nicknames = {
+        "саша", "саши", "саше", "сашу", "сашей", "сашка", "сашки", "сашке",
+        "сашку", "сашкой", "сашкою", "сашенька", "сашеньки", "сашеньке",
+        "сашеньку", "сашенькой", "саня", "сани", "сане", "саню", "саней",
+        "маша", "маши", "маше", "машу", "машей", "машка", "машки", "машке",
+        "машку", "машкой", "машкою", "машенька", "машеньки", "машеньке",
+        "машеньку", "машенькой", "машенькою",
+    }
+    if not any(re.search(r"(?<![a-zа-яё])" + re.escape(nick) + r"(?![a-zа-яё])", q) for nick in generic_nicknames):
+        return False
+
+    by_name = {str(record.get("name") or "").strip(): record for record in records}
+    for patient in set(matched_people):
+        record = by_name.get(patient)
+        if not record:
+            continue
+        identities = list(record.get("aliases") or []) + [patient]
+        distinguishing_forms = set()
+        for identity in identities:
+            for token in re.findall(r"[a-zа-яё]+", str(identity or "").casefold().replace("ё", "е")):
+                if len(token) < 3 or token in generic_nicknames:
+                    continue
+                distinguishing_forms.add(token)
+                if token[-1] in "бвгджзклмнпрстфхцчшщ":
+                    distinguishing_forms.update(token + suffix for suffix in ("а", "у", "е", "ом", "ы", "и"))
+                if token.endswith("й"):
+                    distinguishing_forms.add(token[:-1] + "я")
+                if token.endswith(("а", "я")):
+                    distinguishing_forms.add(token[:-1] + "и")
+        if any(re.search(r"(?<![a-zа-яё])" + re.escape(form) + r"(?![a-zа-яё])", q) for form in distinguishing_forms):
+            # At least one matched patient has an explicit non-nickname identifier in the query.
+            # This covers requests such as "Саша и Олег" while keeping "Саша" ambiguous.
+            return False
+    return True
+
 def _row_matches_patient(row, patient):
     """Require an explicit stored patient match before any document reaches the model or UI."""
     row_patient = " ".join(str((row or {}).get("patient") or "").casefold().replace("ё", "е").split())
@@ -2056,6 +2097,19 @@ def install_assistant_routes(app, current_user, family_guard):
         if forced_patient:
             current_mentioned = [forced_patient]
             previous_turn_people = [forced_patient] if previous_turn else []
+        if not forced_patient and _has_ambiguous_nickname_reference(patient_records, query, query_mentioned_people):
+            answer = ("Уточни, пожалуйста, кого ты имеешь в виду: короткое имя совпадает у нескольких пациентов. "
+                      "Назови имя/фамилию или выбери пациента в архиве — я не буду смешивать их медицинские данные.")
+            ai_trace_log.emit(trace_id, "patient.ambiguous_nickname", patient_count=len(patient_records),
+                matched_patient_count=len(query_mentioned_people), model_called=False)
+            try:
+                ai_interaction_log.record(family_id=fid, actor_id=uid, query=query, answer=answer,
+                    mode="ambiguous_patient", provider="local", model="none", duration_ms=0)
+            except Exception:
+                logging.warning("AI interaction logging skipped for ambiguous patient nickname")
+            return JSONResponse({"mode":"analysis", "answer":answer, "documents":[],
+                "missing_documents":[], "limitations":["Имя неоднозначно; медицинские документы не выбирались."],
+                "data_completeness":"insufficient", "memory_proposals":[]})
         standalone_general = _looks_like_standalone_general_question(query)
         fact_fragment = _looks_like_patient_fact_fragment(query)
         patient_topic_ellipsis = _looks_like_patient_topic_ellipsis(query, current_mentioned)
