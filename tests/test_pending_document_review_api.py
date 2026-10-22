@@ -1,5 +1,7 @@
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 os.environ.setdefault("WEB_USERNAME", "test-admin")
@@ -21,6 +23,142 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
     def tearDown(self):
         webapp.app.dependency_overrides.clear()
         webapp.app.dependency_overrides.update(self.original_overrides)
+
+    def _run_delete_document(self, root, original, ocr, delete_result=True):
+        import local_storage
+        from unittest.mock import patch
+
+        patient_dir = root / "family_1" / local_storage._component("Саша")
+        patient_dir.mkdir(parents=True, exist_ok=True)
+        original_path = patient_dir / "original.pdf"
+        ocr_path = patient_dir / "original.pdf.txt"
+        original_path.write_bytes(original)
+        ocr_path.write_text(ocr, encoding="utf-8")
+        with (
+            patch.object(webapp, "family"),
+            patch.object(webapp, "STORAGE_BACKEND", "local"),
+            patch.object(webapp.db, "get_doc", return_value={
+                "id": 44, "patient": "Саша", "remote": str(original_path),
+                "ocr_remote": str(ocr_path), "name": "original.pdf",
+            }),
+            patch.object(webapp.db, "delete_doc", return_value=delete_result),
+            patch.object(local_storage, "DATA_ROOT", root),
+        ):
+            response = self.client.post(
+                "/families/1/documents/44/delete",
+                data={"confirm": "yes"},
+                follow_redirects=False,
+            )
+        return response, original_path, ocr_path
+
+    def test_document_delete_rolls_files_back_when_database_delete_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            response, original, ocr = self._run_delete_document(
+                root, b"original bytes", "OCR text", delete_result=False
+            )
+            self.assertEqual(response.status_code, 500)
+            self.assertEqual(original.read_bytes(), b"original bytes")
+            self.assertEqual(ocr.read_text(encoding="utf-8"), "OCR text")
+            self.assertFalse(list(original.parent.glob(".*.deleting-*")))
+
+    def test_document_delete_removes_original_and_ocr_after_database_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            response, original, ocr = self._run_delete_document(
+                root, b"original bytes", "OCR text", delete_result=True
+            )
+            self.assertEqual(response.status_code, 303)
+            self.assertFalse(original.exists())
+            self.assertFalse(ocr.exists())
+            self.assertFalse(list(original.parent.glob(".*.deleting-*")))
+
+    def test_document_delete_rejects_symlink_without_touching_target_or_sidecar(self):
+        import tempfile
+        from pathlib import Path
+        import local_storage
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            patient_dir = root / "family_1" / local_storage._component("Саша")
+            patient_dir.mkdir(parents=True)
+            outside = root / "outside.pdf"
+            outside.write_bytes(b"do not delete")
+            symlink = patient_dir / "linked.pdf"
+            symlink.symlink_to(outside)
+            ocr = patient_dir / "linked.pdf.txt"
+            ocr.write_text("OCR stays", encoding="utf-8")
+            with (
+                patch.object(webapp, "family"),
+                patch.object(webapp, "STORAGE_BACKEND", "local"),
+                patch.object(webapp.db, "get_doc", return_value={
+                    "id": 44, "patient": "Саша", "remote": str(symlink),
+                    "ocr_remote": str(ocr), "name": "linked.pdf",
+                }),
+                patch.object(webapp.db, "delete_doc") as delete_doc,
+                patch.object(local_storage, "DATA_ROOT", root),
+            ):
+                response = self.client.post(
+                    "/families/1/documents/44/delete",
+                    data={"confirm": "yes"},
+                    follow_redirects=False,
+                )
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(outside.read_bytes(), b"do not delete")
+            self.assertTrue(symlink.is_symlink())
+            self.assertEqual(ocr.read_text(encoding="utf-8"), "OCR stays")
+            delete_doc.assert_not_called()
+
+    def test_document_delete_rejects_path_outside_patient_directory(self):
+        import tempfile
+        from pathlib import Path
+        import local_storage
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            patient_dir = root / "family_1" / local_storage._component("Саша")
+            patient_dir.mkdir(parents=True)
+            outside = root / "outside.pdf"
+            outside.write_bytes(b"do not delete")
+            with (
+                patch.object(webapp, "family"),
+                patch.object(webapp, "STORAGE_BACKEND", "local"),
+                patch.object(webapp.db, "get_doc", return_value={
+                    "id": 44, "patient": "Саша", "remote": str(outside),
+                    "ocr_remote": None, "name": "outside.pdf",
+                }),
+                patch.object(webapp.db, "delete_doc") as delete_doc,
+                patch.object(local_storage, "DATA_ROOT", root),
+            ):
+                response = self.client.post(
+                    "/families/1/documents/44/delete",
+                    data={"confirm": "yes"},
+                    follow_redirects=False,
+                )
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(outside.read_bytes(), b"do not delete")
+            delete_doc.assert_not_called()
+
+    def test_document_delete_reports_warning_if_trash_cleanup_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            import pathlib
+            real_unlink = pathlib.Path.unlink
+
+            def fail_for_staged_trash(path, *args, **kwargs):
+                if ".deleting-" in path.name:
+                    raise OSError("synthetic cleanup failure")
+                return real_unlink(path, *args, **kwargs)
+
+            with patch.object(pathlib.Path, "unlink", fail_for_staged_trash):
+                response, original, ocr = self._run_delete_document(
+                    root, b"original bytes", "OCR text", delete_result=True
+                )
+            self.assertEqual(response.status_code, 303)
+            self.assertIn("cleanup_warning=1", response.headers["location"])
+            self.assertFalse(original.exists())
+            self.assertFalse(ocr.exists())
+            self.assertEqual(len(list(original.parent.glob(".*.deleting-*"))), 2)
 
     def test_review_api_returns_editor_metadata_without_file_bytes(self):
         pending = {
