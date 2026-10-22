@@ -1100,7 +1100,7 @@ def patient_detail_api(fid:int,patient:str,q:str="",view:str="timeline",uid:int=
 
 
 @app.get("/families/{fid}/patients/{patient}",response_class=HTMLResponse)
-def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,cleanup_warning:int=0,uid:int=Depends(current_user)):
+def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,cleanup_warning:int=0,pending_cleanup_warning:int=0,uid:int=Depends(current_user)):
     family(fid,uid)
     if patient not in db.patients(fid): raise HTTPException(404,"Пациент не найден")
     upload_ui_limit_mb=min(MAX_UPLOAD_MB, DEMO_MAX_UPLOAD_MB) if is_demo_user(uid) else MAX_UPLOAD_MB
@@ -1112,6 +1112,7 @@ def patient_page(fid:int,patient:str,q:str="",view:str="timeline",deleted:int=0,
     b=[f'<p><a href="/?family_id={fid}">← К архиву</a></p>',f'<div class="patient-heading"><div><h2>{html.escape(patient)}</h2><p class="muted">{format_document_count(len(rows))}</p></div><div class="patient-actions"><a class="button-link patient-action-primary" href="#patient-assistant" data-patient-assistant="1" data-family-id="{fid}" data-patient="{html.escape(patient,quote=True)}">✦ Спросить ИИ</a><a class="button-link" href="/patient-memory?family_id={fid}&patient={safe_patient}">Память пациента</a><a class="button-link" href="/families/{fid}/patients/{safe_patient}/edit">Редактировать</a><a class="button-link" href="#patient-upload">＋ Добавить документы</a></div></div>']
     if deleted: b.append('<div class="notice-success" role="status">Документ удалён из архива.</div>')
     if cleanup_warning: b.append('<div class="notice-warning" role="status">Запись удалена, но временный файл не удалось окончательно очистить. Проверьте журнал приложения.</div>')
+    if pending_cleanup_warning: b.append('<div class="notice-warning" role="status">Документ сохранён в архиве, но запись во входящих не удалось очистить. Проверьте входящие; при повторной обработке дубликат не будет добавлен.</div>')
     b.append(f'<form class="card patient-search" method="get" action="{base}"><label for="patient-q">Поиск по документам пациента</label><div class="row"><input id="patient-q" type="search" name="q" value="{html.escape(q,quote=True)}" placeholder="Например: анализы, УЗИ, выписка"><input type="hidden" name="view" value="{view}"><button type="submit">Найти</button>')
     if q: b.append(f'<a class="button-link" href="{base}?view={view}">Сбросить</a>')
     b.append('</div></form>')
@@ -1954,10 +1955,23 @@ def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:st
                     "Файл с таким именем уже существует; запись во входящих сохранена. Повторите попытку.",
                 ) from exc
             raise
-        db.delete_pending_doc(fid,pending_id)
+        pending_cleanup_warning = False
+        try:
+            pending_deleted = db.delete_pending_doc(fid,pending_id)
+            if not pending_deleted:
+                pending_cleanup_warning = True
+                logging.error("Document %s saved but pending inbox row %s was not deleted", d.get("digest"), pending_id)
+        except Exception:
+            if storage_backend != "local":
+                raise
+            pending_cleanup_warning = True
+            logging.exception("Document saved locally but pending inbox cleanup failed for pending_id=%s", pending_id)
         if storage_backend=="yandex":
             hp=Path(td)/"history.txt"; hp.write_text(db.history(fid,patient),encoding="utf-8"); disk.upload_file(str(hp),folder+"/history.txt")
-    return RedirectResponse(f"/families/{fid}/patients/{patient}",status_code=303)
+    destination=f"/families/{fid}/patients/{patient}"
+    if pending_cleanup_warning:
+        destination += "?pending_cleanup_warning=1"
+    return RedirectResponse(destination,status_code=303)
 
 @app.post("/families/{fid}/patients/{patient}/upload",response_class=HTMLResponse)
 def upload(fid:int,patient:str,file:UploadFile=File(...),ai_consent:bool=Form(False),uid:int=Depends(current_user)):

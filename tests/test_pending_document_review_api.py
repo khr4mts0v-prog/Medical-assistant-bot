@@ -339,5 +339,44 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
 
 
 
+    def test_successful_local_assignment_warns_if_pending_cleanup_fails(self):
+        from pathlib import Path
+
+        pending = {
+            "id": 12, "name": "scan.pdf", "file_bytes": b"synthetic bytes",
+            "text": "synthetic OCR", "digest": "e" * 64, "analysis": {},
+        }
+        for delete_result in (False, OSError("synthetic SQLite cleanup failure")):
+            with self.subTest(delete_result=delete_result):
+                delete_patch = patch.object(
+                    webapp.db, "delete_pending_doc",
+                    side_effect=delete_result if isinstance(delete_result, Exception) else None,
+                    return_value=delete_result if not isinstance(delete_result, Exception) else None,
+                )
+                with (
+                    patch.object(webapp, "family"),
+                    patch.object(webapp, "is_demo_user", return_value=False),
+                    patch.object(webapp, "STORAGE_BACKEND", "local"),
+                    patch.object(webapp.db, "get_pending_doc", return_value=pending),
+                    patch.object(webapp.db, "patients", return_value=["Саша"]),
+                    patch.object(webapp.db, "document_exists", return_value=False),
+                    patch.object(webapp, "save_local_file", side_effect=[
+                        Path("/tmp/synthetic-original.pdf"), Path("/tmp/synthetic-ocr.txt")
+                    ]),
+                    delete_patch as delete_pending,
+                    patch.object(webapp.db, "add_doc", return_value=True),
+                    patch.object(webapp, "format_filename", return_value="scan.pdf"),
+                    patch.object(webapp, "normalize_extension", return_value="pdf"),
+                    patch.object(webapp, "extract_keywords", return_value=[]),
+                ):
+                    response = webapp.assign_pending_document(
+                        1, 12, "Саша", "не определено", "Скан", "", uid=123
+                    )
+                self.assertEqual(response.status_code, 303)
+                self.assertIn("pending_cleanup_warning=1", response.headers["location"])
+                delete_pending.assert_called_once_with(1, 12)
+
+
+
 if __name__ == "__main__":
     unittest.main()
