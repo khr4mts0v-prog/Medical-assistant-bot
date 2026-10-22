@@ -255,6 +255,66 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
         save_file.assert_not_called()
 
 
+    def test_pending_duplicate_restores_missing_indexed_original_and_ocr_sidecar(self):
+        import hashlib
+        import tempfile
+        from pathlib import Path
+        import local_storage
+
+        payload = b"recovered medical document"
+        digest = hashlib.sha256(payload).hexdigest()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            patient_dir = root / "family_1" / local_storage._component("Саша")
+            original = patient_dir / "scan.pdf"
+            sidecar = patient_dir / "scan.txt"
+            source = root / "pending-copy.pdf"
+            source.write_bytes(payload)
+            with (
+                patch.object(local_storage, "DATA_ROOT", root),
+                patch.object(webapp.db, "get_document_storage_paths", return_value={
+                    "remote": str(original), "ocr_remote": str(sidecar)
+                }),
+            ):
+                restored = webapp._restore_local_indexed_document(
+                    1, "Саша", digest, source, "восстановленный OCR"
+                )
+            self.assertTrue(restored)
+            self.assertEqual(original.read_bytes(), payload)
+            self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(), digest)
+            self.assertEqual(sidecar.read_text(encoding="utf-8"), "восстановленный OCR")
+            self.assertEqual(original.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(sidecar.stat().st_mode & 0o777, 0o600)
+
+    def test_restore_refuses_to_overwrite_corrupt_existing_original(self):
+        import hashlib
+        import tempfile
+        from pathlib import Path
+        import local_storage
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            patient_dir = root / "family_1" / local_storage._component("Саша")
+            patient_dir.mkdir(parents=True)
+            original = patient_dir / "scan.pdf"
+            original.write_bytes(b"corrupt existing bytes")
+            sidecar = patient_dir / "scan.txt"
+            source = root / "pending-copy.pdf"
+            source.write_bytes(b"valid original bytes")
+            with (
+                patch.object(local_storage, "DATA_ROOT", root),
+                patch.object(webapp.db, "get_document_storage_paths", return_value={
+                    "remote": str(original), "ocr_remote": str(sidecar)
+                }),
+            ):
+                restored = webapp._restore_local_indexed_document(
+                    1, "Саша", hashlib.sha256(b"valid original bytes").hexdigest(),
+                    source, "valid OCR"
+                )
+            self.assertFalse(restored)
+            self.assertEqual(original.read_bytes(), b"corrupt existing bytes")
+            self.assertFalse(sidecar.exists())
+
     def test_local_archive_original_verification_checks_root_and_digest(self):
         import hashlib
         import tempfile
