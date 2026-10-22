@@ -1922,7 +1922,10 @@ def _local_archive_original_available(fid, patient, digest):
     try:
         from local_storage import _component
         expected = (root / f"family_{int(fid)}" / _component(str(patient))).resolve()
-        original = Path(remote).resolve(strict=True)
+        original_path = Path(remote)
+        if root not in expected.parents or original_path.is_symlink():
+            return False
+        original = original_path.resolve(strict=True)
         if original.parent != expected or not original.is_file():
             return False
         hasher = hashlib.sha256()
@@ -1945,8 +1948,12 @@ def _restore_local_indexed_document(fid, patient, digest, source_path, ocr_text)
     expected = (root / f"family_{int(fid)}" / _component(str(patient))).resolve()
     created = []
     try:
-        original = Path(str(paths["remote"])).resolve()
-        sidecar = Path(str(paths["ocr_remote"])).resolve()
+        original_path = Path(str(paths["remote"]))
+        sidecar_path = Path(str(paths["ocr_remote"]))
+        if root not in expected.parents or original_path.is_symlink() or sidecar_path.is_symlink():
+            return False
+        original = original_path.resolve()
+        sidecar = sidecar_path.resolve()
         if original.parent != expected or sidecar.parent != expected:
             return False
         if original == sidecar or original.name == sidecar.name:
