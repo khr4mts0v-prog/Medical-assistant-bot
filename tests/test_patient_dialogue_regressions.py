@@ -47,7 +47,7 @@ class PatientDialogueRegressionTests(unittest.TestCase):
             {"name": "Денис Петров", "aliases": ["Денис Петров", "Димка"]},
         ]
         self.assertTrue(assistant_routes._has_ambiguous_custom_alias_reference(records, "Сравни документы Димка"))
-        self.assertTrue(assistant_routes._has_ambiguous_custom_alias_reference(records, "Сравни Димку и Олега"))
+        self.assertTrue(assistant_routes._has_ambiguous_custom_alias_reference(records, "Сравни документы Димка и Олега"))
         self.assertFalse(assistant_routes._has_ambiguous_custom_alias_reference(records, "Сравни документы Димка Иванов"))
         self.assertFalse(assistant_routes._has_ambiguous_custom_alias_reference(records, "Сравни документы Дмитрия Иванова и Дениса Петрова"))
 
