@@ -438,44 +438,51 @@ def _mentioned_people(records, question):
 
 
 def _has_ambiguous_nickname_reference(records, question, matched_people):
-    """Return true when a generic nickname points at multiple patients without a distinguishing name."""
-    if len(set(matched_people or [])) < 2:
-        return False
+    """Return true only when a nickname itself matches multiple patients without disambiguation."""
     q = " ".join(str(question or "").casefold().replace("ё", "е").split())
-    generic_nicknames = {
+    generic_nicknames = (
         "саша", "саши", "саше", "сашу", "сашей", "сашка", "сашки", "сашке",
         "сашку", "сашкой", "сашкою", "сашенька", "сашеньки", "сашеньке",
         "сашеньку", "сашенькой", "саня", "сани", "сане", "саню", "саней",
         "маша", "маши", "маше", "машу", "машей", "машка", "машки", "машке",
         "машку", "машкой", "машкою", "машенька", "машеньки", "машеньке",
         "машеньку", "машенькой", "машенькою",
-    }
-    if not any(re.search(r"(?<![a-zа-яё])" + re.escape(nick) + r"(?![a-zа-яё])", q) for nick in generic_nicknames):
+    )
+    mentioned_nicknames = [
+        nick for nick in generic_nicknames
+        if re.search(r"(?<![a-zа-яё])" + re.escape(nick) + r"(?![a-zа-яё])", q)
+    ]
+    if not mentioned_nicknames:
         return False
 
+    # Do not confuse a legitimate multi-person request ("Саша и Олег") with a
+    # nickname collision. First isolate which records the nickname alone matches.
     by_name = {str(record.get("name") or "").strip(): record for record in records}
-    for patient in set(matched_people):
-        record = by_name.get(patient)
-        if not record:
-            return True
-        identities = list(record.get("aliases") or []) + [patient]
-        distinguishing_forms = set()
-        for identity in identities:
-            for token in re.findall(r"[a-zа-яё]+", str(identity or "").casefold().replace("ё", "е")):
-                if len(token) < 3 or token in generic_nicknames:
-                    continue
-                distinguishing_forms.add(token)
-                if token[-1] in "бвгджзклмнпрстфхцчшщ":
-                    distinguishing_forms.update(token + suffix for suffix in ("а", "у", "е", "ом", "ы", "и"))
-                if token.endswith("й"):
-                    distinguishing_forms.add(token[:-1] + "я")
-                if token.endswith(("а", "я")):
-                    distinguishing_forms.add(token[:-1] + "и")
-        if not any(re.search(r"(?<![a-zа-яё])" + re.escape(form) + r"(?![a-zа-яё])", q) for form in distinguishing_forms):
-            # Every matched patient must have a distinct identifier in the question.
-            # Mentioning "Олега" does not resolve which "Саша" was intended.
-            return True
+    for nickname in mentioned_nicknames:
+        nickname_matches = list(dict.fromkeys(_mentioned_people(records, nickname)))
+        if len(nickname_matches) < 2:
+            continue
+        for patient in nickname_matches:
+            record = by_name.get(patient)
+            if not record:
+                return True
+            identities = list(record.get("aliases") or []) + [patient]
+            distinguishing_forms = set()
+            for identity in identities:
+                for token in re.findall(r"[a-zа-яё]+", str(identity or "").casefold().replace("ё", "е")):
+                    if len(token) < 3 or token in generic_nicknames:
+                        continue
+                    distinguishing_forms.add(token)
+                    if token[-1] in "бвгджзклмнпрстфхцчшщ":
+                        distinguishing_forms.update(token + suffix for suffix in ("а", "у", "е", "ом", "ы", "и"))
+                    if token.endswith("й"):
+                        distinguishing_forms.add(token[:-1] + "я")
+                    if token.endswith(("а", "я")):
+                        distinguishing_forms.add(token[:-1] + "и")
+            if not any(re.search(r"(?<![a-zа-яё])" + re.escape(form) + r"(?![a-zа-яё])", q) for form in distinguishing_forms):
+                return True
     return False
+
 
 def _row_matches_patient(row, patient):
     """Require an explicit stored patient match before any document reaches the model or UI."""
