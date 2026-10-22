@@ -1956,16 +1956,18 @@ def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:st
                 ) from exc
             raise
         pending_cleanup_warning = False
-        try:
-            pending_deleted = db.delete_pending_doc(fid,pending_id)
-            if not pending_deleted:
+        if storage_backend == "local":
+            try:
+                pending_deleted = db.delete_pending_doc(fid,pending_id)
+                if not pending_deleted:
+                    pending_cleanup_warning = True
+                    logging.error("Document %s saved but pending inbox row %s was not deleted", d.get("digest"), pending_id)
+            except Exception:
                 pending_cleanup_warning = True
-                logging.error("Document %s saved but pending inbox row %s was not deleted", d.get("digest"), pending_id)
-        except Exception:
-            if storage_backend != "local":
-                raise
-            pending_cleanup_warning = True
-            logging.exception("Document saved locally but pending inbox cleanup failed for pending_id=%s", pending_id)
+                logging.exception("Document saved locally but pending inbox cleanup failed for pending_id=%s", pending_id)
+        else:
+            # Preserve existing external-storage behavior; this change is local-only.
+            db.delete_pending_doc(fid,pending_id)
         if storage_backend=="yandex":
             hp=Path(td)/"history.txt"; hp.write_text(db.history(fid,patient),encoding="utf-8"); disk.upload_file(str(hp),folder+"/history.txt")
     destination=f"/families/{fid}/patients/{patient}"
