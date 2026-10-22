@@ -147,6 +147,20 @@ def classify_medical_intent(query):
     return "unknown"
 
 
+def _strip_embedded_structured_fields(value):
+    """Drop structured transport fields accidentally appended to plain user-facing prose."""
+    text = sanitize_model_text(value)
+    marker = re.search(
+        r"(?:^|\\n|\n)\s*(?:missing_documents|limitations|data_completeness|memory_updates)\s*:",
+        text,
+        flags=re.I,
+    )
+    if not marker:
+        return text
+    answer = text[:marker.start()].rstrip()
+    return re.sub(r"(?:\\n)+$", "", answer).rstrip()
+
+
 def _history_answer_text(value, max_chars=1100):
     """Unwrap structured answers; bound history separately from the current user-facing answer."""
     text = sanitize_model_text(value)
@@ -219,7 +233,7 @@ def answer_archive_question(query, patient, context="", history=None, trace_id=N
         if trace_id:
             ai_trace_log.emit_full(trace_id, "general_medical.model_raw_response", raw_response=raw)
             ai_trace_log.emit(trace_id, "general_medical.model_completion_metadata", **metadata)
-        answer = sanitize_model_text(raw)
+        answer = _strip_embedded_structured_fields(raw)
         # Avoid returning a serialized payload when a provider/model violates the requested format.
         # The history cap must not truncate the current answer shown to the user.
         cleaned = _history_answer_text(answer, max_chars=None)
