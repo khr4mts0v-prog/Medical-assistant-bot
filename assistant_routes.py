@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 import database as db
 import tenancy
 import ai_consent
-from ai_provider import answer_archive_question, chat_completion, provider_config, sanitize_model_text
+from ai_provider import answer_archive_question, chat_completion, generation_was_truncated, provider_config, sanitize_model_text
 import patient_memory
 import ai_interaction_log
 import ai_trace_log
@@ -974,7 +974,7 @@ def _structured_archive_answer(question, patients, rows, history=None, memory_co
     answer_data.setdefault("data_completeness", "unknown")
     answer_data.setdefault("memory_updates", [])
     parse_recovered = bool(answer_data.pop("_parse_recovered", False))
-    provider_truncated = metadata.get("finish_reason") in {"length", "max_tokens", "token_limit", "max_output_tokens"}
+    provider_truncated = generation_was_truncated(metadata)
     truncated = provider_truncated or parse_recovered
     answer_data["generation_status"] = "partial" if truncated else "complete"
     if truncated:
