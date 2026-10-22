@@ -101,6 +101,15 @@ def _is_archive_related(question):
 def _off_topic_response():
     return "Я отвечаю только на вопросы о медицинских документах, результатах обследований и анализов, истории здоровья и поиске по семейному архиву. Погоду, политику, программирование и другие посторонние темы я не обрабатываю."
 
+def _is_ai_provider_error(answer):
+    """Recognize user-safe provider failure messages before treating them as successful answers."""
+    text = str(answer or "").strip().casefold()
+    return text.startswith((
+        "не удалось получить ответ ии",
+        "не задан ",
+        "сервис ии временно не смог обработать запрос",
+    ))
+
 def _is_brief_summary_request(question):
     """Detect an overall health overview, not a summary of one test or topic."""
     q = " ".join(str(question or "").casefold().replace("ё", "е").split())
@@ -2078,7 +2087,7 @@ def install_assistant_routes(app, current_user, family_guard):
             if not rows:
                 planner_status += "; отдельные документы по запросу не найдены, использована память по всей истории"
             answer = answer_archive_question(question, patient, context=context)
-            if answer.startswith("Не удалось получить ответ ИИ") or answer.startswith("Не задан "):
+            if _is_ai_provider_error(answer):
                 return _page("Ошибка анализа", '<div class="card">' + html.escape(answer) + '</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Попробовать ещё раз</a></p>', 502)
             source_rows = {int(r["id"]): r for r in rows}
             for item in snapshot.get("documents", [])[:100]:
@@ -2418,7 +2427,7 @@ def install_assistant_routes(app, current_user, family_guard):
                 ai_trace_log.emit(trace_id, "model.configured", provider=provider_name,
                     model=model_name, mode="general_medical")
                 answer = answer_archive_question(query, "не идентифицирован", context="", history=conversation, trace_id=trace_id)
-                if answer.startswith("Не удалось получить ответ ИИ") or answer.startswith("Не задан "):
+                if _is_ai_provider_error(answer):
                     ai_trace_log.emit(trace_id, "response.complete", status="error", mode="general_medical",
                         error_type="provider_error", answer_chars=len(answer),
                         duration_ms=int((time.monotonic()-request_started)*1000), source_count=0)
