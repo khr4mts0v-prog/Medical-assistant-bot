@@ -242,6 +242,7 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
             patch.object(webapp.db, "patients", return_value=["Саша"]),
             patch.object(webapp.db, "document_exists", return_value=True),
             patch.object(webapp, "_local_archive_original_available", return_value=False),
+            patch.object(webapp, "_restore_local_indexed_document", return_value=False),
             patch.object(webapp.db, "delete_pending_doc") as delete_pending,
             patch.object(webapp, "save_local_file") as save_file,
         ):
@@ -254,6 +255,35 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
         delete_pending.assert_not_called()
         save_file.assert_not_called()
 
+
+    def test_direct_duplicate_upload_restores_missing_local_original(self):
+        with (
+            patch.object(webapp, "family"),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(webapp, "STORAGE_BACKEND", "local"),
+            patch.object(webapp.db, "patients", return_value=["Саша"]),
+            patch.object(webapp, "ocr_file", return_value="synthetic OCR"),
+            patch.object(webapp, "analyze_document", return_value={
+                "primary_type": "не определено", "review_required": True,
+                "document_types": [], "confidence": "low",
+            }),
+            patch.object(webapp, "extract_keywords", return_value=[]),
+            patch.object(webapp, "parse_date_from_text", return_value=""),
+            patch.object(webapp, "normalize_extension", return_value="pdf"),
+            patch.object(webapp.db, "document_exists", return_value=True),
+            patch.object(webapp, "_local_archive_original_available", return_value=False),
+            patch.object(webapp, "_restore_local_indexed_document", return_value=True) as restore,
+            patch.object(webapp.db, "add_doc") as add_doc,
+        ):
+            response = self.client.post(
+                "/families/1/patients/Саша/upload",
+                files={"file": ("scan.pdf", b"original pdf bytes", "application/pdf")},
+                data={"ai_consent": "false"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Документ восстановлен", response.text)
+        restore.assert_called_once()
+        add_doc.assert_not_called()
 
     def test_pending_duplicate_restores_missing_indexed_original_and_ocr_sidecar(self):
         import hashlib
