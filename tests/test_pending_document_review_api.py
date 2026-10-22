@@ -353,7 +353,9 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
-            original = root / "original.pdf"
+            patient_dir = root / "family_1" / local_storage._component("Саша")
+            patient_dir.mkdir(parents=True)
+            original = patient_dir / "original.pdf"
             original.write_bytes(b"known original bytes")
             digest = hashlib.sha256(b"known original bytes").hexdigest()
             with (
@@ -366,6 +368,11 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
                 outside.write_bytes(b"known original bytes")
                 try:
                     with patch.object(webapp.db, "get_document_storage_paths", return_value={"remote": str(outside)}):
+                        self.assertFalse(webapp._local_archive_original_available(1, "Саша", digest))
+                    wrong_patient = root / "family_1" / local_storage._component("Маша") / "original.pdf"
+                    wrong_patient.parent.mkdir(parents=True)
+                    wrong_patient.write_bytes(b"known original bytes")
+                    with patch.object(webapp.db, "get_document_storage_paths", return_value={"remote": str(wrong_patient)}):
                         self.assertFalse(webapp._local_archive_original_available(1, "Саша", digest))
                 finally:
                     outside.unlink(missing_ok=True)
