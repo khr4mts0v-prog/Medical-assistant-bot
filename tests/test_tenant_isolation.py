@@ -68,6 +68,12 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertEqual(count, 1)
 
 
+    def test_sqlite_connection_waits_for_short_write_contention(self):
+        with tenancy.connect() as conn:
+            timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        self.assertEqual(timeout, 30000)
+
+
     def test_membership_is_family_specific(self):
         self.assertEqual(tenancy.role_for_user(self.a, 101), "owner")
         self.assertIsNone(tenancy.role_for_user(self.b, 101))
