@@ -36,12 +36,24 @@ def save_file(family_id: int, patient: str, filename: str, source: Path) -> Path
     if target_dir.resolve() not in target.parents:
         raise ValueError("Storage path escapes patient directory")
     # Exclusive creation avoids silently overwriting an existing original.
-    with source.open("rb") as src, target.open("xb") as dst:
-        while True:
-            chunk = src.read(1024 * 1024)
-            if not chunk:
-                break
-            dst.write(chunk)
+    # Once xb succeeds, this invocation owns the new path and must remove it if
+    # copying fails. Never unlink a path when exclusive creation itself failed.
+    with source.open("rb") as src:
+        dst = target.open("xb")
+        try:
+            with dst:
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+        except BaseException:
+            # Preserve the original I/O exception even if cleanup also fails.
+            try:
+                target.unlink()
+            except OSError:
+                pass
+            raise
     try:
         target.chmod(0o600)
     except OSError:
