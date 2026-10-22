@@ -527,15 +527,16 @@ def _has_ambiguous_custom_alias_reference(records, question):
                     tokens.update(forms)
             for token in tokens:
                 owner_tokens.setdefault(token, set()).add(owner_name)
-        for owner_name in unique_owners:
-            distinguishing = [
-                token for token, names in owner_tokens.items()
-                if names == {owner_name}
-            ]
-            if not any(re.search(
-                r"(?<![a-zа-яё])" + re.escape(token) + r"(?![a-zа-яё])", q
-            ) for token in distinguishing):
-                return True
+        distinguishing = [
+            token for token, names in owner_tokens.items()
+            if len(names) == 1 and next(iter(names)) in unique_owners
+        ]
+        # One unique surname/name in the query is enough to resolve the shared alias
+        # to a specific record; unrelated names (e.g. "Димка и Олег") are not.
+        if not any(re.search(
+            r"(?<![a-zа-яё])" + re.escape(token) + r"(?![a-zа-яё])", q
+        ) for token in distinguishing):
+            return True
     return False
 
 
