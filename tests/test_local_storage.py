@@ -153,5 +153,24 @@ class LocalStorageTests(unittest.TestCase):
                         local_storage.save_file(1, "Sasha", "original.bin", source)
                 self.assertEqual(list((root / "family_1" / "Sasha").iterdir()), [])
 
+    def test_file_is_not_written_if_directory_permissions_cannot_be_enforced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "archive"
+            source = Path(tmp) / "source.bin"
+            source.write_bytes(b"medical document")
+            real_chmod = Path.chmod
+
+            def chmod_path(path, mode, *args, **kwargs):
+                if path.name == "Sasha":
+                    raise OSError("synthetic directory chmod failure")
+                return real_chmod(path, mode, *args, **kwargs)
+
+            with patch.object(local_storage, "DATA_ROOT", root.resolve()):
+                with patch.object(Path, "chmod", autospec=True, side_effect=chmod_path):
+                    with self.assertRaisesRegex(OSError, "synthetic directory chmod failure"):
+                        local_storage.save_file(1, "Sasha", "original.bin", source)
+                patient_dir = root / "family_1" / "Sasha"
+                self.assertFalse((patient_dir / "original.bin").exists())
+
 if __name__ == "__main__":
     unittest.main()
