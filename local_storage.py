@@ -61,5 +61,11 @@ def save_file(family_id: int, patient: str, filename: str, source: Path) -> Path
     try:
         target.chmod(0o600)
     except OSError:
-        pass
+        # Do not leave a potentially over-permissive medical file behind when
+        # private permissions cannot be enforced.
+        try:
+            target.unlink()
+        except OSError:
+            pass
+        raise
     return target
