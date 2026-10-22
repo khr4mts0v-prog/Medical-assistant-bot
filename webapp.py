@@ -1884,6 +1884,28 @@ def delete_pending_document(fid:int,pending_id:int,confirm:str=Form(...),uid:int
     db.delete_pending_doc(fid,pending_id)
     return RedirectResponse(f"/families/{fid}/inbox?deleted=1",status_code=303)
 
+def _local_archive_original_available(fid, patient, digest):
+    """Verify an indexed local original before treating a pending copy as a safe duplicate."""
+    from local_storage import DATA_ROOT
+
+    paths = db.get_document_storage_paths(fid, patient, digest)
+    remote = str((paths or {}).get("remote") or "")
+    if not remote:
+        return False
+    root = DATA_ROOT.resolve()
+    try:
+        original = Path(remote).resolve(strict=True)
+        if root not in original.parents or not original.is_file():
+            return False
+        hasher = hashlib.sha256()
+        with original.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        return hmac.compare_digest(hasher.hexdigest(), str(digest))
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 @app.post("/families/{fid}/inbox/{pending_id}/assign", response_class=HTMLResponse)
 def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:str=Form(...),title:str=Form(...),date:str=Form(""),uid:int=Depends(current_user)):
     family(fid,uid)
@@ -1902,8 +1924,23 @@ def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:st
         try: date=datetime.strptime(date,"%d-%m-%Y").strftime("%d-%m-%Y")
         except ValueError: raise HTTPException(400,"Дата должна быть в формате ДД-ММ-ГГГГ")
     if db.document_exists(fid,patient,d["digest"]):
-        db.delete_pending_doc(fid,pending_id)
-        return RedirectResponse(f"/families/{fid}/inbox",status_code=303)
+        if storage_backend == "local" and not _local_archive_original_available(fid, patient, d["digest"]):
+            # An index row alone is not proof that the original is still recoverable.
+            # Keep the encrypted inbox copy until the archive file is verified.
+            raise HTTPException(
+                409,
+                "Документ уже есть в индексе, но исходный файл не найден или не совпадает. "
+                "Документ во входящих сохранён для восстановления; проверьте архив.",
+            )
+        try:
+            pending_deleted = db.delete_pending_doc(fid,pending_id)
+        except Exception:
+            logging.exception("Duplicate document is indexed but pending cleanup failed for pending_id=%s", pending_id)
+            pending_deleted = False
+        destination = f"/families/{fid}/inbox"
+        if not pending_deleted:
+            destination += "?pending_cleanup_warning=1"
+        return RedirectResponse(destination,status_code=303)
     token=tenancy.get_yadisk_token(fid) if storage_backend=="yandex" else None
     if storage_backend=="yandex" and not token: raise HTTPException(400,"Сначала подключите Яндекс Диск")
     analysis=d["analysis"] or {}

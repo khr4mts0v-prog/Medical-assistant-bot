@@ -166,6 +166,15 @@ def document_exists(fid, patient, digest):
                       (int(fid),patient,digest)).fetchone()
         return row is not None
 
+def get_document_storage_paths(fid, patient, digest):
+    """Return indexed file paths for one exact family/patient/document digest."""
+    with connect() as c:
+        row = c.execute(
+            "SELECT remote,ocr_remote FROM docs WHERE family_id=? AND patient=? COLLATE NOCASE AND digest=?",
+            (int(fid), patient, digest),
+        ).fetchone()
+    return dict(row) if row else None
+
 def _refresh_patient_memory(fid, patient):
     """Best-effort derived-memory refresh; archive writes must succeed independently."""
     try:
