@@ -176,6 +176,27 @@ class TestPatientSelectionApi:
         planner.assert_not_called()
         retrieve.assert_not_called()
 
+    def test_duplicate_custom_alias_with_unique_surname_retrieves_only_that_patient(self):
+        with patch("database.patient_records", return_value=[
+            {"name": "Дмитрий Иванов", "aliases": ["Дмитрий Иванов", "Димка"]},
+            {"name": "Денис Петров", "aliases": ["Денис Петров", "Димка"]},
+        ]), patch("assistant_routes._planner", return_value={"search_terms": [], "document_types": [], "allow_full_history": False}), \
+             patch("assistant_routes._retrieve", side_effect=lambda fid, person, plan, result_limit=15: [
+                 self.oleg_cbc if person == "Дмитрий Иванов" else self.oleg_us
+             ] if person == "Дмитрий Иванов" else []), \
+             patch("assistant_routes._structured_archive_answer", return_value={
+                 "answer":"Ответ", "missing_documents":[], "limitations":[],
+                 "data_completeness":"partial", "memory_updates":[],
+             }) as answer:
+            # Configure the database roster names to match the two candidate aliases.
+            with patch("database.patients", return_value=["Дмитрий Иванов", "Денис Петров"]):
+                response = self.client.post("/api/intelligent-search", json={
+                    "query": "Сравни документы Димка Иванов", "family_id": 1,
+                    "document_selection_mode": False, "selected_document_ids": [], "consent": False,
+                })
+        assert response.status_code == 200, response.text
+        assert answer.call_args.args[1] == ["Дмитрий Иванов"]
+
     def test_selected_mode_rejects_document_from_another_patient(self):
         with patch("database.get_documents_by_ids", return_value=[self.sasha_mri]):
             response = self.client.post("/api/intelligent-search", json={
