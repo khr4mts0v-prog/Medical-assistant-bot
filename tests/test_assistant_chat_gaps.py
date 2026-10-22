@@ -263,6 +263,28 @@ class AssistantChatGapTests(unittest.TestCase):
         self.assertEqual(matched, ["Александр Иванов"])
         self.assertFalse(assistant._has_ambiguous_nickname_reference(records, question, matched))
 
+    def test_unique_surname_disambiguates_shared_nickname_without_false_positive(self):
+        records = [
+            {"name": "Александр Иванов", "aliases": ["Саша"]},
+            {"name": "Александра Петрова", "aliases": ["Саша"]},
+        ]
+        question = "Расскажи про Сашу Иванова"
+        matched = assistant._mentioned_people(records, question)
+        self.assertFalse(
+            assistant._has_ambiguous_nickname_reference(records, question, matched)
+        )
+
+    def test_shared_nickname_remains_ambiguous_when_no_unique_name_is_given(self):
+        records = [
+            {"name": "Александр Иванов", "aliases": ["Саша"]},
+            {"name": "Александр Петров", "aliases": ["Саша"]},
+        ]
+        question = "Расскажи про Сашу"
+        matched = assistant._mentioned_people(records, question)
+        self.assertTrue(
+            assistant._has_ambiguous_nickname_reference(records, question, matched)
+        )
+
     def test_canonical_name_still_matches_when_aliases_only_contain_nickname(self):
         records = [{"name": "Храмцов Александр Михайлович", "aliases": ["Саша"]}]
         self.assertEqual(
