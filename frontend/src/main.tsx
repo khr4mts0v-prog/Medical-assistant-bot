@@ -779,6 +779,7 @@ function App() {
   const historyRef = useRef<string[]>([]);
   const smartComposeFormRef = useRef<HTMLFormElement>(null);
   const autoSubmitPendingRef = useRef(false);
+  const smartRequestGenerationRef = useRef(0);
 
   useEffect(() => {
     if (!smartSearchOpen || !smartQuery.trim() || smartBusy || !autoSubmitPendingRef.current) return;
@@ -803,9 +804,10 @@ function App() {
     }
     setDocumentSelectionActive(false);
     setSelectedDocumentIds([]);
+    setSmartBusy(false);
     setSmartConversation([]); setSmartQuery(''); setSmartResult(null); setSmartError(''); setSmartConsent(false);
     setSmartSearchOpen(true);
-    return () => { active = false; };
+    return () => { active = false; smartRequestGenerationRef.current += 1; };
   }, [assistantRoute, path]);
 
   useEffect(() => {
@@ -963,7 +965,12 @@ function App() {
         const familyId = Number(patientAssistant.dataset.familyId || '');
         const patient = String(patientAssistant.dataset.patient || '').trim();
         if (!Number.isInteger(familyId) || familyId <= 0 || !patient) return;
+        smartRequestGenerationRef.current += 1;
+        setSmartBusy(false);
+        setAssistantFamilyId(familyId);
         setPatientAssistantScope({familyId, patient});
+        setDocumentSelectionActive(false);
+        setSelectedDocumentIds([]);
         setSmartConversation([]); setSmartQuery(''); setSmartResult(null); setSmartError(''); setSmartConsent(false);
         setSmartSearchOpen(true);
         return;
@@ -1225,6 +1232,7 @@ function App() {
             event.preventDefault();
             const submittedQuestion = smartQuery.trim();
             if (!submittedQuestion) return;
+            const requestGeneration = ++smartRequestGenerationRef.current;
             setSmartBusy(true);setSmartError('');
             try {
               const familyId = patientAssistantScope?.familyId || Number(new URLSearchParams(location.search).get('family_id') || 0) || assistantFamilyId || undefined;
@@ -1241,6 +1249,7 @@ function App() {
               const history = conversation.map((turn:any) => turn.question);
               const response = await fetch('/api/intelligent-search', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:submittedQuestion,history,conversation,family_id:familyId,patient_scope:patientAssistantScope?.patient,document_selection_mode:selectionMode,selected_document_ids:selectionMode ? selectedDocumentIds : [],consent:smartConsent})});
               const result = await response.json();
+              if (requestGeneration !== smartRequestGenerationRef.current) return;
               if (!response.ok) throw new Error(result.detail || result.error || 'Не удалось выполнить запрос.');
               if (result.needs_consent) {
                 setSmartResult(result);
@@ -1257,6 +1266,7 @@ function App() {
                   } catch {}
                   setSmartConsent(false);
                 }
+                if (requestGeneration !== smartRequestGenerationRef.current) return;
                 setSmartConversation((previous:any[]) => [...previous,{
                   question:submittedQuestion,
                   result,
@@ -1266,8 +1276,10 @@ function App() {
                 setSmartResult(null);
                 setSmartQuery('');
               }
-            } catch (e) {setSmartError(e instanceof Error ? e.message : 'Не удалось выполнить запрос');}
-            finally {setSmartBusy(false);}
+            } catch (e) {
+              if (requestGeneration === smartRequestGenerationRef.current) setSmartError(e instanceof Error ? e.message : 'Не удалось выполнить запрос');
+            }
+            finally {if (requestGeneration === smartRequestGenerationRef.current) setSmartBusy(false);}
           }}>
             <label htmlFor="smart-search-query">Что хочешь узнать?</label>
             <textarea id="smart-search-query" rows={2} maxLength={1200} value={smartQuery} onChange={e => setSmartQuery(e.target.value)} placeholder="Например: Дай краткую сводку по УЗИ Саши" required />
@@ -1347,7 +1359,7 @@ function App() {
         <article className="settings-card"><div className="settings-icon"><ShieldCheck size={21}/></div><div><h2>Безопасность</h2><p>Не храните медицинские данные в публичном кеше браузера. Перед использованием реальных документов необходимо проверить резервное копирование.</p></div></article>
       </section> : <section className={'page-content ' + (loading ? 'is-loading' : '')} style={assistantRoute ? {display:'none'} : undefined}>
         {error && <div className="error-banner" role="alert">{error}<button onClick={() => navigate(path, false)}>Повторить</button></div>}
-        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} onAsk={(query,selectedFamilyId)=>{autoSubmitPendingRef.current=true;setPatientAssistantScope(null);setAssistantFamilyId(selectedFamilyId);setDocumentSelectionActive(false);setSelectedDocumentIds([]);setSmartConversation([]);setSmartQuery(query);setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : searchRoute ? <SearchReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : memoryRouteData && memoryRouteData.familyId>0 && memoryRouteData.patient ? <PatientMemoryReactView familyId={memoryRouteData.familyId} patient={memoryRouteData.patient} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} pendingCleanupWarning={new URLSearchParams(path.split('?')[1] || '').has('pending_cleanup_warning')} onNavigate={(url)=>{void navigate(url);}} onAsk={(selectedIds) => {setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
+        {loading && !screen ? <div className="skeleton"><div/><div/><div/></div> : path.split('?')[0] === '/' ? <HomeReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} onAsk={(query,selectedFamilyId)=>{smartRequestGenerationRef.current+=1;setSmartBusy(false);autoSubmitPendingRef.current=true;setPatientAssistantScope(null);setAssistantFamilyId(selectedFamilyId);setDocumentSelectionActive(false);setSelectedDocumentIds([]);setSmartConversation([]);setSmartQuery(query);setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : searchRoute ? <SearchReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : settingsRoute ? <SettingsReactView familyId={new URLSearchParams(path.split('?')[1] || '').has('family_id') ? Number(new URLSearchParams(path.split('?')[1] || '').get('family_id')) : null} onNavigate={(url)=>{void navigate(url);}} /> : inboxDetailRoute ? <InboxReviewReactView familyId={Number(inboxDetailRoute[1])} pendingId={Number(inboxDetailRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : patientNewRoute ? <PatientEditorReactView familyId={Number(patientNewRoute[1])} patient={null} onNavigate={(url)=>{void navigate(url);}} /> : patientEditRoute ? <PatientEditorReactView familyId={Number(patientEditRoute[1])} patient={decodeURIComponent(patientEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : documentEditRoute ? <DocumentEditorReactView familyId={Number(documentEditRoute[1])} documentId={Number(documentEditRoute[2])} onNavigate={(url)=>{void navigate(url);}} /> : inboxRoute ? <InboxReactView familyId={Number(inboxRoute[1])} onNavigate={(url)=>{void navigate(url);}} /> : memoryRouteData && memoryRouteData.familyId>0 && memoryRouteData.patient ? <PatientMemoryReactView familyId={memoryRouteData.familyId} patient={memoryRouteData.patient} onNavigate={(url)=>{void navigate(url);}} /> : patientRouteData ? <PatientReactView familyId={patientRouteData.familyId} patient={patientRouteData.patient} pendingCleanupWarning={new URLSearchParams(path.split('?')[1] || '').has('pending_cleanup_warning')} onNavigate={(url)=>{void navigate(url);}} onAsk={(selectedIds) => {smartRequestGenerationRef.current+=1;setSmartBusy(false);setAssistantFamilyId(patientRouteData.familyId);setPatientAssistantScope({familyId:patientRouteData.familyId,patient:patientRouteData.patient});setSelectedDocumentIds(selectedIds || []);setDocumentSelectionActive(Boolean(selectedIds?.length));setSmartConversation([]);setSmartQuery('');setSmartResult(null);setSmartError('');setSmartConsent(false);setSmartSearchOpen(true);}} /> : <div ref={contentRef} className="legacy-content" dangerouslySetInnerHTML={{ __html: screen?.html || '' }} />}
         {loading && screen && <div className="loading-line"/>}
       </section>}
     </main>
