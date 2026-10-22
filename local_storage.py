@@ -21,10 +21,9 @@ def document_dir(family_id: int, patient: str) -> Path:
     if root != target and root not in target.parents:
         raise ValueError("Storage path escapes local storage root")
     target.mkdir(parents=True, exist_ok=True, mode=0o700)
-    try:
-        target.chmod(0o700)
-    except OSError:
-        pass
+    # Existing directories may have permissive modes; fail closed if we
+    # cannot enforce private access before writing medical documents.
+    target.chmod(0o700)
     return target
 
 def save_file(family_id: int, patient: str, filename: str, source: Path) -> Path:
