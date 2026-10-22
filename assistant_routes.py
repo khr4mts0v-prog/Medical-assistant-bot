@@ -484,6 +484,66 @@ def _has_ambiguous_nickname_reference(records, question, matched_people):
     return False
 
 
+def _resolve_custom_alias_reference(records, question, matched_people):
+    """Resolve shared custom aliases conservatively before any patient-scoped retrieval."""
+    q = " ".join(str(question or "").casefold().replace("ё", "е").split())
+    alias_owners = {}
+    normalized_records = []
+    for record in records:
+        name = str(record.get("name") or "")
+        identities = list(record.get("aliases") or []) + [name]
+        normalized = list(dict.fromkeys(
+            " ".join(str(value or "").casefold().replace("ё", "е").split())
+            for value in identities if str(value or "").strip()
+        ))
+        normalized_records.append((name, normalized))
+        for alias in normalized:
+            if len(alias) >= 2:
+                alias_owners.setdefault(alias, []).append(name)
+    resolved_people = list(matched_people or [])
+    for alias, owner_names in alias_owners.items():
+        unique_owners = list(dict.fromkeys(owner_names))
+        if len(unique_owners) < 2 or not re.search(
+            r"(?<![a-zа-яё])" + re.escape(alias) + r"(?![a-zа-яё])", q
+        ):
+            continue
+        # Build unique name/alias tokens for each candidate, excluding the shared alias.
+        token_owners = {}
+        for owner_name, identities in normalized_records:
+            tokens = set()
+            for identity in identities:
+                if identity == alias:
+                    continue
+                for token in re.findall(r"[a-zа-яё]+", identity):
+                    if len(token) < 3:
+                        continue
+                    forms = {token}
+                    if token[-1] in "бвгджзклмнпрстфхцчшщ":
+                        forms.update(token + suffix for suffix in ("а", "у", "е", "ом", "ы", "и"))
+                    if token.endswith(("а", "я")):
+                        forms.add(token[:-1] + "и")
+                    if token.endswith("й"):
+                        forms.add(token[:-1] + "я")
+                    for form in forms:
+                        token_owners.setdefault(form, set()).add(owner_name)
+        distinguishing_tokens = {
+            token: names for token, names in token_owners.items()
+            if len(names) == 1 and next(iter(names)) in unique_owners
+        }
+        identified = {
+            next(iter(names)) for token, names in distinguishing_tokens.items()
+            if re.search(r"(?<![a-zа-яё])" + re.escape(token) + r"(?![a-zа-яё])", q)
+        }
+        if not identified:
+            return True, []
+        # Do not merely suppress the ambiguity warning: narrow retrieval to the
+        # patient(s) actually identified by unique tokens in the query.
+        resolved_people = [person for person in resolved_people if person not in unique_owners]
+        resolved_people.extend(name for name in unique_owners if name in identified)
+        resolved_people = list(dict.fromkeys(resolved_people))
+    return False, resolved_people
+
+
 def _row_matches_patient(row, patient):
     """Require an explicit stored patient match before any document reaches the model or UI."""
     row_patient = " ".join(str((row or {}).get("patient") or "").casefold().replace("ё", "е").split())
@@ -2139,6 +2199,24 @@ def install_assistant_routes(app, current_user, family_guard):
         if forced_patient:
             current_mentioned = [forced_patient]
             previous_turn_people = [forced_patient] if previous_turn else []
+        if not forced_patient:
+            ambiguous_custom_alias, resolved_alias_people = _resolve_custom_alias_reference(
+                patient_records, query, query_mentioned_people
+            )
+            if ambiguous_custom_alias:
+                answer = ("Уточни, пожалуйста, кого ты имеешь в виду: этот псевдоним назначен нескольким пациентам. "
+                          "Назови имя/фамилию или выбери пациента в архиве — я не буду смешивать их медицинские данные.")
+                ai_trace_log.emit(trace_id, "patient.ambiguous_custom_alias", patient_count=len(patient_records),
+                    matched_patient_count=len(query_mentioned_people), model_called=False)
+                try:
+                    ai_interaction_log.record(family_id=fid, actor_id=uid, query=query, answer=answer,
+                        mode="ambiguous_patient", provider="local", model="none", duration_ms=0)
+                except Exception:
+                    logging.warning("AI interaction logging skipped for ambiguous custom alias")
+                return JSONResponse({"mode":"analysis", "answer":answer, "documents":[],
+                    "missing_documents":[], "limitations":["Псевдоним неоднозначен; медицинские документы не выбирались."],
+                    "data_completeness":"insufficient", "memory_proposals":[]})
+            current_mentioned = resolved_alias_people
         if not forced_patient and _has_ambiguous_nickname_reference(patient_records, query, query_mentioned_people):
             answer = ("Уточни, пожалуйста, кого ты имеешь в виду: короткое имя совпадает у нескольких пациентов. "
                       "Назови имя/фамилию или выбери пациента в архиве — я не буду смешивать их медицинские данные.")
