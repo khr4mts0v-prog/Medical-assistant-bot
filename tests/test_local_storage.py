@@ -103,5 +103,36 @@ class LocalStorageTests(unittest.TestCase):
                         with self.assertRaisesRegex(OSError, "original copy failure"):
                             local_storage.save_file(1, "Sasha", "original.bin", source)
 
+    def test_partial_file_is_removed_when_source_close_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "archive"
+            source = Path(tmp) / "source.bin"
+            source.write_bytes(b"complete copy")
+            real_open = Path.open
+
+            class Reader:
+                def __init__(self, file):
+                    self.file = file
+                def __enter__(self):
+                    self.file.__enter__()
+                    return self
+                def __exit__(self, *args):
+                    result = self.file.__exit__(*args)
+                    if args[0] is None:
+                        raise OSError("synthetic source close failure")
+                    return result
+                def read(self, size=-1):
+                    return self.file.read(size)
+
+            def open_path(path, mode="r", *args, **kwargs):
+                handle = real_open(path, mode, *args, **kwargs)
+                return Reader(handle) if path == source and mode == "rb" else handle
+
+            with patch.object(local_storage, "DATA_ROOT", root.resolve()):
+                with patch.object(Path, "open", autospec=True, side_effect=open_path):
+                    with self.assertRaisesRegex(OSError, "synthetic source close failure"):
+                        local_storage.save_file(1, "Sasha", "original.bin", source)
+                self.assertEqual(list((root / "family_1" / "Sasha").iterdir()), [])
+
 if __name__ == "__main__":
     unittest.main()
