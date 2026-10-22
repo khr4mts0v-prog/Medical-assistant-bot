@@ -216,7 +216,8 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
             patch.object(webapp.db, "get_pending_doc", return_value=pending),
             patch.object(webapp.db, "patients", return_value=["Саша"]),
             patch.object(webapp.db, "document_exists", return_value=True),
-            patch.object(webapp.db, "delete_pending_doc") as delete_pending,
+            patch.object(webapp, "_local_archive_original_available", return_value=True),
+            patch.object(webapp.db, "delete_pending_doc", return_value=True) as delete_pending,
             patch.object(webapp, "save_local_file") as save_file,
             patch.object(webapp.db, "add_doc") as add_doc,
         ):
@@ -227,6 +228,32 @@ class PendingDocumentReviewApiTests(unittest.TestCase):
         delete_pending.assert_called_once_with(1, 12)
         save_file.assert_not_called()
         add_doc.assert_not_called()
+
+    def test_duplicate_assignment_preserves_pending_copy_if_indexed_original_is_missing(self):
+        pending = {
+            "id": 12, "name": "scan.pdf", "file_bytes": b"synthetic bytes",
+            "text": "synthetic OCR", "digest": "a" * 64, "analysis": {},
+        }
+        with (
+            patch.object(webapp, "family"),
+            patch.object(webapp, "is_demo_user", return_value=False),
+            patch.object(webapp, "STORAGE_BACKEND", "local"),
+            patch.object(webapp.db, "get_pending_doc", return_value=pending),
+            patch.object(webapp.db, "patients", return_value=["Саша"]),
+            patch.object(webapp.db, "document_exists", return_value=True),
+            patch.object(webapp, "_local_archive_original_available", return_value=False),
+            patch.object(webapp.db, "delete_pending_doc") as delete_pending,
+            patch.object(webapp, "save_local_file") as save_file,
+        ):
+            with self.assertRaises(webapp.HTTPException) as caught:
+                webapp.assign_pending_document(
+                    1, 12, "Саша", "не определено", "Скан", "", uid=123
+                )
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertIn("во входящих сохранён", caught.exception.detail)
+        delete_pending.assert_not_called()
+        save_file.assert_not_called()
+
 
     def test_local_file_is_removed_when_ocr_storage_fails(self):
         import tempfile
