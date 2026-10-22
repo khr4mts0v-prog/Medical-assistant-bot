@@ -1946,13 +1946,6 @@ def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:st
                         pass
                     except OSError:
                         logging.exception("Could not clean up local file after document assignment failure")
-            elif storage_backend=="yandex" and saved_paths:
-                for candidate in saved_paths:
-                    try:
-                        disk.delete_file(candidate)
-                    except Exception:
-                        # Preserve the original assignment error; log cleanup failures.
-                        logging.exception("Could not clean up Yandex Disk file after document assignment failure")
             raise
         db.delete_pending_doc(fid,pending_id)
         if storage_backend=="yandex":
