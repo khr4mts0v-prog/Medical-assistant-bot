@@ -1930,18 +1930,29 @@ def assign_pending_document(fid:int,pending_id:int,patient:str=Form(...),kind:st
                 docs,ocr=folder+"/docs",folder+"/OCR"; disk.ensure_folder(docs); disk.ensure_folder(ocr)
                 remote,oremote=docs+"/"+stored,ocr+"/"+ocr_stored
                 disk.upload_file(str(local),remote)
+                saved_paths.append(remote)
                 ocr_tmp=Path(td)/ocr_stored; ocr_tmp.write_text(d["text"],encoding="utf-8"); disk.upload_file(str(ocr_tmp),oremote)
+                saved_paths.append(oremote)
             if not db.add_doc(fid,patient,stored,kind,date,remote,oremote,d["text"],extract_keywords(d["text"],analysis),d["digest"],analysis=analysis):
                 raise HTTPException(409,"Не удалось добавить документ в историю; запись во входящих сохранена")
         except Exception:
-            # If the index write fails, don't leave an orphaned original/OCR file.
-            # Only remove paths created by this request in local storage.
+            # Roll back files written by this request if indexing fails. Keep the
+            # pending inbox record intact so the user can retry safely.
             if storage_backend=="local":
                 for candidate in saved_paths:
                     try:
                         candidate.unlink()
                     except FileNotFoundError:
                         pass
+                    except OSError:
+                        logging.exception("Could not clean up local file after document assignment failure")
+            elif storage_backend=="yandex" and saved_paths:
+                for candidate in saved_paths:
+                    try:
+                        disk.delete_file(candidate)
+                    except Exception:
+                        # Preserve the original assignment error; log cleanup failures.
+                        logging.exception("Could not clean up Yandex Disk file after document assignment failure")
             raise
         db.delete_pending_doc(fid,pending_id)
         if storage_backend=="yandex":
