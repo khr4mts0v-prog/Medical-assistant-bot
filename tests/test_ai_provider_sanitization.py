@@ -13,7 +13,7 @@ class ProviderResponseSanitizationTests(unittest.TestCase):
         )
 
     def test_strips_metadata_after_real_newline(self):
-        raw = "Проверьте результат с врачом.\\nMemory_updates: []"
+        raw = "Проверьте результат с врачом.\nMemory_updates: []"
         self.assertEqual(
             ai_provider._strip_embedded_structured_fields(raw),
             "Проверьте результат с врачом.",
