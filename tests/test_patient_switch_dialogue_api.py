@@ -1,4 +1,3 @@
-import json
 import os
 import unittest
 from unittest.mock import patch
@@ -47,13 +46,14 @@ class PatientSwitchDialogueApiTests(unittest.TestCase):
                 "history": list(history),
                 "memory_context": memory_context,
             })
-            return json.dumps({
+            return {
                 "answer": "Сводка по Саше готова.",
                 "missing_documents": [],
                 "limitations": [],
                 "data_completeness": "complete",
                 "memory_updates": [],
-            }, ensure_ascii=False)
+                "generation_status": "complete",
+            }
 
         with (
             patch.object(assistant_routes.tenancy, "families_for_user", return_value=[{"id": 1}]),
