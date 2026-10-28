@@ -184,7 +184,7 @@ class PatientSwitchDialogueApiTests(unittest.TestCase):
         self.assertNotIn("SASHAS_PRIVATE_PREVIOUS_ANSWER", repr(captured))
         self.assertNotIn("SASHAS_PRIVATE_MEDICAL_SOURCE", repr(captured))
         self.assertIn("OLEGS_PRIVATE_MEDICAL_SOURCE", repr(captured["documents"]))
-        self.assertEqual(captured["memory_context"], "Пациент: Олег\\nOLEGS_MEMORY_ONLY")
+        self.assertEqual(captured["memory_context"], "Пациент: Олег\nOLEGS_MEMORY_ONLY")
 
 
 
