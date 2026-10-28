@@ -105,5 +105,88 @@ class PatientSwitchDialogueApiTests(unittest.TestCase):
         self.assertEqual(captured["memory_context"], "Пациент: Саша\nSASHAS_MEMORY_ONLY")
 
 
+    def test_switching_from_sasha_to_oleg_keeps_question_but_drops_sasha_answer_and_documents(self):
+        rows = {
+            "Саша": [{
+                "id": 20, "patient": "Саша", "name": "sasha-private.pdf",
+                "kind": "заключение", "date": "2026-10-01",
+                "text": "SASHAS_PRIVATE_MEDICAL_SOURCE",
+            }],
+            "Олег": [{
+                "id": 10, "patient": "Олег", "name": "oleg-private.pdf",
+                "kind": "заключение", "date": "2026-10-02",
+                "text": "OLEGS_PRIVATE_MEDICAL_SOURCE",
+            }],
+        }
+        captured = {}
+
+        def capture_answer(question, patients, documents, history, memory_context="", trace_id=None):
+            captured.update({
+                "question": question,
+                "patients": list(patients),
+                "documents": list(documents),
+                "history": list(history),
+                "memory_context": memory_context,
+            })
+            return {
+                "answer": "Сводка по Олегу готова.",
+                "missing_documents": [],
+                "limitations": [],
+                "data_completeness": "complete",
+                "memory_updates": [],
+                "generation_status": "complete",
+            }
+
+        with (
+            patch.object(assistant_routes.tenancy, "families_for_user", return_value=[{"id": 1}]),
+            patch.object(assistant_routes.tenancy, "role_for_user", return_value="admin"),
+            patch.object(assistant_routes.tenancy, "get_family", return_value={"id": 1}),
+            patch.object(assistant_routes.db, "patients", return_value=["Саша", "Олег"]),
+            patch.object(assistant_routes.db, "patient_records", return_value=[
+                {"name": "Саша", "aliases": ["Саша"]},
+                {"name": "Олег", "aliases": ["Олег"]},
+            ]),
+            patch.object(assistant_routes.ai_consent, "get", return_value={"granted": True}),
+            patch.object(assistant_routes.ai_consent, "set_consent"),
+            patch.object(assistant_routes, "provider_config", return_value=("test-provider", "test-token", "", "test-model", "")),
+            patch.object(assistant_routes, "_planner", return_value={
+                "search_terms": ["заключение"], "document_types": [],
+                "allow_full_history": False, "original_question": "А теперь по Олегу",
+            }),
+            patch.object(assistant_routes, "_retrieve", side_effect=lambda fid, patient, plan, result_limit=15: rows[patient]),
+            patch.object(assistant_routes, "_structured_archive_answer", side_effect=capture_answer),
+            patch.object(assistant_routes.patient_memory, "get_snapshot", return_value={"profile": {}, "facts": []}),
+            patch.object(assistant_routes.patient_memory, "to_context", return_value="OLEGS_MEMORY_ONLY"),
+            patch.object(assistant_routes.patient_memory, "get_proposals", return_value=[]),
+            patch.object(assistant_routes.ai_interaction_log, "record"),
+        ):
+            response = self.client.post(
+                "/api/intelligent-search",
+                json={
+                    "family_id": 1,
+                    "query": "А теперь по Олегу",
+                    "consent": True,
+                    "conversation": [{
+                        "family_id": 1,
+                        "patient_scope": None,
+                        "question": "Расскажи про Сашу",
+                        "answer": "SASHAS_PRIVATE_PREVIOUS_ANSWER",
+                    }],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["answer"], "Сводка по Олегу готова.")
+        self.assertEqual(captured["patients"], ["Олег"])
+        self.assertEqual([row["id"] for row in captured["documents"]], [10])
+        self.assertEqual([row["patient"] for row in captured["documents"]], ["Олег"])
+        self.assertEqual(captured["history"], ["Предыдущий вопрос: Расскажи про Сашу"])
+        self.assertNotIn("SASHAS_PRIVATE_PREVIOUS_ANSWER", repr(captured))
+        self.assertNotIn("SASHAS_PRIVATE_MEDICAL_SOURCE", repr(captured))
+        self.assertIn("OLEGS_PRIVATE_MEDICAL_SOURCE", repr(captured["documents"]))
+        self.assertEqual(captured["memory_context"], "Пациент: Олег\\nOLEGS_MEMORY_ONLY")
+
+
+
 if __name__ == "__main__":
     unittest.main()
