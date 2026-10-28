@@ -250,5 +250,3 @@ def install_assistant_routes(app, current_user, family_guard):
         except Exception as exc:
             logging.exception("Medical assistant request failed (%s)", type(exc).__name__)
             return _page("Не удалось выполнить запрос", '<div class="card">Произошла техническая ошибка. Подробности записаны в журнал без текста медицинского запроса.</div><p><a href="/assistant?family_id=' + str(family_id) + '&patient=' + quote(patient, safe="") + '">Попробовать ещё раз</a></p>', 502)
-
-[executed on device: marss1k.fvds.ru (ecc850ae-e012-4a56-b726-1ade67f14bec)]
